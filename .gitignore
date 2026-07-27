@@ -1,5 +1,30 @@
-node_modules/
-dist/
+# 备份
 .openclaw-pqc-backup-*/
+
+# node_modules
+node_modules/
+
+# 编译产物（部分可入仓，部分不入）
+dist/
+build/
+*.tsbuildinfo
+
+# 环境
 .env
+.env.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# 系统
+.DS_Store
+Thumbs.db
+
+# 日志
 *.log
+
+# 临时
+tmp/
+.tmp/
