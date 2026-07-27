@@ -1,0 +1,1 @@
+../../../dist/extensions/meta/api.d.ts

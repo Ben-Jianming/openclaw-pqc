@@ -1,0 +1,1 @@
+../../../dist/extensions/github-copilot/dynamic-models.d.ts

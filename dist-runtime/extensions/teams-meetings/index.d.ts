@@ -1,0 +1,1 @@
+../../../dist/extensions/teams-meetings/index.d.ts

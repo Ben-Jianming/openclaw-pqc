@@ -1,0 +1,1 @@
+../../../dist/extensions/clawrouter/index.d.ts

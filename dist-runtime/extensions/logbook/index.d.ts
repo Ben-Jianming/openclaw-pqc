@@ -1,0 +1,1 @@
+../../../dist/extensions/logbook/index.d.ts

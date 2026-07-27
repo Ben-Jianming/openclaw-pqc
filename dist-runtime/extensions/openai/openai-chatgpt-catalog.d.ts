@@ -1,0 +1,1 @@
+../../../dist/extensions/openai/openai-chatgpt-catalog.d.ts

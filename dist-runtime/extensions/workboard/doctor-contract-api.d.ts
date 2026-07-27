@@ -1,0 +1,1 @@
+../../../dist/extensions/workboard/doctor-contract-api.d.ts

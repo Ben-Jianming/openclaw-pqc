@@ -1,0 +1,1 @@
+../../../dist/extensions/cohere/stream.d.ts

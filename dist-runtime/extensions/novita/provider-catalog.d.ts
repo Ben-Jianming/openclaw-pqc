@@ -1,0 +1,1 @@
+../../../dist/extensions/novita/provider-catalog.d.ts

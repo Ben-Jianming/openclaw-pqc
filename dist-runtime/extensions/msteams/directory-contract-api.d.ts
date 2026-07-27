@@ -1,0 +1,1 @@
+../../../dist/extensions/msteams/directory-contract-api.d.ts

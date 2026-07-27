@@ -1,0 +1,1 @@
+../../../dist/extensions/discord/legacy-state-migrations-api.d.ts

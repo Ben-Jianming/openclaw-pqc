@@ -1,0 +1,1 @@
+../../../dist/extensions/anthropic/session-catalog-runtime.d.ts

@@ -1,0 +1,1 @@
+../../../dist/extensions/opencode/session-catalog-terminal.d.ts

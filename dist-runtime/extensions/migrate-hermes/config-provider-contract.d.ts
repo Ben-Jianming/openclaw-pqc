@@ -1,0 +1,1 @@
+../../../dist/extensions/migrate-hermes/config-provider-contract.d.ts

@@ -1,0 +1,1 @@
+../../../dist/extensions/google/provider-discovery.d.ts

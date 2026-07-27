@@ -1,0 +1,1 @@
+../../../dist/extensions/xai/realtime-voice-bridge.d.ts

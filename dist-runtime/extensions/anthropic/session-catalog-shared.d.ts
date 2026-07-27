@@ -1,0 +1,1 @@
+../../../dist/extensions/anthropic/session-catalog-shared.d.ts

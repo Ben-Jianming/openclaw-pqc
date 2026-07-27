@@ -1,0 +1,1 @@
+../../../dist/extensions/cohere/models.d.ts

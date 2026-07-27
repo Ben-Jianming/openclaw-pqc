@@ -1,0 +1,1 @@
+../../../dist/extensions/active-memory/session-policy.d.ts

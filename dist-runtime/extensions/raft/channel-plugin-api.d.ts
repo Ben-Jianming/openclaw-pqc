@@ -1,0 +1,1 @@
+../../../dist/extensions/raft/channel-plugin-api.d.ts

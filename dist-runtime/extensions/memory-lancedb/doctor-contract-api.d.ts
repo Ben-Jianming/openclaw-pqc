@@ -1,0 +1,1 @@
+../../../dist/extensions/memory-lancedb/doctor-contract-api.d.ts

@@ -1,0 +1,1 @@
+../../../dist/extensions/vault/index.d.ts

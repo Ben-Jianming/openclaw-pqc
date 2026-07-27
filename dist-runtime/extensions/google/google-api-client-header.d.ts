@@ -1,0 +1,1 @@
+../../../dist/extensions/google/google-api-client-header.d.ts

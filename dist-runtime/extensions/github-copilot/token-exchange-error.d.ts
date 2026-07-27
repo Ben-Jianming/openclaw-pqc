@@ -1,0 +1,1 @@
+../../../dist/extensions/github-copilot/token-exchange-error.d.ts

@@ -1,0 +1,1 @@
+../../../dist/extensions/minimax/thinking.d.ts

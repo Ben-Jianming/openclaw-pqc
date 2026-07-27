@@ -1,0 +1,1 @@
+../../../dist/extensions/discord/transcripts-source-api.d.ts

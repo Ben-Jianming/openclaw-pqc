@@ -1,0 +1,1 @@
+../../../dist/extensions/imessage/session-binding-contract-api.d.ts

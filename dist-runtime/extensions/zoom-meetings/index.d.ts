@@ -1,0 +1,1 @@
+../../../dist/extensions/zoom-meetings/index.d.ts

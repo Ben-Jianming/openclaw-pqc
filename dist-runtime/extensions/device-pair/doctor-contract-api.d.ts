@@ -1,0 +1,1 @@
+../../../dist/extensions/device-pair/doctor-contract-api.d.ts

@@ -1,0 +1,1 @@
+../../../dist/extensions/opencode-go/provider-policy-api.d.ts

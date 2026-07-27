@@ -1,0 +1,1 @@
+../../../dist/extensions/reef/doctor-contract-api.d.ts

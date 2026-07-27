@@ -1,0 +1,1 @@
+../../../dist/extensions/acpx/doctor-contract-api.d.ts

@@ -1,0 +1,1 @@
+../../../dist/extensions/openai/openai-chatgpt-oauth-flow.runtime.d.ts

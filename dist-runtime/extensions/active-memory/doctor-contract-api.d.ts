@@ -1,0 +1,1 @@
+../../../dist/extensions/active-memory/doctor-contract-api.d.ts

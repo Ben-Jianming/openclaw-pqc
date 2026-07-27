@@ -1,0 +1,1 @@
+../../../dist/extensions/active-memory/recall.d.ts

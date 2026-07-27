@@ -1,0 +1,1 @@
+../../../dist/extensions/discord/session-binding-contract-api.d.ts

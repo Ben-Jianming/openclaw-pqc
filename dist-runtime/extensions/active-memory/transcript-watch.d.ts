@@ -1,0 +1,1 @@
+../../../dist/extensions/active-memory/transcript-watch.d.ts

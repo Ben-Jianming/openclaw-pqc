@@ -1,0 +1,1 @@
+../../../dist/extensions/meta/stream.d.ts

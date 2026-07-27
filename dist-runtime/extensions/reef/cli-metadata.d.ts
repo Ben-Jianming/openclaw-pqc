@@ -1,0 +1,1 @@
+../../../dist/extensions/reef/cli-metadata.d.ts

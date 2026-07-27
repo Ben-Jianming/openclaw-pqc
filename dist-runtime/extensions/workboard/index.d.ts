@@ -1,0 +1,1 @@
+../../../dist/extensions/workboard/index.d.ts

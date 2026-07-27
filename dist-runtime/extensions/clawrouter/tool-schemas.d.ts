@@ -1,0 +1,1 @@
+../../../dist/extensions/clawrouter/tool-schemas.d.ts

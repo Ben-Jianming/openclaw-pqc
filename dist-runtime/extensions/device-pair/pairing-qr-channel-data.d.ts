@@ -1,0 +1,1 @@
+../../../dist/extensions/device-pair/pairing-qr-channel-data.d.ts

@@ -1,0 +1,1 @@
+../../../dist/extensions/raft/setup-plugin-api.d.ts

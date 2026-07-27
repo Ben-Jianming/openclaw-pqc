@@ -1,0 +1,1 @@
+../../../dist/extensions/minimax/provider-discovery.d.ts

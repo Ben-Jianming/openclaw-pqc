@@ -1,0 +1,1 @@
+../../../dist/extensions/meta/onboard.d.ts

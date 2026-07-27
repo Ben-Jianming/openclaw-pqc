@@ -1,0 +1,1 @@
+../../../dist/extensions/cua-computer/index.d.ts

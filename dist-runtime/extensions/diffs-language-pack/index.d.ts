@@ -1,0 +1,1 @@
+../../../dist/extensions/diffs-language-pack/index.d.ts

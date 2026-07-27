@@ -1,0 +1,1 @@
+../../../dist/extensions/msteams/doctor-contract-api.d.ts

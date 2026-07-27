@@ -1,0 +1,179 @@
+{
+  "id": "reef",
+  "name": "Reef",
+  "description": "Guarded end-to-end encrypted claw channel",
+  "activation": {
+    "onStartup": true,
+    "onCommands": [
+      "reef"
+    ]
+  },
+  "channels": [
+    "reef"
+  ],
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "relayUrl": {
+        "type": "string",
+        "format": "uri",
+        "pattern": "^[hH][tT][tT][pP][sS]?://[^\\\\/?#@]+/?$",
+        "default": "https://reefwire.ai"
+      },
+      "handle": {
+        "type": "string",
+        "pattern": "^[a-z0-9][a-z0-9_-]{0,62}$"
+      },
+      "email": {
+        "type": "string",
+        "format": "email"
+      },
+      "guard": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "provider",
+          "pinnedModel",
+          "apiKeyEnv",
+          "policyVersion",
+          "timeoutMs"
+        ],
+        "properties": {
+          "provider": {
+            "enum": [
+              "anthropic",
+              "openai"
+            ]
+          },
+          "pinnedModel": {
+            "type": "string",
+            "minLength": 1
+          },
+          "apiKeyEnv": {
+            "type": "string",
+            "pattern": "^[A-Z_][A-Z0-9_]*$"
+          },
+          "policyVersion": {
+            "type": "string",
+            "minLength": 1
+          },
+          "timeoutMs": {
+            "type": "integer",
+            "minimum": 100,
+            "maximum": 120000
+          }
+        }
+      },
+      "stateDir": {
+        "type": "string",
+        "minLength": 1
+      },
+      "requestPolicy": {
+        "enum": [
+          "code-only",
+          "friends-of-friends",
+          "open"
+        ],
+        "default": "code-only"
+      },
+      "enabled": {
+        "type": "boolean",
+        "default": true
+      }
+    }
+  },
+  "channelConfigs": {
+    "reef": {
+      "schema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "default": true,
+            "type": "boolean"
+          },
+          "relayUrl": {
+            "default": "https://reefwire.ai",
+            "type": "string",
+            "format": "uri",
+            "pattern": "^[hH][tT][tT][pP][sS]?:\\/\\/[^\\\\/?#@]+\\/?$"
+          },
+          "handle": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9_-]{0,62}$"
+          },
+          "email": {
+            "type": "string",
+            "format": "email",
+            "pattern": "^(?!\\.)(?!.*\\.\\.)([A-Za-z0-9_'+\\-\\.]*)[A-Za-z0-9_+-]@([A-Za-z0-9][A-Za-z0-9\\-]*\\.)+[A-Za-z]{2,}$"
+          },
+          "guard": {
+            "type": "object",
+            "properties": {
+              "provider": {
+                "type": "string",
+                "enum": [
+                  "anthropic",
+                  "openai"
+                ]
+              },
+              "pinnedModel": {
+                "type": "string",
+                "minLength": 1
+              },
+              "apiKeyEnv": {
+                "type": "string",
+                "pattern": "^[A-Z_][A-Z0-9_]*$"
+              },
+              "policyVersion": {
+                "type": "string",
+                "minLength": 1
+              },
+              "timeoutMs": {
+                "type": "integer",
+                "minimum": 100,
+                "maximum": 120000
+              }
+            },
+            "required": [
+              "provider",
+              "pinnedModel",
+              "apiKeyEnv",
+              "policyVersion",
+              "timeoutMs"
+            ],
+            "additionalProperties": false
+          },
+          "stateDir": {
+            "type": "string",
+            "minLength": 1
+          },
+          "requestPolicy": {
+            "default": "code-only",
+            "type": "string",
+            "enum": [
+              "code-only",
+              "friends-of-friends",
+              "open"
+            ]
+          },
+          "friends": {}
+        },
+        "required": [
+          "enabled",
+          "relayUrl",
+          "requestPolicy"
+        ],
+        "additionalProperties": false
+      },
+      "label": "Reef",
+      "description": "Guarded end-to-end encrypted claw messaging."
+    }
+  },
+  "commandAliases": [
+    {
+      "name": "reef"
+    }
+  ]
+}

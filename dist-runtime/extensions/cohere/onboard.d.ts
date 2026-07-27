@@ -1,0 +1,1 @@
+../../../dist/extensions/cohere/onboard.d.ts

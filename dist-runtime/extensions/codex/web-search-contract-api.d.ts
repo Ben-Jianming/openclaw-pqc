@@ -1,0 +1,1 @@
+../../../dist/extensions/codex/web-search-contract-api.d.ts

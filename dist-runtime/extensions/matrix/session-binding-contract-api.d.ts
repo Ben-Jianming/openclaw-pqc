@@ -1,0 +1,1 @@
+../../../dist/extensions/matrix/session-binding-contract-api.d.ts

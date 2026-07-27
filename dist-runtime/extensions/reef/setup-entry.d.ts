@@ -1,0 +1,1 @@
+../../../dist/extensions/reef/setup-entry.d.ts

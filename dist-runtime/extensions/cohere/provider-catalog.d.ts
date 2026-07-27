@@ -1,0 +1,1 @@
+../../../dist/extensions/cohere/provider-catalog.d.ts

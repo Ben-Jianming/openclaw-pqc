@@ -1,0 +1,1 @@
+../../../dist/extensions/xai/doctor-contract-api.d.ts

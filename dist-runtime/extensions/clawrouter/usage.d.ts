@@ -1,0 +1,1 @@
+../../../dist/extensions/clawrouter/usage.d.ts

@@ -1,0 +1,1 @@
+../../../dist/extensions/github-copilot/provider-policy-api.d.ts

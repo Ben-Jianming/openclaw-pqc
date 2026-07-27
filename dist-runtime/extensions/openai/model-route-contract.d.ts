@@ -1,0 +1,1 @@
+../../../dist/extensions/openai/model-route-contract.d.ts

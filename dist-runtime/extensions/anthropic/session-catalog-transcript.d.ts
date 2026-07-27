@@ -1,0 +1,1 @@
+../../../dist/extensions/anthropic/session-catalog-transcript.d.ts

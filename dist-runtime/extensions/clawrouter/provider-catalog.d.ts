@@ -1,0 +1,1 @@
+../../../dist/extensions/clawrouter/provider-catalog.d.ts

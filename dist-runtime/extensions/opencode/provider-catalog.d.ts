@@ -1,0 +1,1 @@
+../../../dist/extensions/opencode/provider-catalog.d.ts

@@ -1,0 +1,1 @@
+../../../dist/extensions/linux-canvas/api.d.ts

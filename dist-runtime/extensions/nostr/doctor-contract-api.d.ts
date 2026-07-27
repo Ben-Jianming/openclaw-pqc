@@ -1,0 +1,1 @@
+../../../dist/extensions/nostr/doctor-contract-api.d.ts

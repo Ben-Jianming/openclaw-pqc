@@ -1,0 +1,1 @@
+../../../dist/extensions/opencode/provider-discovery.d.ts

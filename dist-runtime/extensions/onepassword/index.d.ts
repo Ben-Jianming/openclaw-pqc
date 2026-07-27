@@ -1,0 +1,1 @@
+../../../dist/extensions/onepassword/index.d.ts

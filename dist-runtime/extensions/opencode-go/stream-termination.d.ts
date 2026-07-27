@@ -1,0 +1,1 @@
+../../../dist/extensions/opencode-go/stream-termination.d.ts

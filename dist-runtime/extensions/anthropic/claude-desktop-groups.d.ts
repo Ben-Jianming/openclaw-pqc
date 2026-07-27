@@ -1,0 +1,1 @@
+../../../dist/extensions/anthropic/claude-desktop-groups.d.ts

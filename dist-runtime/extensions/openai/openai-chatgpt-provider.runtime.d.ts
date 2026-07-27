@@ -1,0 +1,1 @@
+../../../dist/extensions/openai/openai-chatgpt-provider.runtime.d.ts

@@ -1,0 +1,1 @@
+../../../dist/extensions/feishu/session-binding-contract-api.d.ts

@@ -1,0 +1,1 @@
+../../../dist/extensions/xai/provider-id.d.ts

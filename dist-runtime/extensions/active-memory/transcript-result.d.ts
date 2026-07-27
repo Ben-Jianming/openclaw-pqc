@@ -1,0 +1,1 @@
+../../../dist/extensions/active-memory/transcript-result.d.ts

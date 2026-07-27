@@ -1,0 +1,1 @@
+../../../dist/extensions/xai/web-search-provider-shared.d.ts

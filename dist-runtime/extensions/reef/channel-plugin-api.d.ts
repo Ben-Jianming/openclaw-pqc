@@ -1,0 +1,1 @@
+../../../dist/extensions/reef/channel-plugin-api.d.ts

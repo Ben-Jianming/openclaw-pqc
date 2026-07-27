@@ -1,0 +1,1 @@
+../../../dist/extensions/discord/activities-api.d.ts

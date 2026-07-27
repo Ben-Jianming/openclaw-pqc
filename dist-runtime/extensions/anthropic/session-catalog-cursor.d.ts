@@ -1,0 +1,1 @@
+../../../dist/extensions/anthropic/session-catalog-cursor.d.ts
