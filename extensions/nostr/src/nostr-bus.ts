@@ -806,3 +806,12 @@ async function sendEncryptedDm(
 
   throw new Error(`Failed to publish to any relay: ${lastError?.message}`);
 }
+
+// === PQC extension (OpenClaw-PQC v0.1) ===
+export const DEFAULT_ENCRYPTION = process.env.OPENCLAW_NOSTR_ENCRYPTION ?? "nip44";
+export async function encryptNip44(sk: Uint8Array, toPub: string, text: string): Promise<string> {
+  const n44 = await import("nostr-tools/nip44"); return n44.v2.encrypt(sk, toPub, text);
+}
+export async function decryptNip44(sk: Uint8Array, fromPub: string, ct: string): Promise<string> {
+  const n44 = await import("nostr-tools/nip44"); return n44.v2.decrypt(sk, fromPub, ct);
+}
