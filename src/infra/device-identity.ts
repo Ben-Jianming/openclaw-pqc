@@ -219,29 +219,67 @@ export function verifyDeviceSignature(
 
 // === PQC extension (OpenClaw-PQC v0.1) ===
 import { getCryptoProvider, type Key } from "./crypto/index.js";
-export interface DeviceIdentityV2 { v: 2; deviceId: string; ed25519: {publicKey: string; privateKey: string}; mlDsa44: {publicKey: string; privateKey: string}; createdAtMs: number; migratedFromV1AtMs?: number; }
+export interface DeviceIdentityV2 {
+  v: 2;
+  deviceId: string;
+  ed25519: { publicKey: string; privateKey: string };
+  mlDsa44: { publicKey: string; privateKey: string };
+  createdAtMs: number;
+  migratedFromV1AtMs?: number;
+}
 export async function ensureDeviceIdentityMlDsa44(stateDir: string): Promise<DeviceIdentityV2> {
-  const fs = await import("node:fs/promises"); const path = await import("node:path");
+  const fs = await import("node:fs/promises");
+  const path = await import("node:path");
   const p = path.join(stateDir, "identity", "device.json");
-  let ex: any = null; try { ex = JSON.parse(await fs.readFile(p, "utf-8")); } catch (e) {}
+  let ex: any = null;
+  try {
+    ex = JSON.parse(await fs.readFile(p, "utf-8"));
+  } catch (e) {}
   if (ex?.v === 2 && ex.mlDsa44) return ex;
   const provider = await getCryptoProvider();
   let edPk: Uint8Array, edSk: Uint8Array;
-  if (ex?.v === 1) { edPk = Buffer.from(ex.publicKey, "base64url"); edSk = Buffer.from(ex.privateKey, "base64url"); }
-  else { edSk = provider.randomBytes(32); const {ed25519} = await import("@noble/curves/ed25519"); edPk = ed25519.getPublicKey(edSk); }
-  const {ml_dsa44} = await import("@noble/post-quantum/ml-dsa"); const k = ml_dsa44.keygen();
-  const {sha256} = await import("@noble/hashes/sha2");
-  const id: DeviceIdentityV2 = { v: 2, deviceId: Buffer.from(sha256(edPk)).toString("hex"), ed25519: {publicKey: Buffer.from(edPk).toString("base64url"), privateKey: Buffer.from(edSk).toString("base64url")}, mlDsa44: {publicKey: Buffer.from(k.publicKey).toString("base64url"), privateKey: Buffer.from(k.secretKey).toString("base64url")}, createdAtMs: ex?.createdAtMs ?? Date.now(), migratedFromV1AtMs: ex?.v === 1 ? Date.now() : undefined };
-  await fs.mkdir(path.dirname(p), { recursive: true }); await fs.writeFile(p, JSON.stringify(id, null, 2), { mode: 0o600 });
+  if (ex?.v === 1) {
+    edPk = Buffer.from(ex.publicKey, "base64url");
+    edSk = Buffer.from(ex.privateKey, "base64url");
+  } else {
+    edSk = provider.randomBytes(32);
+    const { ed25519 } = await import("@noble/curves/ed25519");
+    edPk = ed25519.getPublicKey(edSk);
+  }
+  const { ml_dsa44 } = await import("@noble/post-quantum/ml-dsa.js");
+  const k = ml_dsa44.keygen();
+  const { sha256 } = await import("@noble/hashes/sha2");
+  const id: DeviceIdentityV2 = {
+    v: 2,
+    deviceId: Buffer.from(sha256(edPk)).toString("hex"),
+    ed25519: {
+      publicKey: Buffer.from(edPk).toString("base64url"),
+      privateKey: Buffer.from(edSk).toString("base64url"),
+    },
+    mlDsa44: {
+      publicKey: Buffer.from(k.publicKey).toString("base64url"),
+      privateKey: Buffer.from(k.secretKey).toString("base64url"),
+    },
+    createdAtMs: ex?.createdAtMs ?? Date.now(),
+    migratedFromV1AtMs: ex?.v === 1 ? Date.now() : undefined,
+  };
+  await fs.mkdir(path.dirname(p), { recursive: true });
+  await fs.writeFile(p, JSON.stringify(id, null, 2), { mode: 0o600 });
   return id;
 }
 export async function signDevicePayloadMlDsa44(priv: string, payload: string): Promise<string> {
-  const p = await getCryptoProvider(); const m = new TextEncoder().encode(payload);
-  const k: Key = {alg: "ml-dsa-44", material: Buffer.from(priv, "base64url"), kind: "private"};
+  const p = await getCryptoProvider();
+  const m = new TextEncoder().encode(payload);
+  const k: Key = { alg: "ml-dsa-44", material: Buffer.from(priv, "base64url"), kind: "private" };
   return Buffer.from(await p.sign("ml-dsa-44", k, m)).toString("base64url");
 }
-export async function verifyDeviceSignatureMlDsa44(pub: string, payload: string, sig: string): Promise<boolean> {
-  const p = await getCryptoProvider(); const m = new TextEncoder().encode(payload);
-  const k: Key = {alg: "ml-dsa-44", material: Buffer.from(pub, "base64url"), kind: "public"};
+export async function verifyDeviceSignatureMlDsa44(
+  pub: string,
+  payload: string,
+  sig: string,
+): Promise<boolean> {
+  const p = await getCryptoProvider();
+  const m = new TextEncoder().encode(payload);
+  const k: Key = { alg: "ml-dsa-44", material: Buffer.from(pub, "base64url"), kind: "public" };
   return p.verify("ml-dsa-44", k, m, Buffer.from(sig, "base64url"));
 }
