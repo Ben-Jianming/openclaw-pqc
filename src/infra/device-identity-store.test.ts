@@ -46,7 +46,7 @@ function storeOptions(rootDir: string, identityKey?: string): DeviceIdentityStor
 
 describe("device-identity-store ML-DSA-65 invariants", () => {
   it("generateStoredDeviceIdentity produces a prefixed ML-DSA-65 keypair", () => {
-    const stored = generateStoredDeviceIdentity(1_700_000_000_000);
+    const stored = generateStoredDeviceIdentity({ now: 1_700_000_000_000 });
     expect(stored.publicKeyPem.startsWith(MLDSA65_PUBLIC_KEY_PREFIX)).toBe(true);
     expect(stored.privateKeyPem.startsWith(MLDSA65_SECRET_KEY_PREFIX)).toBe(true);
     expect(decodeMlDsa65PublicKey(stored.publicKeyPem).length).toBe(MLDSA65_PUBLIC_KEY_BYTES);
