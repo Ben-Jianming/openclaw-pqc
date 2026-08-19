@@ -243,7 +243,7 @@ CREATE TABLE IF NOT EXISTS exec_approvals_config (
   auto_allow_skills INTEGER,
   agent_count INTEGER NOT NULL,
   allowlist_count INTEGER NOT NULL,
-  updated_at_ms INTEGER NOT NULL
+  updated_at_ms INTEGER NOT NULL,
 ) STRICT;
 
 CREATE TABLE IF NOT EXISTS operator_approvals (
@@ -382,7 +382,7 @@ CREATE TABLE IF NOT EXISTS schema_meta (
 CREATE TABLE IF NOT EXISTS config_machine_state (
   state_key TEXT NOT NULL PRIMARY KEY,
   value_json TEXT NOT NULL,
-  updated_at_ms INTEGER NOT NULL
+  updated_at_ms INTEGER NOT NULL,
 ) STRICT;
 
 CREATE TABLE IF NOT EXISTS device_pairing_pending (
@@ -458,7 +458,11 @@ CREATE TABLE IF NOT EXISTS device_identities (
   public_key_pem TEXT NOT NULL,
   private_key_pem TEXT NOT NULL,
   created_at_ms INTEGER NOT NULL,
-  updated_at_ms INTEGER NOT NULL
+  updated_at_ms INTEGER NOT NULL,
+  mldsa_public_key_pem TEXT,
+  mldsa_private_key_pem TEXT,
+  mldsa_private_key_wrapped BLOB,
+  mldsa_private_key_wrap_key_id TEXT
 ) STRICT;
 
 CREATE INDEX IF NOT EXISTS idx_device_identities_device
@@ -479,7 +483,7 @@ CREATE INDEX IF NOT EXISTS idx_device_auth_tokens_updated
 CREATE TABLE IF NOT EXISTS android_notification_recent_packages (
   package_name TEXT NOT NULL PRIMARY KEY,
   sort_order INTEGER NOT NULL,
-  updated_at_ms INTEGER NOT NULL
+  updated_at_ms INTEGER NOT NULL,
 ) STRICT;
 
 CREATE INDEX IF NOT EXISTS idx_android_notification_recent_packages_order
@@ -502,7 +506,7 @@ CREATE TABLE IF NOT EXISTS onboarding_recommendations (
   matches_json TEXT NOT NULL,
   offered_at_ms INTEGER NOT NULL,
   accepted_at_ms INTEGER,
-  updated_at_ms INTEGER NOT NULL
+  updated_at_ms INTEGER NOT NULL,
 ) STRICT;
 
 CREATE TABLE IF NOT EXISTS workspace_setup_state (
@@ -522,7 +526,7 @@ CREATE TABLE IF NOT EXISTS workspace_path_aliases (
   alias_path TEXT NOT NULL,
   workspace_key TEXT NOT NULL,
   workspace_path TEXT NOT NULL,
-  updated_at_ms INTEGER NOT NULL
+  updated_at_ms INTEGER NOT NULL,
 ) STRICT;
 
 CREATE INDEX IF NOT EXISTS idx_workspace_path_aliases_workspace
@@ -531,7 +535,7 @@ CREATE INDEX IF NOT EXISTS idx_workspace_path_aliases_workspace
 CREATE TABLE IF NOT EXISTS workspace_attestations (
   workspace_key TEXT NOT NULL PRIMARY KEY,
   attested_at_ms INTEGER NOT NULL,
-  updated_at_ms INTEGER NOT NULL
+  updated_at_ms INTEGER NOT NULL,
 ) STRICT;
 
 CREATE INDEX IF NOT EXISTS idx_workspace_attestations_attested
@@ -552,7 +556,7 @@ CREATE TABLE IF NOT EXISTS native_hook_relay_bridges (
   port INTEGER NOT NULL,
   token TEXT NOT NULL,
   expires_at_ms INTEGER NOT NULL,
-  updated_at_ms INTEGER NOT NULL
+  updated_at_ms INTEGER NOT NULL,
 ) STRICT;
 
 CREATE INDEX IF NOT EXISTS idx_native_hook_relay_bridges_expires
@@ -660,7 +664,7 @@ CREATE TABLE IF NOT EXISTS web_push_subscriptions (
   p256dh TEXT NOT NULL,
   auth TEXT NOT NULL,
   created_at_ms INTEGER NOT NULL,
-  updated_at_ms INTEGER NOT NULL
+  updated_at_ms INTEGER NOT NULL,
 ) STRICT;
 
 CREATE INDEX IF NOT EXISTS idx_web_push_subscriptions_updated
@@ -671,7 +675,7 @@ CREATE TABLE IF NOT EXISTS web_push_vapid_keys (
   public_key TEXT NOT NULL,
   private_key TEXT NOT NULL,
   subject TEXT NOT NULL,
-  updated_at_ms INTEGER NOT NULL
+  updated_at_ms INTEGER NOT NULL,
 ) STRICT;
 
 CREATE TABLE IF NOT EXISTS apns_registrations (
@@ -686,7 +690,7 @@ CREATE TABLE IF NOT EXISTS apns_registrations (
   environment TEXT NOT NULL,
   distribution TEXT,
   token_debug_suffix TEXT,
-  updated_at_ms INTEGER NOT NULL
+  updated_at_ms INTEGER NOT NULL,
 ) STRICT;
 
 CREATE INDEX IF NOT EXISTS idx_apns_registrations_updated
@@ -709,7 +713,7 @@ CREATE TABLE IF NOT EXISTS node_host_config (
   gateway_tls_fingerprint TEXT,
   gateway_context_path TEXT,
   installed_apps_sharing INTEGER NOT NULL DEFAULT 0,
-  updated_at_ms INTEGER NOT NULL
+  updated_at_ms INTEGER NOT NULL,
 ) STRICT;
 
 CREATE TABLE IF NOT EXISTS voicewake_triggers (
@@ -729,7 +733,7 @@ CREATE TABLE IF NOT EXISTS voicewake_routing_config (
   default_target_mode TEXT NOT NULL,
   default_target_agent_id TEXT,
   default_target_session_key TEXT,
-  updated_at_ms INTEGER NOT NULL
+  updated_at_ms INTEGER NOT NULL,
 ) STRICT;
 
 CREATE TABLE IF NOT EXISTS voicewake_routing_routes (
@@ -762,7 +766,7 @@ CREATE TABLE IF NOT EXISTS update_check_state (
   auto_last_attempt_at TEXT,
   auto_last_success_version TEXT,
   auto_last_success_at TEXT,
-  updated_at_ms INTEGER NOT NULL
+  updated_at_ms INTEGER NOT NULL,
 ) STRICT;
 
 CREATE TABLE IF NOT EXISTS config_health_entries (
@@ -770,7 +774,7 @@ CREATE TABLE IF NOT EXISTS config_health_entries (
   last_known_good_json TEXT,
   last_promoted_good_json TEXT,
   last_observed_suspicious_signature TEXT,
-  updated_at_ms INTEGER NOT NULL
+  updated_at_ms INTEGER NOT NULL,
 ) STRICT;
 
 CREATE TABLE IF NOT EXISTS clawhub_promotions_feed_state (
@@ -780,7 +784,7 @@ CREATE TABLE IF NOT EXISTS clawhub_promotions_feed_state (
   feed_sequence INTEGER,
   last_checked_at_ms INTEGER,
   notified_slugs_json TEXT NOT NULL DEFAULT '[]',
-  updated_at_ms INTEGER NOT NULL
+  updated_at_ms INTEGER NOT NULL,
 ) STRICT;
 
 CREATE TABLE IF NOT EXISTS clawhub_promotion_claims (
@@ -804,7 +808,7 @@ CREATE TABLE IF NOT EXISTS installed_plugin_index (
   plugins_json TEXT NOT NULL,
   diagnostics_json TEXT NOT NULL,
   warning TEXT,
-  updated_at_ms INTEGER NOT NULL
+  updated_at_ms INTEGER NOT NULL,
 ) STRICT;
 
 CREATE INDEX IF NOT EXISTS idx_installed_plugin_index_generated
@@ -823,7 +827,7 @@ CREATE TABLE IF NOT EXISTS official_external_plugin_catalog_snapshots (
   trust_signature_count INTEGER,
   trust_threshold INTEGER,
   trust_verified_at TEXT,
-  updated_at_ms INTEGER NOT NULL
+  updated_at_ms INTEGER NOT NULL,
 ) STRICT;
 
 CREATE INDEX IF NOT EXISTS idx_official_external_plugin_catalog_snapshots_updated
@@ -845,7 +849,7 @@ CREATE TABLE IF NOT EXISTS gateway_restart_sentinel (
   doctor_hint TEXT,
   stats_json TEXT,
   payload_json TEXT NOT NULL,
-  updated_at_ms INTEGER NOT NULL
+  updated_at_ms INTEGER NOT NULL,
 ) STRICT;
 
 CREATE INDEX IF NOT EXISTS idx_gateway_restart_sentinel_ts
@@ -859,7 +863,7 @@ CREATE TABLE IF NOT EXISTS gateway_restart_intent (
   reason TEXT,
   force INTEGER,
   wait_ms INTEGER,
-  updated_at_ms INTEGER NOT NULL
+  updated_at_ms INTEGER NOT NULL,
 ) STRICT;
 
 CREATE TABLE IF NOT EXISTS gateway_restart_handoff (
@@ -877,7 +881,7 @@ CREATE TABLE IF NOT EXISTS gateway_restart_handoff (
   source TEXT NOT NULL,
   restart_kind TEXT NOT NULL,
   supervisor_mode TEXT NOT NULL,
-  updated_at_ms INTEGER NOT NULL
+  updated_at_ms INTEGER NOT NULL,
 ) STRICT;
 
 CREATE INDEX IF NOT EXISTS idx_gateway_restart_handoff_expiry
@@ -2044,7 +2048,7 @@ CREATE TABLE IF NOT EXISTS claw_installs (
     status IN ('pending', 'workspace_ready', 'config_committed', 'complete', 'partial')
   ),
   added_at_ms INTEGER NOT NULL,
-  updated_at_ms INTEGER NOT NULL
+  updated_at_ms INTEGER NOT NULL,
 ) STRICT;
 
 CREATE TABLE IF NOT EXISTS claw_workspace_files (

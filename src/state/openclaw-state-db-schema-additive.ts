@@ -356,5 +356,13 @@ export function ensureAdditiveStateColumns(db: DatabaseSync): void {
     "worker_environments",
     "teardown_terminal_state TEXT CHECK (teardown_terminal_state IN ('destroyed', 'failed'))",
   );
+  // M3 (PQC migration, whitepaper 2.1.3 + 2.2.1): additive ML-DSA-65 columns on
+  // device_identities. Pure additive — downgraded builds keep working without
+  // the new feature (AGENTS.md schema-additive rule). The wrap envelope column
+  // stays NULL for M3; M4 + M5 will populate it via src/security/secret-wrapping.
+  ensureColumn(db, "device_identities", "mldsa_public_key_pem TEXT");
+  ensureColumn(db, "device_identities", "mldsa_private_key_pem TEXT");
+  ensureColumn(db, "device_identities", "mldsa_private_key_wrapped BLOB");
+  ensureColumn(db, "device_identities", "mldsa_private_key_wrap_key_id TEXT");
   ensureOperatorApprovalResolutionRefs(db);
 }
