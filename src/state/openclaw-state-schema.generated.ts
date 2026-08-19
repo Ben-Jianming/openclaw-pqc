@@ -463,7 +463,11 @@ CREATE TABLE IF NOT EXISTS device_identities (
   public_key_pem TEXT NOT NULL,
   private_key_pem TEXT NOT NULL,
   created_at_ms INTEGER NOT NULL,
-  updated_at_ms INTEGER NOT NULL
+  updated_at_ms INTEGER NOT NULL,
+  mldsa_public_key_pem TEXT,
+  mldsa_private_key_pem TEXT,
+  mldsa_private_key_wrapped BLOB,
+  mldsa_private_key_wrap_key_id TEXT
 ) STRICT;
 
 CREATE INDEX IF NOT EXISTS idx_device_identities_device
