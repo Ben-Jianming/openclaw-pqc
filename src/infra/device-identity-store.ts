@@ -1,4 +1,12 @@
-// Canonical SQLite storage for gateway/device Ed25519 identities.
+// Canonical SQLite storage for gateway/device ML-DSA-65 (FIPS 204) identities.
+//
+// M2 (PQC migration, whitepaper 2.1): the device identity is now ML-DSA-65.
+// The stored columns (public_key_pem, private_key_pem) are still named
+// `*_key_pem` for backward-compat with the on-disk SQLite schema, but the
+// content is the MLDSA65-{PUBLIC,SECRET}-KEY prefixed base64url wire format
+// defined in src/infra/mldsa65-key-storage.ts. Ed25519 PEM material can no
+// longer be read out of this table; Doctor is responsible for migrating or
+// deleting legacy rows from pre-M2 forks.
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
@@ -12,14 +20,23 @@ import {
 } from "../state/openclaw-state-db.js";
 import { resolveOpenClawStateSqlitePath } from "../state/openclaw-state-db.paths.js";
 import {
-  deriveCanonicalEd25519PrivateKeyRaw,
-  deriveCanonicalEd25519PublicKeyRaw,
-} from "./ed25519-signature.js";
-import {
   executeSqliteQuerySync,
   executeSqliteQueryTakeFirstSync,
   getNodeSqliteKysely,
 } from "./kysely-sync.js";
+import {
+  decodeMlDsa65PublicKey,
+  decodeMlDsa65SecretKey,
+  encodeMlDsa65PublicKey,
+  encodeMlDsa65SecretKey,
+  generateMlDsa65Keypair,
+  MLDSA65_PUBLIC_KEY_BYTES,
+  MLDSA65_PUBLIC_KEY_PREFIX,
+  MLDSA65_SECRET_KEY_BYTES,
+  MLDSA65_SECRET_KEY_PREFIX,
+  signMlDsa65Payload,
+  verifyMlDsa65Signature,
+} from "./mldsa65-key-storage.js";
 
 export const PRIMARY_DEVICE_IDENTITY_KEY = "primary";
 
@@ -71,16 +88,17 @@ function invalidStoredIdentityError(
   );
 }
 
+/** Fingerprint = SHA-256 over the raw 1952-byte ML-DSA-65 public key. */
 function fingerprintPublicKey(publicKeyPem: string): string {
-  const raw = deriveCanonicalEd25519PublicKeyRaw(publicKeyPem);
+  const raw = decodeMlDsa65PublicKey(publicKeyPem);
   return crypto.createHash("sha256").update(raw).digest("hex");
 }
 
-/** Generate canonical Ed25519 material before entering a synchronous write transaction. */
+/** Generate canonical ML-DSA-65 material before entering a synchronous write transaction. */
 export function generateStoredDeviceIdentity(now = Date.now()): StoredDeviceIdentity {
-  const { publicKey, privateKey } = crypto.generateKeyPairSync("ed25519");
-  const publicKeyPem = publicKey.export({ type: "spki", format: "pem" });
-  const privateKeyPem = privateKey.export({ type: "pkcs8", format: "pem" });
+  const { publicKey, secretKey } = generateMlDsa65Keypair();
+  const publicKeyPem = encodeMlDsa65PublicKey(publicKey);
+  const privateKeyPem = encodeMlDsa65SecretKey(secretKey);
   return {
     deviceId: fingerprintPublicKey(publicKeyPem),
     publicKeyPem,
@@ -89,20 +107,27 @@ export function generateStoredDeviceIdentity(now = Date.now()): StoredDeviceIden
   };
 }
 
+/**
+ * Verify the prefixed ML-DSA-65 public/secret pair is well-formed and
+ * round-trips through sign/verify. ML-DSA-65 uses hedged signing, so we
+ * pick a fresh probe payload per call to avoid signature reuse.
+ */
 function keyPairMatches(publicKeyPem: string, privateKeyPem: string): boolean {
   try {
-    deriveCanonicalEd25519PublicKeyRaw(publicKeyPem);
-    deriveCanonicalEd25519PrivateKeyRaw(privateKeyPem);
-    const publicKey = crypto.createPublicKey(publicKeyPem);
-    const privateKey = crypto.createPrivateKey(privateKeyPem);
-    if (publicKey.asymmetricKeyType !== "ed25519" || privateKey.asymmetricKeyType !== "ed25519") {
-      return false;
-    }
-    const derivedPublicKey = crypto
-      .createPublicKey(privateKeyPem)
-      .export({ type: "spki", format: "der" });
-    const storedPublicKey = publicKey.export({ type: "spki", format: "der" });
-    return Buffer.from(derivedPublicKey).equals(Buffer.from(storedPublicKey));
+    if (typeof publicKeyPem !== "string" || typeof privateKeyPem !== "string") return false;
+    if (!publicKeyPem.startsWith(MLDSA65_PUBLIC_KEY_PREFIX)) return false;
+    if (!privateKeyPem.startsWith(MLDSA65_SECRET_KEY_PREFIX)) return false;
+    const rawPk = decodeMlDsa65PublicKey(publicKeyPem);
+    const rawSk = decodeMlDsa65SecretKey(privateKeyPem);
+    if (rawPk.length !== MLDSA65_PUBLIC_KEY_BYTES) return false;
+    if (rawSk.length !== MLDSA65_SECRET_KEY_BYTES) return false;
+    const probePayload = `ml-dsa-65-roundtrip-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const sig = signMlDsa65Payload(privateKeyPem, probePayload);
+    return verifyMlDsa65Signature({
+      publicKey: publicKeyPem,
+      payload: probePayload,
+      sigBase64Url: sig,
+    });
   } catch {
     return false;
   }
@@ -172,35 +197,28 @@ function salvageStoredIdentityRow(
   expectedIdentityKey: string,
   repairedAtMs: number,
 ): StoredDeviceIdentity | null {
-  // Device ids, timestamps, and PEM framing are repairable metadata. Preserve matching
-  // Ed25519 key bytes because rotating them would invalidate pairing and stored auth.
+  // M2 salvage only accepts ML-DSA-65 prefixed rows. Legacy Ed25519 PEM
+  // rows are dropped here so Doctor can replace them with a fresh ML-DSA-65
+  // identity; this preserves the existing salvage-then-repair contract.
   if (
     row.identity_key !== expectedIdentityKey ||
     typeof row.public_key_pem !== "string" ||
-    typeof row.private_key_pem !== "string"
+    typeof row.private_key_pem !== "string" ||
+    !row.public_key_pem.startsWith(MLDSA65_PUBLIC_KEY_PREFIX) ||
+    !row.private_key_pem.startsWith(MLDSA65_SECRET_KEY_PREFIX)
   ) {
     return null;
   }
   try {
-    const publicKey = crypto.createPublicKey(row.public_key_pem);
-    const privateKey = crypto.createPrivateKey(row.private_key_pem);
-    if (publicKey.asymmetricKeyType !== "ed25519" || privateKey.asymmetricKeyType !== "ed25519") {
-      return null;
-    }
-    const canonicalPublicKeyPem = publicKey.export({ type: "spki", format: "pem" });
-    const canonicalPrivateKeyPem = privateKey.export({ type: "pkcs8", format: "pem" });
-    const derivedPublicKeyPem = crypto
-      .createPublicKey(canonicalPrivateKeyPem)
-      .export({ type: "spki", format: "pem" });
-    if (derivedPublicKeyPem !== canonicalPublicKeyPem) {
+    if (!keyPairMatches(row.public_key_pem, row.private_key_pem)) {
       return null;
     }
     const createdAtMs =
       parseCreatedAtMs(row.created_at_ms) ?? parseCreatedAtMs(row.updated_at_ms) ?? repairedAtMs;
     const salvaged = {
-      deviceId: fingerprintPublicKey(canonicalPublicKeyPem),
-      publicKeyPem: canonicalPublicKeyPem,
-      privateKeyPem: canonicalPrivateKeyPem,
+      deviceId: fingerprintPublicKey(row.public_key_pem),
+      publicKeyPem: row.public_key_pem,
+      privateKeyPem: row.private_key_pem,
       createdAtMs,
     };
     validateStoredDeviceIdentity(salvaged, expectedIdentityKey);

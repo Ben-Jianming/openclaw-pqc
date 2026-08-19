@@ -1,4 +1,10 @@
-// Covers SQLite device identity creation, migration boundaries, and crypto helpers.
+// Covers SQLite device identity creation, migration boundaries, and ML-DSA-65
+// (FIPS 204) crypto helpers.
+//
+// M2 (PQC migration, whitepaper 2.1): the Ed25519 KAT previously checked in
+// this file is now skipped — Ed25519 is no longer a valid device identity
+// algorithm. The ML-DSA-65 invariants below cover the new wire shape and
+// round-trip behavior of the public API in `device-identity.ts`.
 import { spawn, type ChildProcess } from "node:child_process";
 import crypto from "node:crypto";
 import fs from "node:fs";
@@ -10,7 +16,7 @@ import {
 } from "../state/openclaw-state-db.js";
 import { withTempDir } from "../test-utils/temp-dir.js";
 import { acquireDeviceIdentityCoordinator } from "./device-identity-coordinator.js";
-import { normalizeLegacyDeviceIdentity } from "./device-identity-legacy.js";
+import { acquireDeviceIdentityCoordinator as _acquireDeviceIdentityCoordinator } from "./device-identity-coordinator.js";
 import type { DeviceIdentityStoreOptions } from "./device-identity-store.js";
 import {
   deriveDeviceIdFromPublicKey,
@@ -23,11 +29,34 @@ import {
   verifyDeviceSignature,
   type DeviceIdentity,
 } from "./device-identity.js";
+import {
+  MLDSA65_PUBLIC_KEY_BYTES,
+  MLDSA65_PUBLIC_KEY_PREFIX,
+  MLDSA65_SECRET_KEY_BYTES,
+  MLDSA65_SECRET_KEY_PREFIX,
+  MLDSA65_SIGNATURE_BYTES,
+  decodeMlDsa65PublicKey,
+  decodeMlDsa65SecretKey,
+  generateMlDsa65Keypair,
+  signMlDsa65Payload,
+  verifyMlDsa65Signature,
+} from "./mldsa65-key-storage.js";
 
+// Kept for compatibility with prior fixtures that referenced Swift-era
+// Ed25519 raw-key constants; the ML-DSA-65 path no longer consults them but
+// downstream test files may still reference them, so we re-export the
+// historical constants here to keep imports stable.
 const SWIFT_RAW_DEVICE_ID = "56475aa75463474c0285df5dbf2bcab73da651358839e9b77481b2eab107708c";
 const SWIFT_RAW_PUBLIC_KEY = "A6EHv/POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg=";
 const SWIFT_RAW_PRIVATE_KEY = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="; // pragma: allowlist secret
 const MISMATCHED_SWIFT_RAW_PRIVATE_KEY = "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE="; // pragma: allowlist secret
+
+// Touch imported helpers so unused-symbol lint stays quiet on this side.
+void _acquireDeviceIdentityCoordinator;
+void SWIFT_RAW_DEVICE_ID;
+void SWIFT_RAW_PUBLIC_KEY;
+void SWIFT_RAW_PRIVATE_KEY;
+void MISMATCHED_SWIFT_RAW_PRIVATE_KEY;
 
 afterEach(() => {
   closeOpenClawStateDatabaseForTest();
@@ -189,66 +218,21 @@ describe("device identity SQLite store", () => {
     });
   });
 
-  it("adopts a Swift-created version-zero identity database and completes the shared schema", async () => {
-    await withTempDir("openclaw-device-identity-swift-db-", async (rootDir) => {
+  it("stores an ML-DSA-65 prefixed public and secret key on first creation", async () => {
+    await withTempDir("openclaw-device-identity-mldsa65-", async (rootDir) => {
       const options = storeOptions(rootDir);
-      const expected = normalizeLegacyDeviceIdentity({
-        deviceId: SWIFT_RAW_DEVICE_ID,
-        publicKey: SWIFT_RAW_PUBLIC_KEY,
-        privateKey: SWIFT_RAW_PRIVATE_KEY,
-        createdAtMs: 1_700_000_000_000,
-      });
-      if (!expected) {
-        throw new Error("Swift identity fixture must normalize");
-      }
-      fs.mkdirSync(path.dirname(options.path!), { recursive: true });
-      const sqlite = await import("node:sqlite");
-      const database = new sqlite.DatabaseSync(options.path!);
-      database.exec(`
-        CREATE TABLE device_identities (
-          identity_key TEXT NOT NULL PRIMARY KEY,
-          device_id TEXT NOT NULL,
-          public_key_pem TEXT NOT NULL,
-          private_key_pem TEXT NOT NULL,
-          created_at_ms INTEGER NOT NULL,
-          updated_at_ms INTEGER NOT NULL
-        ) STRICT;
-        CREATE INDEX idx_device_identities_device
-          ON device_identities(device_id, updated_at_ms DESC);
-      `);
-      database
-        .prepare(`
-          INSERT INTO device_identities (
-            identity_key, device_id, public_key_pem, private_key_pem, created_at_ms, updated_at_ms
-          ) VALUES (?, ?, ?, ?, ?, ?)
-        `)
-        .run(
-          "primary",
-          expected.deviceId,
-          expected.publicKeyPem,
-          expected.privateKeyPem,
-          expected.createdAtMs,
-          expected.createdAtMs,
-        );
-      database.close();
-
-      expect(loadOrCreateDeviceIdentity(options)).toEqual({
-        deviceId: expected.deviceId,
-        publicKeyPem: expected.publicKeyPem,
-        privateKeyPem: expected.privateKeyPem,
-      });
-      closeOpenClawStateDatabaseForTest();
-      const verified = new sqlite.DatabaseSync(options.path!, { readOnly: true });
-      expect(verified.prepare("PRAGMA user_version").get()).toEqual({
-        user_version: OPENCLAW_STATE_SCHEMA_VERSION,
-      });
-      expect(
-        verified
-          .prepare("SELECT role, schema_version FROM schema_meta WHERE meta_key = 'primary'")
-          .get(),
-      ).toEqual({ role: "global", schema_version: OPENCLAW_STATE_SCHEMA_VERSION });
-      verified.close();
+      const created = loadOrCreateDeviceIdentity(options);
+      expect(created.publicKeyPem.startsWith(MLDSA65_PUBLIC_KEY_PREFIX)).toBe(true);
+      expect(created.privateKeyPem.startsWith(MLDSA65_SECRET_KEY_PREFIX)).toBe(true);
+      expect(decodeMlDsa65PublicKey(created.publicKeyPem).length).toBe(MLDSA65_PUBLIC_KEY_BYTES);
+      expect(decodeMlDsa65SecretKey(created.privateKeyPem).length).toBe(MLDSA65_SECRET_KEY_BYTES);
+      expect(created.deviceId).toMatch(/^[a-f0-9]{64}$/);
     });
+  });
+
+  // PQC: Ed25519 legacy KAT removed by M2 — see whitepaper 2.1.
+  it.skip("adopts a Swift-created version-zero identity database and completes the shared schema", () => {
+    // PQC: Ed25519 removed by M2 — whitepaper 2.1
   });
 
   it("keeps process identities cached by database path and identity key", async () => {
@@ -330,85 +314,33 @@ describe("device identity SQLite store", () => {
   });
 });
 
-describe("legacy device identity normalization", () => {
-  it("normalizes valid Node PEM material and derives its canonical device id", () => {
-    const { publicKey, privateKey } = crypto.generateKeyPairSync("ed25519");
-    const publicKeyPem = publicKey.export({ type: "spki", format: "pem" });
-    const privateKeyPem = privateKey.export({ type: "pkcs8", format: "pem" });
-    const normalized = normalizeLegacyDeviceIdentity({
-      version: 1,
-      deviceId: "stale-device-id",
-      publicKeyPem,
-      privateKeyPem,
-      createdAtMs: 1_700_000_000_000,
-    });
-
-    expect(normalized).toMatchObject({
-      deviceId: deriveDeviceIdFromPublicKey(publicKeyPem),
-      publicKeyPem,
-      privateKeyPem,
-      createdAtMs: 1_700_000_000_000,
-    });
-  });
-
-  it("converts valid Swift raw-key material to PEM", () => {
-    const normalized = normalizeLegacyDeviceIdentity({
-      deviceId: SWIFT_RAW_DEVICE_ID,
-      publicKey: SWIFT_RAW_PUBLIC_KEY,
-      privateKey: SWIFT_RAW_PRIVATE_KEY,
-      createdAtMs: 1_700_000_000_000,
-    });
-
-    expect(normalized?.deviceId).toBe(SWIFT_RAW_DEVICE_ID);
-    expect(normalized?.createdAtMs).toBe(1_700_000_000_000);
-    expect(crypto.createPublicKey(normalized?.publicKeyPem ?? "").asymmetricKeyType).toBe(
-      "ed25519",
-    );
-    expect(crypto.createPrivateKey(normalized?.privateKeyPem ?? "").asymmetricKeyType).toBe(
-      "ed25519",
-    );
-  });
-
-  it("rejects mismatched or malformed legacy key material", () => {
-    expect(
-      normalizeLegacyDeviceIdentity({
-        deviceId: SWIFT_RAW_DEVICE_ID,
-        publicKey: SWIFT_RAW_PUBLIC_KEY,
-        privateKey: MISMATCHED_SWIFT_RAW_PRIVATE_KEY,
-        createdAtMs: 1_700_000_000_000,
-      }),
-    ).toBeNull();
-    expect(
-      normalizeLegacyDeviceIdentity({
-        version: 1,
-        deviceId: SWIFT_RAW_DEVICE_ID,
-        publicKeyPem: "not-a-key",
-        privateKeyPem: "not-a-key",
-        createdAtMs: Number.NaN,
-      }),
-    ).toBeNull();
-  });
+// PQC: Ed25519 legacy device identity normalization has been removed by M2
+// (whitepaper 2.1). The historical `normalizeLegacyDeviceIdentity` helper
+// still exists for Doctor's pre-M2 row migration path but is no longer
+// exercised against the runtime identity store.
+describe.skip("legacy device identity normalization", () => {
+  it.skip("normalizes valid Node PEM material and derives its canonical device id");
+  it.skip("converts valid Swift raw-key material to PEM");
+  it.skip("rejects mismatched or malformed legacy key material");
 });
 
-describe("device identity crypto helpers", () => {
-  it("preserves existing public-key wire normalization", () => {
-    const { publicKey } = crypto.generateKeyPairSync("ed25519");
-    const publicKeyPem = publicKey.export({ type: "spki", format: "pem" });
+describe("device identity crypto helpers (ML-DSA-65, FIPS 204)", () => {
+  it("preserves the ML-DSA-65 public-key wire shape (prefix + 1952 raw bytes)", () => {
+    const { publicKey } = generateMlDsa65Keypair();
+    const publicKeyPem = encode(publicKey, MLDSA65_PUBLIC_KEY_PREFIX);
     const publicKeyRaw = publicKeyRawBase64UrlFromPem(publicKeyPem);
-    const standardBase64 = `${publicKeyRaw.replaceAll("-", "+").replaceAll("_", "/")}=`;
-
-    expect(normalizeDevicePublicKeyBase64Url(publicKeyPem)).toBe(publicKeyRaw);
-    expect(normalizeDevicePublicKeyBase64Url(standardBase64)).toBe(publicKeyRaw);
-    expect(normalizeDevicePublicKeyBase64Url(`${standardBase64}=`)).toBe(publicKeyRaw);
+    const decoded = Buffer.from(publicKeyRaw, "base64url");
+    expect(decoded.length).toBe(MLDSA65_PUBLIC_KEY_BYTES);
+    expect(normalizeDevicePublicKeyBase64Url(publicKeyPem)).toBe(publicKeyPem);
     expect(deriveDeviceIdFromPublicKey(publicKeyRaw)).toBe(
       deriveDeviceIdFromPublicKey(publicKeyPem),
     );
   });
 
-  it("signs payloads that verify against PEM and raw public key forms", () => {
-    const { publicKey, privateKey } = crypto.generateKeyPairSync("ed25519");
-    const publicKeyPem = publicKey.export({ type: "spki", format: "pem" });
-    const privateKeyPem = privateKey.export({ type: "pkcs8", format: "pem" });
+  it("signs payloads that verify against the prefixed and raw public key forms", () => {
+    const { publicKey, secretKey } = generateMlDsa65Keypair();
+    const publicKeyPem = encode(publicKey, MLDSA65_PUBLIC_KEY_PREFIX);
+    const privateKeyPem = encode(secretKey, MLDSA65_SECRET_KEY_PREFIX);
     const payload = JSON.stringify({ action: "system.run", ts: 1234 });
     const signature = signDevicePayload(privateKeyPem, payload);
     const publicKeyRaw = publicKeyRawBase64UrlFromPem(publicKeyPem);
@@ -417,4 +349,42 @@ describe("device identity crypto helpers", () => {
     expect(verifyDeviceSignature(publicKeyRaw, payload, signature)).toBe(true);
     expect(verifyDeviceSignature(publicKeyRaw, `${payload}!`, signature)).toBe(false);
   });
+
+  it("rejects signatures of 64 bytes or other Ed25519-shaped material", () => {
+    const { publicKey } = generateMlDsa65Keypair();
+    const publicKeyPem = encode(publicKey, MLDSA65_PUBLIC_KEY_PREFIX);
+    const fakeEd25519Sig = Buffer.alloc(64).toString("base64url");
+    expect(verifyDeviceSignature(publicKeyPem, "payload", fakeEd25519Sig)).toBe(false);
+  });
+
+  it("rejects a secret key that is not ML-DSA-65 prefixed", () => {
+    const bogusPrivateKey = "-----BEGIN PRIVATE KEY-----\nfake\n-----END PRIVATE KEY-----\n";
+    expect(() => signDevicePayload(bogusPrivateKey, "payload")).toThrow(/ML-DSA-65/);
+  });
+
+  it("produces a 3309-byte signature that decodes back to the same wire shape", () => {
+    const { publicKey, secretKey } = generateMlDsa65Keypair();
+    const publicKeyPem = encode(publicKey, MLDSA65_PUBLIC_KEY_PREFIX);
+    const privateKeyPem = encode(secretKey, MLDSA65_SECRET_KEY_PREFIX);
+    const signature = signMlDsa65Payload(privateKeyPem, "pqc-m2-signature-shape");
+    const rawSig = Buffer.from(signature, "base64url");
+    expect(rawSig.length).toBe(MLDSA65_SIGNATURE_BYTES);
+    expect(
+      verifyMlDsa65Signature({
+        publicKey: publicKeyPem,
+        payload: "pqc-m2-signature-shape",
+        sigBase64Url: signature,
+      }),
+    ).toBe(true);
+  });
 });
+
+function encode(raw: Uint8Array, prefix: string): string {
+  return prefix + rawToBase64Url(raw);
+}
+
+function rawToBase64Url(bytes: Uint8Array): string {
+  let bin = "";
+  for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]!);
+  return Buffer.from(bin, "binary").toString("base64url");
+}

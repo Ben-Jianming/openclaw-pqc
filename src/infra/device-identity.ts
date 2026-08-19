@@ -1,4 +1,19 @@
-// Gateway/device Ed25519 identity API backed by canonical shared SQLite state.
+// Gateway/device ML-DSA-65 (FIPS 204) identity API backed by canonical shared SQLite state.
+//
+// M2 (PQC migration, whitepaper 2.1): Ed25519 device identity has been removed.
+// All public functions in this module now speak ML-DSA-65 (FIPS 204) only.
+//
+// Wire format used for stored PEM-shaped fields:
+//   publicKeyPem  = "MLDSA65-PUBLIC-KEY:" + base64url(raw 1952 bytes)
+//   privateKeyPem = "MLDSA65-SECRET-KEY:" + base64url(raw 4032 bytes)
+//
+// Sign/verify always operates on the raw 1952/4032 bytes; the prefix is for
+// storage disambiguation only (FIPS 204 does not natively understand prefixes).
+//
+// @noble/post-quantum uses hedged mode (FIPS 204 §5.3, NIST-recommended), so each
+// sign() call automatically mixes in 32 fresh random bytes — signatures are
+// non-deterministic by design.
+
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
@@ -16,11 +31,17 @@ import {
   type StoredDeviceIdentity,
 } from "./device-identity-store.js";
 import {
-  normalizeEd25519PublicKeyBase64Url,
-  publicKeyRawBase64UrlFromEd25519Pem,
-  signEd25519Payload,
-  verifyEd25519Signature,
-} from "./ed25519-signature.js";
+  decodeMlDsa65PublicKey,
+  decodeMlDsa65SecretKey,
+  encodeMlDsa65PublicKey,
+  MLDSA65_PUBLIC_KEY_BYTES,
+  MLDSA65_PUBLIC_KEY_PREFIX,
+  MLDSA65_SECRET_KEY_BYTES,
+  MLDSA65_SECRET_KEY_PREFIX,
+  MLDSA65_SIGNATURE_BYTES,
+  signMlDsa65Payload as signMlDsa65PayloadImpl,
+  verifyMlDsa65Signature as verifyMlDsa65SignatureImpl,
+} from "./mldsa65-key-storage.js";
 
 export type { DeviceIdentity } from "./device-identity-store.js";
 
@@ -179,107 +200,137 @@ export function loadDeviceIdentityIfPresent(
   });
 }
 
-/** Sign a UTF-8 payload with a PEM Ed25519 private key and return base64url bytes. */
+/** Sign a UTF-8 payload with an ML-DSA-65 secret key (MLDSA65-SECRET-KEY prefixed). */
 export function signDevicePayload(privateKeyPem: string, payload: string): string {
-  return signEd25519Payload(privateKeyPem, payload);
+  if (typeof privateKeyPem !== "string") {
+    throw new Error("ML-DSA-65 secret key must be a string");
+  }
+  if (!privateKeyPem.startsWith(MLDSA65_SECRET_KEY_PREFIX)) {
+    throw new Error(
+      `Device secret key must be prefixed with "${MLDSA65_SECRET_KEY_PREFIX}" (ML-DSA-65, FIPS 204).`,
+    );
+  }
+  // Defensive: confirm the prefix payload actually decodes before signing.
+  decodeMlDsa65SecretKey(privateKeyPem);
+  return signMlDsa65PayloadImpl(privateKeyPem, payload);
 }
 
-/** Normalize PEM or raw base64/base64url public keys to canonical raw base64url bytes. */
+/**
+ * Try to interpret `base64Url` as a raw base64url-encoded ML-DSA-65 public
+ * key (no prefix, exactly 1952 decoded bytes). Returns null on any decode or
+ * length mismatch.
+ */
+function tryDecodeRawMlDsa65PublicKey(base64Url: string): Uint8Array | null {
+  try {
+    const raw = Buffer.from(base64Url, "base64url");
+    if (raw.length !== MLDSA65_PUBLIC_KEY_BYTES) {
+      return null;
+    }
+    return new Uint8Array(raw);
+  } catch {
+    return null;
+  }
+}
+
+/** Normalize ML-DSA-65 public key (PEM-prefixed or raw base64url) to canonical prefixed form. */
 export function normalizeDevicePublicKeyBase64Url(publicKey: string): string | null {
-  return normalizeEd25519PublicKeyBase64Url(publicKey);
+  if (typeof publicKey !== "string" || publicKey.length === 0) {
+    return null;
+  }
+  if (publicKey.startsWith(MLDSA65_PUBLIC_KEY_PREFIX)) {
+    try {
+      const raw = decodeMlDsa65PublicKey(publicKey);
+      return encodeMlDsa65PublicKey(raw);
+    } catch {
+      return null;
+    }
+  }
+  // Try raw base64url ML-DSA-65 public key (1952 bytes after decode).
+  const raw = tryDecodeRawMlDsa65PublicKey(publicKey);
+  if (!raw) {
+    return null;
+  }
+  return encodeMlDsa65PublicKey(raw);
 }
 
-/** Derive the stable device id from PEM or raw base64/base64url public key material. */
+/** Derive the stable device id from an ML-DSA-65 public key (PEM-prefixed or raw base64url). */
 export function deriveDeviceIdFromPublicKey(publicKey: string): string | null {
   try {
-    const normalized = normalizeEd25519PublicKeyBase64Url(publicKey);
+    const normalized = normalizeDevicePublicKeyBase64Url(publicKey);
     if (!normalized) {
       return null;
     }
-    const raw = Buffer.from(normalized, "base64url");
+    const raw = decodeMlDsa65PublicKey(normalized);
+    if (raw.length !== MLDSA65_PUBLIC_KEY_BYTES) {
+      return null;
+    }
     return crypto.createHash("sha256").update(raw).digest("hex");
   } catch {
     return null;
   }
 }
 
-/** Export a PEM Ed25519 public key as canonical raw base64url bytes. */
+/** Export an ML-DSA-65 prefixed public key as canonical raw base64url bytes (no prefix). */
 export function publicKeyRawBase64UrlFromPem(publicKeyPem: string): string {
-  return publicKeyRawBase64UrlFromEd25519Pem(publicKeyPem);
+  if (typeof publicKeyPem !== "string") {
+    throw new Error("ML-DSA-65 public key must be a string");
+  }
+  if (!publicKeyPem.startsWith(MLDSA65_PUBLIC_KEY_PREFIX)) {
+    throw new Error(
+      `Device public key must be prefixed with "${MLDSA65_PUBLIC_KEY_PREFIX}" (ML-DSA-65, FIPS 204).`,
+    );
+  }
+  const raw = decodeMlDsa65PublicKey(publicKeyPem);
+  if (raw.length !== MLDSA65_PUBLIC_KEY_BYTES) {
+    throw new Error(
+      `ML-DSA-65 public key must be ${MLDSA65_PUBLIC_KEY_BYTES} bytes, got ${raw.length}`,
+    );
+  }
+  return mldsaRawToBase64Url(raw);
 }
 
-/** Verify a UTF-8 payload signature against PEM or raw base64/base64url public key material. */
+function mldsaRawToBase64Url(bytes: Uint8Array): string {
+  let bin = "";
+  for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]!);
+  return Buffer.from(bin, "binary").toString("base64url");
+}
+
+/** Verify a UTF-8 payload signature against an ML-DSA-65 public key. */
 export function verifyDeviceSignature(
   publicKey: string,
   payload: string,
   signatureBase64Url: string,
 ): boolean {
-  return verifyEd25519Signature({ publicKey, payload, signatureBase64Url });
+  if (typeof publicKey !== "string" || publicKey.length === 0) {
+    return false;
+  }
+  let prefixed: string;
+  if (publicKey.startsWith(MLDSA65_PUBLIC_KEY_PREFIX)) {
+    prefixed = publicKey;
+  } else {
+    const raw = tryDecodeRawMlDsa65PublicKey(publicKey);
+    if (!raw) {
+      return false;
+    }
+    prefixed = encodeMlDsa65PublicKey(raw);
+  }
+  return verifyMlDsa65SignatureImpl({
+    publicKey: prefixed,
+    payload,
+    sigBase64Url: signatureBase64Url,
+  });
 }
 
-// === PQC extension (OpenClaw-PQC v0.1) ===
-import { getCryptoProvider, type Key } from "./crypto/index.js";
-export interface DeviceIdentityV2 {
-  v: 2;
-  deviceId: string;
-  ed25519: { publicKey: string; privateKey: string };
-  mlDsa44: { publicKey: string; privateKey: string };
-  createdAtMs: number;
-  migratedFromV1AtMs?: number;
-}
-export async function ensureDeviceIdentityMlDsa44(stateDir: string): Promise<DeviceIdentityV2> {
-  const fs = await import("node:fs/promises");
-  const path = await import("node:path");
-  const p = path.join(stateDir, "identity", "device.json");
-  let ex: any = null;
-  try {
-    ex = JSON.parse(await fs.readFile(p, "utf-8"));
-  } catch (e) {}
-  if (ex?.v === 2 && ex.mlDsa44) return ex;
-  const provider = await getCryptoProvider();
-  let edPk: Uint8Array, edSk: Uint8Array;
-  if (ex?.v === 1) {
-    edPk = Buffer.from(ex.publicKey, "base64url");
-    edSk = Buffer.from(ex.privateKey, "base64url");
-  } else {
-    edSk = provider.randomBytes(32);
-    const { ed25519 } = await import("@noble/curves/ed25519");
-    edPk = ed25519.getPublicKey(edSk);
-  }
-  const { ml_dsa44 } = await import("@noble/post-quantum/ml-dsa.js");
-  const k = ml_dsa44.keygen();
-  const { sha256 } = await import("@noble/hashes/sha2");
-  const id: DeviceIdentityV2 = {
-    v: 2,
-    deviceId: Buffer.from(sha256(edPk)).toString("hex"),
-    ed25519: {
-      publicKey: Buffer.from(edPk).toString("base64url"),
-      privateKey: Buffer.from(edSk).toString("base64url"),
-    },
-    mlDsa44: {
-      publicKey: Buffer.from(k.publicKey).toString("base64url"),
-      privateKey: Buffer.from(k.secretKey).toString("base64url"),
-    },
-    createdAtMs: ex?.createdAtMs ?? Date.now(),
-    migratedFromV1AtMs: ex?.v === 1 ? Date.now() : undefined,
-  };
-  await fs.mkdir(path.dirname(p), { recursive: true });
-  await fs.writeFile(p, JSON.stringify(id, null, 2), { mode: 0o600 });
-  return id;
-}
-export async function signDevicePayloadMlDsa44(priv: string, payload: string): Promise<string> {
-  const p = await getCryptoProvider();
-  const m = new TextEncoder().encode(payload);
-  const k: Key = { alg: "ml-dsa-44", material: Buffer.from(priv, "base64url"), kind: "private" };
-  return Buffer.from(await p.sign("ml-dsa-44", k, m)).toString("base64url");
-}
-export async function verifyDeviceSignatureMlDsa44(
-  pub: string,
-  payload: string,
-  sig: string,
-): Promise<boolean> {
-  const p = await getCryptoProvider();
-  const m = new TextEncoder().encode(payload);
-  const k: Key = { alg: "ml-dsa-44", material: Buffer.from(pub, "base64url"), kind: "public" };
-  return p.verify("ml-dsa-44", k, m, Buffer.from(sig, "base64url"));
-}
+// Re-export MLDSA-65 size constants and prefixes for downstream consumers
+// that need to validate wire shapes without taking a hard dependency on the
+// mldsa65-key-storage module.
+export {
+  MLDSA65_PUBLIC_KEY_BYTES,
+  MLDSA65_PUBLIC_KEY_PREFIX,
+  MLDSA65_SECRET_KEY_BYTES,
+  MLDSA65_SECRET_KEY_PREFIX,
+  MLDSA65_SIGNATURE_BYTES,
+};
+
+// Silence "imported but unused" for symbols that exist for documentation only.
+void decodeMlDsa65SecretKey;
