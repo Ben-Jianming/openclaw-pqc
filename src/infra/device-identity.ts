@@ -31,6 +31,10 @@ import {
   type StoredDeviceIdentity,
 } from "./device-identity-store.js";
 import {
+  decodeBase64UrlKey,
+  type SyncWrappingKeyProvider,
+} from "../security/keyring-provider.js";
+import {
   decodeMlDsa65PublicKey,
   decodeMlDsa65SecretKey,
   encodeMlDsa65PublicKey,
@@ -141,17 +145,61 @@ function withDeviceIdentityCoordinator<T>(
   return result;
 }
 
+/**
+ * Build a SyncWrappingKeyProvider from OPENCLAW_PQC_WRAP_KEY[_ID] env vars.
+ * Returns undefined if neither var is set, which triggers the plaintext path
+ * (a startup warning is logged in that case).
+ *
+ * We use a custom inline provider rather than EnvKeyring because EnvKeyring
+ * hardcodes the env var name as the keyId, which would force the user to
+ * set OPENCLAW_PQC_WRAP_KEY_ID = "OPENCLAW_PQC_WRAP_KEY". The env var name
+ * is an implementation detail; users set a logical keyId via
+ * OPENCLAW_PQC_WRAP_KEY_ID.
+ */
+function resolveDeviceIdentityKeyring(
+  env: NodeJS.ProcessEnv = process.env,
+): SyncWrappingKeyProvider | undefined {
+  const raw = env.OPENCLAW_PQC_WRAP_KEY?.trim();
+  if (!raw) {
+    return undefined;
+  }
+  if (!/^[A-Za-z0-9_-]+$/.test(raw)) {
+    throw new Error(
+      "OPENCLAW_PQC_WRAP_KEY must be base64url (A-Z a-z 0-9 _ -); got: " + raw.slice(0, 16) + "...",
+    );
+  }
+  const keyId = env.OPENCLAW_PQC_WRAP_KEY_ID?.trim() || "env-default";
+  const decode = () => decodeBase64UrlKey(raw);
+  return {
+    getActiveKey: () => ({ keyId, key: decode() }),
+    getKeyById: (id: string) => (id === keyId ? { keyId, key: decode() } : null),
+  };
+}
+
 function loadOrCreateDeviceIdentityOwned(options: DeviceIdentityStoreOptions): DeviceIdentity {
   assertNoPendingLegacyIdentity(options);
-  const existing = readStoredDeviceIdentity(options);
+  // Resolve wrap keyring from env. If absent, the device identity will be
+  // stored with the ML-DSA-65 private key in plaintext (M5 fallback path).
+  // Operators must set OPENCLAW_PQC_WRAP_KEY in production deployments.
+  const wrappingKeyProvider = resolveDeviceIdentityKeyring(options.env ?? process.env);
+  if (!wrappingKeyProvider) {
+    process.stderr.write(
+      "[openclaw][PQC] WARNING: device identity will be stored with ML-DSA-65 private key in plaintext. " +
+      "Set OPENCLAW_PQC_WRAP_KEY (32-byte base64url) and OPENCLAW_PQC_WRAP_KEY_ID env vars to enable wrap. " +
+      "See docs/security/pqc-whitepaper.md §2.2.1.\n",
+    );
+  }
+  const readOptions = { ...options, wrappingKeyProvider };
+
+  const existing = readStoredDeviceIdentity(readOptions);
   if (existing) {
     return toDeviceIdentity(existing);
   }
 
   // Generate outside the write transaction. The transaction rereads the row
   // before inserting so concurrent runtimes converge on one authoritative key.
-  const candidate = generateStoredDeviceIdentity();
-  return toDeviceIdentity(insertStoredDeviceIdentityIfAbsent(candidate, options));
+  const candidate = generateStoredDeviceIdentity({ wrappingKeyProvider });
+  return toDeviceIdentity(insertStoredDeviceIdentityIfAbsent(candidate, readOptions));
 }
 
 /** Load a valid canonical identity or atomically create its SQLite row. */
