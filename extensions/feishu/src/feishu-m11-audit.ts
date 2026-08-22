@@ -150,9 +150,11 @@ export function auditFeishuSendWithM11(
     const ed = getOrCreateEd25519Key(env);
     const mldsa = getOrCreateMldsaKey(env);
     // Ed25519 sign (deterministic per RFC 8032)
-    const edSig = ed25519.sign(content, ed.secretRaw);
-    // ML-DSA-65 sign (hedged, randomized)
+    // @noble/curves ed25519.sign expects msg as Uint8Array (or hex string).
+    // Our content is UTF-8 text, so encode it explicitly.
     const messageBytes = new TextEncoder().encode(content);
+    const edSig = ed25519.sign(messageBytes, ed.secretRaw);
+    // ML-DSA-65 sign (hedged, randomized)
     const mldsaSig = ml_dsa65.sign(messageBytes, mldsa.secretRaw);
     if (mldsaSig.length !== MLDSA65_SIG_BYTES) {
       throw new Error(
