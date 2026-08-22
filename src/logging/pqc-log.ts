@@ -17,6 +17,7 @@ export const PQC_EVENT = [
   "backup",
   "restore",
   "doctor",
+  "push-signature",
 ] as const;
 
 export type PqcEvent = (typeof PQC_EVENT)[number];
