@@ -14,6 +14,7 @@ import {
   signDevicePayload,
   type DeviceIdentity,
 } from "./device-identity.js";
+import { buildApnsRelayM11Audit } from "./push-apns-relay-m11.js";
 import { formatErrorMessage } from "./errors.js";
 import { readResponseWithLimit } from "./http-body.js";
 import { normalizeHostname } from "./net/hostname.js";
@@ -399,6 +400,14 @@ export async function sendApnsRelayPush(params: {
       bodyJson,
     }),
   );
+
+  // M11 (PQC migration): compute the M11 dual-signature envelope over the
+  // exact bodyJson for our local audit trail (pqcLog). The wire body is
+  // unchanged (existing receiver expects MLDSA-65-only `signature`).
+  // danteng §M11.3 — never drop a push because of PQC error, so
+  // fail-soft (trySignPushEnvelope already handles this).
+  buildApnsRelayM11Audit(bodyJson, gatewayIdentity.deviceId);
+
   return await sender({
     relayConfig: params.relayConfig,
     sendGrant: params.sendGrant,
