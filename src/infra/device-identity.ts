@@ -46,6 +46,7 @@ import {
   signMlDsa65Payload as signMlDsa65PayloadImpl,
   verifyMlDsa65Signature as verifyMlDsa65SignatureImpl,
 } from "./mldsa65-key-storage.js";
+import { pqcLog } from "../logging/pqc-log.js";
 
 export type { DeviceIdentity } from "./device-identity-store.js";
 
@@ -146,19 +147,58 @@ function withDeviceIdentityCoordinator<T>(
 }
 
 /**
- * Build a SyncWrappingKeyProvider from OPENCLAW_PQC_WRAP_KEY[_ID] env vars.
- * Returns undefined if neither var is set, which triggers the plaintext path
- * (a startup warning is logged in that case).
+ * Build a SyncWrappingKeyProvider from wrap env vars. Returns undefined if
+ * neither var is set, which triggers the plaintext path (a startup warning
+ * is logged in that case).
  *
- * We use a custom inline provider rather than EnvKeyring because EnvKeyring
- * hardcodes the env var name as the keyId, which would force the user to
- * set OPENCLAW_PQC_WRAP_KEY_ID = "OPENCLAW_PQC_WRAP_KEY". The env var name
- * is an implementation detail; users set a logical keyId via
- * OPENCLAW_PQC_WRAP_KEY_ID.
+ * Resolution order (first wins):
+ *   1. OPENCLAW_WRAP_KEY_FILE (M15.B, v3-style) - absolute path to a chmod 0600
+ *      file containing a 32-byte base64url AES-256 key on the first line.
+ *      Read at provider construction time, not cached.
+ *   2. OPENCLAW_PQC_WRAP_KEY (M5 v2, v2-style) - raw 32-byte base64url value
+ *      in env. Backward compatible with all existing deployments.
+ *
+ * The file path is preferred because:
+ *   - It survives shell history (raw env values have been leaked 3 times)
+ *   - It enables chmod 0600 enforcement as a security gate (not stat-guard)
+ *   - It is the format used by danteng v3 fork and by FileKeyring class in src
+ *
+ * We use a custom inline provider (read-once + closure decode) rather than
+ * the FileKeyring class because FileKeyring expects a JSON shape
+ * (keys + activeKeyId); for the single-key v3 use case we only need a
+ * raw base64url string.
  */
 function resolveDeviceIdentityKeyring(
   env: NodeJS.ProcessEnv = process.env,
 ): SyncWrappingKeyProvider | undefined {
+  // M15.B: v3-style file-based wrap takes precedence.
+  const wrapKeyFile = env.OPENCLAW_WRAP_KEY_FILE?.trim();
+  if (wrapKeyFile) {
+    if (!path.isAbsolute(wrapKeyFile)) {
+      throw new Error(
+        `OPENCLAW_WRAP_KEY_FILE must be absolute; got: ${wrapKeyFile}`,
+      );
+    }
+    const stat = fs.statSync(wrapKeyFile);
+    if ((stat.mode & 0o777) !== 0o600) {
+      throw new Error(
+        `OPENCLAW_WRAP_KEY_FILE ${wrapKeyFile} must be chmod 0600; got 0o${(stat.mode & 0o777).toString(8)}`,
+      );
+    }
+    const raw = fs.readFileSync(wrapKeyFile, "utf8").trim();
+    if (!/^[A-Za-z0-9_-]+$/.test(raw)) {
+      throw new Error(
+        "OPENCLAW_WRAP_KEY_FILE contents must be base64url (A-Z a-z 0-9 _ -); got: " + raw.slice(0, 16) + "...",
+      );
+    }
+    const keyId = env.OPENCLAW_PQC_WRAP_KEY_ID?.trim() || "file-default";
+    const decode = () => decodeBase64UrlKey(raw);
+    return {
+      getActiveKey: () => ({ keyId, key: decode() }),
+      getKeyById: (id: string) => (id === keyId ? { keyId, key: decode() } : null),
+    };
+  }
+  // M5 v2: v2-style inline env value path (backward compatible).
   const raw = env.OPENCLAW_PQC_WRAP_KEY?.trim();
   if (!raw) {
     return undefined;
@@ -182,24 +222,66 @@ function loadOrCreateDeviceIdentityOwned(options: DeviceIdentityStoreOptions): D
   // stored with the ML-DSA-65 private key in plaintext (M5 fallback path).
   // Operators must set OPENCLAW_PQC_WRAP_KEY in production deployments.
   const wrappingKeyProvider = resolveDeviceIdentityKeyring(options.env ?? process.env);
-  if (!wrappingKeyProvider) {
+  const wrapEnvEnabled = wrappingKeyProvider !== undefined;
+  if (!wrapEnvEnabled) {
     process.stderr.write(
       "[openclaw][PQC] WARNING: device identity will be stored with ML-DSA-65 private key in plaintext. " +
       "Set OPENCLAW_PQC_WRAP_KEY (32-byte base64url) and OPENCLAW_PQC_WRAP_KEY_ID env vars to enable wrap. " +
       "See docs/security/pqc-whitepaper.md §2.2.1.\n",
     );
+    // M17: emit pqcLog so dashboard can see wrap-disabled state at startup
+    pqcLog.warn({
+      event: "device-identity",
+      status: "fail",
+      identityKey: PRIMARY_DEVICE_IDENTITY_KEY,
+      detail: "wrap env unavailable, falling back to plaintext storage (set OPENCLAW_PQC_WRAP_KEY to enable)",
+    });
   }
   const readOptions = { ...options, wrappingKeyProvider };
 
   const existing = readStoredDeviceIdentity(readOptions);
   if (existing) {
+    // M17: emit pqcLog so dashboard can see device-identity activity.
+    // Distinguish: row state (actual wrap) vs env state (config intent).
+    const rowIsWrapped = existing.mldsaPrivateKeyWrapped != null;
+    let detail: string;
+    let status: "ok" | "fail";
+    if (rowIsWrapped && wrapEnvEnabled) {
+      detail = "loaded existing wrapped identity (M2+M4 active)";
+      status = "ok";
+    } else if (rowIsWrapped && !wrapEnvEnabled) {
+      detail = "loaded existing wrapped identity, env has no wrap (M5 fallback would kick in on next generate)";
+      status = "ok";
+    } else if (!rowIsWrapped && wrapEnvEnabled) {
+      detail = "loaded existing legacy plaintext identity (env has wrap but row is plaintext, M15 task to migrate)";
+      status = "ok";  // load succeeded, just legacy state
+    } else {
+      detail = "loaded existing legacy plaintext identity (no wrap, M5 fallback)";
+      status = "ok";
+    }
+    pqcLog.info({
+      event: "device-identity",
+      status,
+      identityKey: existing.identityKey,
+      detail,
+    });
     return toDeviceIdentity(existing);
   }
 
   // Generate outside the write transaction. The transaction rereads the row
   // before inserting so concurrent runtimes converge on one authoritative key.
   const candidate = generateStoredDeviceIdentity({ wrappingKeyProvider });
-  return toDeviceIdentity(insertStoredDeviceIdentityIfAbsent(candidate, readOptions));
+  const created = insertStoredDeviceIdentityIfAbsent(candidate, readOptions);
+  // M17: emit pqcLog on first-time generation
+  pqcLog.info({
+    event: "device-identity",
+    status: "ok",
+    identityKey: PRIMARY_DEVICE_IDENTITY_KEY,
+    detail: wrapEnvEnabled
+      ? "generated and wrapped new identity (M2+M4+M5 v2 active)"
+      : "generated new identity in plaintext (M5 fallback)",
+  });
+  return toDeviceIdentity(created);
 }
 
 /** Load a valid canonical identity or atomically create its SQLite row. */
