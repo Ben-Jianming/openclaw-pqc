@@ -36,10 +36,21 @@ beforeEach(async () => {
   delete process.env.OPENCLAW_PUSH_SIGNING_KEY_FILE;
   pqcLogCalls = [];
 
-  // Mock pqcLog
+  // Mock pqcLog (real API: object with .info/.warn/.error/.debug methods)
   vi.doMock("../logging/pqc-log.js", () => ({
-    pqcLog: (level: string, payload: Record<string, unknown>) => {
-      pqcLogCalls.push({ level, payload });
+    pqcLog: {
+      info: (payload: Record<string, unknown>) => {
+        pqcLogCalls.push({ level: "info", payload });
+      },
+      warn: (payload: Record<string, unknown>) => {
+        pqcLogCalls.push({ level: "warn", payload });
+      },
+      error: (payload: Record<string, unknown>) => {
+        pqcLogCalls.push({ level: "error", payload });
+      },
+      debug: (payload: Record<string, unknown>) => {
+        pqcLogCalls.push({ level: "debug", payload });
+      },
     },
   }));
 

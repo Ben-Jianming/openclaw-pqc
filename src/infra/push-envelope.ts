@@ -67,7 +67,7 @@ export function signPushEnvelope(options: SignPushEnvelopeOptions): SignPushEnve
     keyIdMldsa65,
   });
 
-  pqcLog("info", {
+  pqcLog.info({
     event: "push-signature",
     status: "ok",
     detail: "signed M11 dual signature envelope (Ed25519 + ML-DSA-65)",
@@ -97,7 +97,7 @@ export function trySignPushEnvelope(options: SignPushEnvelopeOptions): SignPushE
     return signPushEnvelope(options);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    pqcLog("warn", {
+    pqcLog.warn({
       event: "push-signature",
       status: "fail",
       detail: "M11 envelope signing failed; caller should fall back to unsigned",
