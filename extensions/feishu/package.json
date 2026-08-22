@@ -9,6 +9,8 @@
   "type": "module",
   "dependencies": {
     "@larksuiteoapi/node-sdk": "1.71.1",
+    "@noble/curves": "^1.9.7",
+    "@noble/post-quantum": "^0.5.4",
     "mdast-util-from-markdown": "2.0.3",
     "mdast-util-gfm-table": "2.0.0",
     "micromark-extension-gfm-table": "2.1.1",
@@ -45,16 +47,18 @@
         }
       },
       "label": "Feishu",
-      "selectionLabel": "Feishu/Lark (飞书)",
+      "selectionLabel": "Feishu/Lark (\u98de\u4e66)",
       "docsPath": "/channels/feishu",
       "docsLabel": "feishu",
-      "blurb": "飞书/Lark enterprise messaging with doc/wiki/drive tools.",
+      "blurb": "\u98de\u4e66/Lark enterprise messaging with doc/wiki/drive tools.",
       "aliases": [
         "lark"
       ],
       "order": 35,
       "quickstartAllowFrom": true,
-      "setup": { "fields": [] }
+      "setup": {
+        "fields": []
+      }
     },
     "install": {
       "npmSpec": "@openclaw/feishu",
