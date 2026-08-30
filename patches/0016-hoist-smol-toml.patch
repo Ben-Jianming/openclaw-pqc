@@ -1,0 +1,42 @@
+From 5d5b39455ae7df6b8062f399a48701dc8f2980a2 Mon Sep 17 00:00:00 2001
+From: wu <wuc8974@gmail.com>
+Date: Thu, 20 Aug 2026 23:43:09 +0800
+Subject: [PATCH] fix(build): hoist smol-toml for codex plugin
+
+Same class of issue as M12 v2 + feishu-deploy: workspace-package deps not hoisted to root. extensions/codex requires smol-toml but it was only in deep .pnpm paths.
+
+After this commit, codex plugin loads alongside feishu.
+---
+ package.json   | 1 +
+ pnpm-lock.yaml | 3 +++
+ 2 files changed, 4 insertions(+)
+
+diff --git a/package.json b/package.json
+index df223ea995b..42d1589f0a8 100644
+--- a/package.json
++++ b/package.json
+@@ -1966,6 +1966,7 @@
+     "quickjs-wasi": "3.0.2",
+     "rastermill": "0.3.1",
+     "semver": "7.8.5",
++    "smol-toml": "^1.3.0",
+     "tar": "7.5.20",
+     "tree-sitter-bash": "0.25.1",
+     "tslog": "4.10.2",
+diff --git a/pnpm-lock.yaml b/pnpm-lock.yaml
+index b0eb7d177a7..1f971adfe2f 100644
+--- a/pnpm-lock.yaml
++++ b/pnpm-lock.yaml
+@@ -209,6 +209,9 @@ importers:
+       semver:
+         specifier: 7.8.5
+         version: 7.8.5
++      smol-toml:
++        specifier: ^1.3.0
++        version: 1.7.0
+       tar:
+         specifier: 7.5.20
+         version: 7.5.20
+-- 
+2.43.0
+

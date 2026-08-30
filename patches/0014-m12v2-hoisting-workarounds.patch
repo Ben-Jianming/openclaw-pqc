@@ -1,0 +1,71 @@
+From 37007e9b61e4ff0738245ffe7ede72d8443024e4 Mon Sep 17 00:00:00 2001
+From: wu <wuc8974@gmail.com>
+Date: Thu, 20 Aug 2026 11:55:20 +0800
+Subject: [PATCH] fix(build): pnpm hoisting workarounds + Shai-Hulud dep
+ override
+
+After a git clean -fdx wiped node_modules, 5 transitive deps stopped being resolvable from the workspace root because their consumers live in deep node_modules/.pnpm paths. Hoist them to direct dependencies:
+
+  @discord/embedded-app-sdk@2.5.0
+
+  @noble/ed25519@3.1.0
+
+  @pierre/diffs@1.2.12
+
+  @shikijs/langs@4.3.1
+
+  @shikijs/themes@^4.4.3
+
+  @shikijs/transformers@^4.4.3
+
+Add pnpm.overrides.fetch-blob = ^4.0.0 to skip the Shai-Hulud-worm node-domexception@1.0.28 typosquat that the legacy lockfile still references from fetch-blob 3.2.0.
+
+pnpm install with this commit runs to completion (no-op, packages are already in the lockfile). pnpm build remains green.
+---
+ package.json | 13 ++++++++++++-
+ 1 file changed, 12 insertions(+), 1 deletion(-)
+
+diff --git a/package.json b/package.json
+index 146dd8775be..451942fdf25 100644
+--- a/package.json
++++ b/package.json
+@@ -1892,6 +1892,7 @@
+     "@anthropic-ai/sdk": "0.112.3",
+     "@clack/core": "1.4.3",
+     "@clack/prompts": "1.7.0",
++    "@discord/embedded-app-sdk": "2.5.0",
+     "@earendil-works/pi-tui": "0.80.10",
+     "@google/genai": "2.12.0",
+     "@grammyjs/runner": "2.0.3",
+@@ -1902,11 +1903,16 @@
+     "@modelcontextprotocol/sdk": "1.29.0",
+     "@mozilla/readability": "0.6.0",
+     "@noble/curves": "^1.9.7",
++    "@noble/ed25519": "3.1.0",
+     "@noble/hashes": "^1.8.0",
+     "@noble/post-quantum": "^0.5.4",
+     "@openclaw/ai": "workspace:*",
+     "@openclaw/fs-safe": "0.4.7",
+     "@openclaw/proxyline": "0.3.4",
++    "@pierre/diffs": "1.2.12",
++    "@shikijs/langs": "4.3.1",
++    "@shikijs/themes": "^4.4.3",
++    "@shikijs/transformers": "^4.4.3",
+     "@silvia-odwyer/photon-node": "0.3.4",
+     "chalk": "5.6.2",
+     "chokidar": "5.0.0",
+@@ -2002,5 +2008,10 @@
+   "engines": {
+     "node": ">=22.22.3 <23 || >=24.15.0 <25 || >=25.9.0"
+   },
+-  "packageManager": "pnpm@11.15.1+sha512.81350b07e53c9538a02f1f2303b4290fa2d7be04e56e2a970c4cc4b417dc761de196edabd49d55c7dc9580db81007c44143e4e3d7e462b3000d23c255122d065"
++  "packageManager": "pnpm@11.15.1+sha512.81350b07e53c9538a02f1f2303b4290fa2d7be04e56e2a970c4cc4b417dc761de196edabd49d55c7dc9580db81007c44143e4e3d7e462b3000d23c255122d065",
++  "pnpm": {
++    "overrides": {
++      "fetch-blob": "^4.0.0"
++    }
++  }
+ }
+-- 
+2.43.0
+

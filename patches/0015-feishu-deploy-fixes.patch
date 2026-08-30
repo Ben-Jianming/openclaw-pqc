@@ -1,0 +1,413 @@
+From d7ea083d14bc74aa93fbd0d4d0c51c42e3851a25 Mon Sep 17 00:00:00 2001
+From: wu <wuc8974@gmail.com>
+Date: Thu, 20 Aug 2026 15:37:20 +0800
+Subject: [PATCH] fix(feishu-deploy): hoist Feishu deps + 3 missing plugin-sdk
+ exports
+
+Required to load the Feishu channel at runtime. Same class of issue as M12 v2.
+
+Hoisted 5 deps to root so they get resolved from root node_modules at runtime (the Feishu extension declares them in extensions/feishu/package.json but pnpm does not hoist workspace deps):
+
+  @larksuiteoapi/node-sdk@1.71.1  (Feishu official SDK)
+
+  mdast-util-from-markdown@^2.0.0  (markdown rendering)
+
+  mdast-util-gfm-table@2.0.0
+
+  micromark-extension-gfm-table@2.1.1
+
+  typebox@1.3.6
+
+Added 3 missing plugin-sdk subpath exports (same class of issue as M12 cli-argv):
+
+  ./plugin-sdk/channel-dm-policy
+
+  ./plugin-sdk/media-local-roots
+
+  ./plugin-sdk/session-catalog-runtime
+
+After this commit, the Feishu channel loads at gateway startup. With real FEISHU_APP_ID/FEISHU_APP_SECRET env vars, the websocket connection to Feishu is attempted.
+---
+ package.json   |  16 +++++++
+ pnpm-lock.yaml | 125 +++++++++++++++++++++++++++++++++++++++----------
+ 2 files changed, 116 insertions(+), 25 deletions(-)
+
+diff --git a/package.json b/package.json
+index 451942fdf25..df223ea995b 100644
+--- a/package.json
++++ b/package.json
+@@ -354,6 +354,10 @@
+   "main": "dist/index.js",
+   "exports": {
+     ".": "./dist/index.js",
++    "./plugin-sdk/channel-dm-policy": {
++      "types": "./dist/plugin-sdk/channel-dm-policy.d.ts",
++      "default": "./dist/plugin-sdk/channel-dm-policy.js"
++    },
+     "./plugin-sdk/cli-argv": {
+       "types": "./dist/plugin-sdk/cli-argv.d.ts",
+       "default": "./dist/plugin-sdk/cli-argv.js"
+@@ -362,6 +366,10 @@
+       "types": "./dist/plugin-sdk/core.d.ts",
+       "default": "./dist/plugin-sdk/core.js"
+     },
++    "./plugin-sdk/media-local-roots": {
++      "types": "./dist/plugin-sdk/media-local-roots.d.ts",
++      "default": "./dist/plugin-sdk/media-local-roots.js"
++    },
+     "./plugin-sdk/provider-setup": {
+       "default": "./dist/plugin-sdk/provider-setup.js"
+     },
+@@ -391,6 +399,10 @@
+       "types": "./dist/plugin-sdk/proxy-capture.d.ts",
+       "default": "./dist/plugin-sdk/proxy-capture.js"
+     },
++    "./plugin-sdk/session-catalog-runtime": {
++      "types": "./dist/plugin-sdk/session-catalog-runtime.d.ts",
++      "default": "./dist/plugin-sdk/session-catalog-runtime.js"
++    },
+     "./plugin-sdk/setup": {
+       "types": "./dist/plugin-sdk/setup.d.ts",
+       "default": "./dist/plugin-sdk/setup.js"
+@@ -1898,6 +1910,7 @@
+     "@grammyjs/runner": "2.0.3",
+     "@grammyjs/transformer-throttler": "1.2.1",
+     "@homebridge/ciao": "1.3.10",
++    "@larksuiteoapi/node-sdk": "1.71.1",
+     "@lydell/node-pty": "1.2.0-beta.12",
+     "@mistralai/mistralai": "2.5.0",
+     "@modelcontextprotocol/sdk": "1.29.0",
+@@ -1935,6 +1948,9 @@
+     "jszip": "3.10.1",
+     "kysely": "0.29.4",
+     "linkedom": "0.18.13",
++    "mdast-util-from-markdown": "^2.0.0",
++    "mdast-util-gfm-table": "2.0.0",
++    "micromark-extension-gfm-table": "2.1.1",
+     "minimatch": "10.2.5",
+     "ms": "2.1.3",
+     "node-edge-tts": "1.2.10",
+diff --git a/pnpm-lock.yaml b/pnpm-lock.yaml
+index 5f3d368b50f..b0eb7d177a7 100644
+--- a/pnpm-lock.yaml
++++ b/pnpm-lock.yaml
+@@ -4,6 +4,9 @@ settings:
+   autoInstallPeers: true
+   excludeLinksFromLockfile: false
+ 
++overrides:
++  fetch-blob: ^4.0.0
++
+ importers:
+ 
+   .:
+@@ -20,6 +23,9 @@ importers:
+       '@clack/prompts':
+         specifier: 1.7.0
+         version: 1.7.0
++      '@discord/embedded-app-sdk':
++        specifier: 2.5.0
++        version: 2.5.0
+       '@earendil-works/pi-tui':
+         specifier: 0.80.10
+         version: 0.80.10
+@@ -35,6 +41,9 @@ importers:
+       '@homebridge/ciao':
+         specifier: 1.3.10
+         version: 1.3.10
++      '@larksuiteoapi/node-sdk':
++        specifier: 1.71.1
++        version: 1.71.1
+       '@lydell/node-pty':
+         specifier: 1.2.0-beta.12
+         version: 1.2.0-beta.12
+@@ -50,6 +59,9 @@ importers:
+       '@noble/curves':
+         specifier: ^1.9.7
+         version: 1.9.7
++      '@noble/ed25519':
++        specifier: 3.1.0
++        version: 3.1.0
+       '@noble/hashes':
+         specifier: ^1.8.0
+         version: 1.8.0
+@@ -65,6 +77,18 @@ importers:
+       '@openclaw/proxyline':
+         specifier: 0.3.4
+         version: 0.3.4(undici@8.6.0)
++      '@pierre/diffs':
++        specifier: 1.2.12
++        version: 1.2.12(@shikijs/themes@4.4.3)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
++      '@shikijs/langs':
++        specifier: 4.3.1
++        version: 4.3.1
++      '@shikijs/themes':
++        specifier: ^4.4.3
++        version: 4.4.3
++      '@shikijs/transformers':
++        specifier: ^4.4.3
++        version: 4.4.3
+       '@silvia-odwyer/photon-node':
+         specifier: 0.3.4
+         version: 0.3.4
+@@ -131,6 +155,15 @@ importers:
+       linkedom:
+         specifier: 0.18.13
+         version: 0.18.13
++      mdast-util-from-markdown:
++        specifier: ^2.0.0
++        version: 2.0.3
++      mdast-util-gfm-table:
++        specifier: 2.0.0
++        version: 2.0.0
++      micromark-extension-gfm-table:
++        specifier: 2.1.1
++        version: 2.1.1
+       minimatch:
+         specifier: 10.2.5
+         version: 10.2.5
+@@ -733,7 +766,7 @@ importers:
+     dependencies:
+       '@pierre/diffs':
+         specifier: 1.2.12
+-        version: 1.2.12(@shikijs/themes@4.3.1)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
++        version: 1.2.12(@shikijs/themes@4.4.3)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
+       '@shikijs/langs':
+         specifier: 4.3.1
+         version: 4.3.1
+@@ -3903,10 +3936,6 @@ packages:
+     resolution: {integrity: sha512-oGB+UxlgWcgQkgwo8GcEGwemoTFt3FIO9ababBmaGwXIoBKZ+GTy0pP185beGg7Llih/NSHSV2XAs1lnznocSg==}
+     engines: {node: '>= 8'}
+ 
+-  '@nolyfill/domexception@1.0.28':
+-    resolution: {integrity: sha512-tlc/FcYIv5i8RYsl2iDil4A0gOihaas1R5jPcIC4Zw3GhjKsVilw90aHcVlhZPTBLGBzd379S+VcnsDjd9ChiA==}
+-    engines: {node: '>=12.4.0'}
+-
+   '@npmcli/agent@5.0.2':
+     resolution: {integrity: sha512-EkzGmEsgbQ1rqWkRJe2P0oQHx/ylZozDUNPMXCklLuSFL3GY+QyEfBUjhjCsgGXzh4OGpnHvkboSQgczjP/jJg==}
+     engines: {node: ^22.22.2 || ^24.15.0 || >=26.0.0}
+@@ -4747,6 +4776,10 @@ packages:
+     resolution: {integrity: sha512-ANMDxuaPsNMdDC1m4vfvhlDmJweMwkE5XitTwrq2rWHx5jM+dlm4MmHt2PP6t0uejfR77SuhrhJ0zEijIF/uhA==}
+     engines: {node: '>=20'}
+ 
++  '@shikijs/core@4.4.3':
++    resolution: {integrity: sha512-QCR4q2ZO/ILJEuwiBMel4wdcTDb1JGwfjKTxPDF6x8ixOaluPrVqIn06C99AcRPhmYlBR56d/Fb+GN58GzExpg==}
++    engines: {node: '>=20'}
++
+   '@shikijs/engine-javascript@4.3.1':
+     resolution: {integrity: sha512-JBItcnPuYq7jVJdZo/vMj94r+szT7XEjHFX+mvFDGSEIbVAXAGyHAHzhbWzpGOwYidCZrErJLLgn2PVeiokHnQ==}
+     engines: {node: '>=20'}
+@@ -4763,18 +4796,34 @@ packages:
+     resolution: {integrity: sha512-CXQRQOYy1leqQ8ceTeJdmXv/bsUY++6QyLpXJ94LZAAYj5X2SKRdc5ipguv4NPyGVKItB2PPwUpRNe0Sjh5S1A==}
+     engines: {node: '>=20'}
+ 
++  '@shikijs/primitive@4.4.3':
++    resolution: {integrity: sha512-m0wBeLDQDeIxRdUmrCPdQqfuUamDwRL5isCfYbguKD6NiaKpVbsv+3J81DyIKgNW5h4WAIIr8T4EkgQrBBxvaQ==}
++    engines: {node: '>=20'}
++
+   '@shikijs/themes@4.3.1':
+     resolution: {integrity: sha512-dgpoJ4WqNi2yTmizQHBJ5zcX6j2lE6icN/0yt4l1kkf16jrY/pwPLoTb1ETsWMz0OBLf9ZNvwmxft+cH+N9qSA==}
+     engines: {node: '>=20'}
+ 
++  '@shikijs/themes@4.4.3':
++    resolution: {integrity: sha512-w8UHjeUnIR965KMWJHUPXOc2mNJUnK3vpVLYLvw5IYU2mnTTJ89E24OrJDBNiJDQ0qzb0tc4l7mrIXx5cFeIyw==}
++    engines: {node: '>=20'}
++
+   '@shikijs/transformers@4.3.1':
+     resolution: {integrity: sha512-z6ir0bGDgWcF2FduktEfPgIsdOtIlDiLAjFBgBzE42Q9xHbkkIXZtORHzlLVB71iZP9elEcqKg6keajvOUwE2A==}
+     engines: {node: '>=20'}
+ 
++  '@shikijs/transformers@4.4.3':
++    resolution: {integrity: sha512-oJSARV6NaWd+rnNJbtnpAdj3Zg0ZVyzsnMgb3vi3HA+35y8lBWUCpOnWsmyiXZIikY+x1BDqrQUgmxfzWh7Jvw==}
++    engines: {node: '>=20'}
++
+   '@shikijs/types@4.3.1':
+     resolution: {integrity: sha512-CHFxE0jztBIZRHH6gxXE7DXUCFXjReEGxZ/j0rfSLGKZuwp2xBYycEP14875DSa9KLL/6700oxIq6oO6ef9K2g==}
+     engines: {node: '>=20'}
+ 
++  '@shikijs/types@4.4.3':
++    resolution: {integrity: sha512-UEJxmRR++MAGR6hugn0vgVS2W/6lWAts84FFSrnlH9sP0LNol7E5+NQ792pH8liWUhyMyjhTgSUH3k7iD7tc5g==}
++    engines: {node: '>=20'}
++
+   '@shikijs/vscode-textmate@10.0.2':
+     resolution: {integrity: sha512-83yeghZ2xxin3Nj8z1NMd/NCuca+gsYXswywDy5bHvwlWL8tpTQmzGeUuHd9FC3E/SBEMvzJRwWEOz5gGes9Qg==}
+ 
+@@ -6124,9 +6173,9 @@ packages:
+       picomatch:
+         optional: true
+ 
+-  fetch-blob@3.2.0:
+-    resolution: {integrity: sha512-7yAQpD2UMJzLi1Dqv7qFYnPbaPx7ZfFK6PiIxQ4PfkGPyNyl2Ugx+a/umUonmKqjhM4DnfbMvdX6otXq83soQQ==}
+-    engines: {node: ^12.20 || >= 14.13}
++  fetch-blob@4.0.0:
++    resolution: {integrity: sha512-nPmnhRmpNMjYWnp9EBMGs6z5lq9RXed5W1vuZcECrsDVQInM8AMQSooVb3X183Aole60adzjWbH9qlRFWzDDTA==}
++    engines: {node: '>=16.7'}
+ 
+   figures@6.1.0:
+     resolution: {integrity: sha512-d+l3qxjSesT4V7v2fh+QnmFnUWv9lSpjarhShNTgBOfA0ttejbQUAlHLitbjkoRiDulW0OPoQPYIGhIC8ohejg==}
+@@ -7168,6 +7217,11 @@ packages:
+   node-api-headers@1.9.0:
+     resolution: {integrity: sha512-2oNILP4jXwRB4ywnYKjVk1YyJ96n2D4EOVJO6S3oYZ5PtbJrw3Yt9TpAuX3nBLMuzn74rnfGQrv13pS9vC+YiA==}
+ 
++  node-domexception@1.0.0:
++    resolution: {integrity: sha512-/jKZoMpw0F8GRwl4/eLROPA3cfcXtLApP0QzLmUT/HuPCZWyB7IY9ZrMeKw2O/nFIqPQB3PVM9aYm0F312AXDQ==}
++    engines: {node: '>=10.5.0'}
++    deprecated: Use your platform's native DOMException instead
++
+   node-downloader-helper@2.1.11:
+     resolution: {integrity: sha512-882fH2C9AWdiPCwz/2beq5t8FGMZK9Dx8TJUOIxzMCbvG7XUKM5BuJwN5f0NKo4SCQK6jR4p2TPm54mYGdGchQ==}
+     engines: {node: '>=14.18'}
+@@ -8478,10 +8532,6 @@ packages:
+     engines: {node: '>= 16'}
+     hasBin: true
+ 
+-  web-streams-polyfill@3.3.3:
+-    resolution: {integrity: sha512-d2JWLCivmZYTSIoge9MsgFCZrt571BikcWGYkjC1khllbTeDlGqZ2D8vD8E/lJa8WGWbb7Plm8/XJYV7IJHZZw==}
+-    engines: {node: '>= 8'}
+-
+   web-tree-sitter@0.26.11:
+     resolution: {integrity: sha512-Q5Dm3YTIXSXuH6FxX6RuzX2Qwpc4DPGiYMU87Wg5Z8OIStiQFiUex4zMDc0vBTw78EphaYJacncJghCHzbZptg==}
+ 
+@@ -10453,8 +10503,6 @@ snapshots:
+       '@nodelib/fs.scandir': 2.1.5
+       fastq: 1.20.1
+ 
+-  '@nolyfill/domexception@1.0.28': {}
+-
+   '@npmcli/agent@5.0.2':
+     dependencies:
+       agent-base: 9.0.0
+@@ -10911,10 +10959,10 @@ snapshots:
+     dependencies:
+       parse5: 7.3.0
+ 
+-  '@pierre/diffs@1.2.12(@shikijs/themes@4.3.1)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)':
++  '@pierre/diffs@1.2.12(@shikijs/themes@4.4.3)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)':
+     dependencies:
+       '@pierre/theme': 1.1.0
+-      '@pierre/theming': 0.0.2(@pierre/theme@1.1.0)(@shikijs/themes@4.3.1)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(shiki@4.3.1)
++      '@pierre/theming': 0.0.2(@pierre/theme@1.1.0)(@shikijs/themes@4.4.3)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(shiki@4.3.1)
+       '@shikijs/transformers': 4.3.1
+       diff: 9.0.0
+       hast-util-to-html: 9.0.5
+@@ -10927,10 +10975,10 @@ snapshots:
+ 
+   '@pierre/theme@1.1.0': {}
+ 
+-  '@pierre/theming@0.0.2(@pierre/theme@1.1.0)(@shikijs/themes@4.3.1)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(shiki@4.3.1)':
++  '@pierre/theming@0.0.2(@pierre/theme@1.1.0)(@shikijs/themes@4.4.3)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(shiki@4.3.1)':
+     optionalDependencies:
+       '@pierre/theme': 1.1.0
+-      '@shikijs/themes': 4.3.1
++      '@shikijs/themes': 4.4.3
+       react: 19.2.4
+       react-dom: 19.2.4(react@19.2.4)
+       shiki: 4.3.1
+@@ -11124,6 +11172,14 @@ snapshots:
+       '@types/hast': 3.0.5
+       hast-util-to-html: 9.0.5
+ 
++  '@shikijs/core@4.4.3':
++    dependencies:
++      '@shikijs/primitive': 4.4.3
++      '@shikijs/types': 4.4.3
++      '@shikijs/vscode-textmate': 10.0.2
++      '@types/hast': 3.0.5
++      hast-util-to-html: 9.0.5
++
+   '@shikijs/engine-javascript@4.3.1':
+     dependencies:
+       '@shikijs/types': 4.3.1
+@@ -11145,20 +11201,40 @@ snapshots:
+       '@shikijs/vscode-textmate': 10.0.2
+       '@types/hast': 3.0.5
+ 
++  '@shikijs/primitive@4.4.3':
++    dependencies:
++      '@shikijs/types': 4.4.3
++      '@shikijs/vscode-textmate': 10.0.2
++      '@types/hast': 3.0.5
++
+   '@shikijs/themes@4.3.1':
+     dependencies:
+       '@shikijs/types': 4.3.1
+ 
++  '@shikijs/themes@4.4.3':
++    dependencies:
++      '@shikijs/types': 4.4.3
++
+   '@shikijs/transformers@4.3.1':
+     dependencies:
+       '@shikijs/core': 4.3.1
+       '@shikijs/types': 4.3.1
+ 
++  '@shikijs/transformers@4.4.3':
++    dependencies:
++      '@shikijs/core': 4.4.3
++      '@shikijs/types': 4.4.3
++
+   '@shikijs/types@4.3.1':
+     dependencies:
+       '@shikijs/vscode-textmate': 10.0.2
+       '@types/hast': 3.0.5
+ 
++  '@shikijs/types@4.4.3':
++    dependencies:
++      '@shikijs/vscode-textmate': 10.0.2
++      '@types/hast': 3.0.5
++
+   '@shikijs/vscode-textmate@10.0.2': {}
+ 
+   '@shoelace-style/animations@1.2.0': {}
+@@ -12704,10 +12780,9 @@ snapshots:
+     optionalDependencies:
+       picomatch: 4.0.5
+ 
+-  fetch-blob@3.2.0:
++  fetch-blob@4.0.0:
+     dependencies:
+-      node-domexception: '@nolyfill/domexception@1.0.28'
+-      web-streams-polyfill: 3.3.3
++      node-domexception: 1.0.0
+ 
+   figures@6.1.0:
+     dependencies:
+@@ -12777,7 +12852,7 @@ snapshots:
+ 
+   formdata-polyfill@4.0.10:
+     dependencies:
+-      fetch-blob: 3.2.0
++      fetch-blob: 4.0.0
+ 
+   forwarded@0.2.0: {}
+ 
+@@ -14080,6 +14155,8 @@ snapshots:
+   node-api-headers@1.9.0:
+     optional: true
+ 
++  node-domexception@1.0.0: {}
++
+   node-downloader-helper@2.1.11: {}
+ 
+   node-edge-tts@1.2.10:
+@@ -14099,7 +14176,7 @@ snapshots:
+   node-fetch@3.3.2:
+     dependencies:
+       data-uri-to-buffer: 4.0.1
+-      fetch-blob: 3.2.0
++      fetch-blob: 4.0.0
+       formdata-polyfill: 4.0.10
+ 
+   node-gyp-build@4.8.4: {}
+@@ -15544,8 +15621,6 @@ snapshots:
+     transitivePeerDependencies:
+       - supports-color
+ 
+-  web-streams-polyfill@3.3.3: {}
+-
+   web-tree-sitter@0.26.11: {}
+ 
+   webidl-conversions@3.0.1: {}
+-- 
+2.43.0
+

@@ -1,0 +1,559 @@
+From 61fada3de2e3dcc64cff89b03e545420cb2d564c Mon Sep 17 00:00:00 2001
+From: wu <wuc8974@gmail.com>
+Date: Wed, 19 Aug 2026 23:28:39 +0800
+Subject: [PATCH 10/11] feat(pqc-m10): Nostr NIP-44 v2 + ML-KEM-768 hybrid
+ envelope
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+PQC migration (whitepaper 1.1): the NIP-44 v2 conversation-key KDF
+gets its 32-byte shared secret from ML-KEM-768 instead of ECDH. The
+wire format carries the new pqc2: prefix so a relay that only
+knows v1 can refuse to forward cleanly.
+
+- src/security/nip44-v2.ts:
+  - deriveConversationKey runs HKDF-SHA256 over the 32-byte shared
+    secret and returns the 76-byte OKM (32 hmac + 32 chacha + 12 nonce).
+  - pad / unpad implement the precise NIP-44 v2 padding scheme: a
+    2-byte big-endian length prefix, then the data zero-padded to the
+    next multiple of 32, with a 32-byte minimum. unpad enforces the
+    exact `padded.length % 32 === 0` modulus and the length range
+    before the structural sanity check.
+  - ChaCha20 encryption uses the IETF variant via Node's
+    chacha20 cipher with a synthesised 16-byte IV (4-byte counter=0
+    + 12-byte nonce), matching RFC 8439 §2.4.
+  - HMAC-SHA256 MAC binds the ML-KEM ciphertext and the ChaCha20
+    ciphertext together; verification uses constant-time compare.
+  - encryptNip44V2 / decryptNip44V2 round-trip through the pqc2: wire
+    format. isPqcNip44Envelope auto-detects the prefix.
+  - All length and structural checks fail closed with a typed
+    Nip44V2Error that is safe to catch in higher-level handlers.
+- src/security/nip44-v2.test.ts: 18 invariants - canonical constants,
+  prefix auto-detect, OKM length + 32-byte shared-secret guard,
+  padding on 1/30/33-byte plaintexts and round-trip, length-field
+  range and structural checks, ChaCha20 round-trip, ML-KEM-768
+  ciphertext length validation, pqc2: format detection, MAC failure
+  on each field of the wire (kem ct / chacha ct / mac), wrong-shape
+  envelope rejection, and a tampered-ciphertext integration check.
+
+18/18 green.
+
+Generated with Mavis
+---
+ src/security/nip44-v2.test.ts | 184 ++++++++++++++++++++
+ src/security/nip44-v2.ts      | 311 ++++++++++++++++++++++++++++++++++
+ 2 files changed, 495 insertions(+)
+ create mode 100755 src/security/nip44-v2.test.ts
+ create mode 100755 src/security/nip44-v2.ts
+
+diff --git a/src/security/nip44-v2.test.ts b/src/security/nip44-v2.test.ts
+new file mode 100755
+index 00000000000..cc5b6cc39bc
+--- /dev/null
++++ b/src/security/nip44-v2.test.ts
+@@ -0,0 +1,184 @@
++// M10 (PQC migration, whitepaper 1.1): Nostr NIP-44 v2 + ML-KEM-768 invariants.
++//
++// 17 invariants covering: round-trip on a representative plaintext, the
++// HKDF conversation-key derivation shape, the precise NIP-44 v2 padding
++// modulus (padded.length - 2) % 32, ChaCha20 round-trip, ML-KEM-768
++// encapsulation/decapsulation, the pqc2: wire format, MAC failure when
++// any single byte of the wire is tampered with, ML-KEM-768 ciphertext
++// length validation, and auto-detection of the envelope.
++import { randomBytes } from "node:crypto";
++import { ml_kem768 } from "@noble/post-quantum/ml-kem.js";
++import { afterEach, describe, expect, it } from "vitest";
++import {
++  decryptNip44V2,
++  deriveConversationKey,
++  encryptNip44V2,
++  isPqcNip44Envelope,
++  Nip44V2Error,
++  NIP44_V2_PQC,
++  pad,
++  unpad,
++} from "./nip44-v2.js";
++
++afterEach(() => {
++  // no-op
++});
++
++function genMlKem768Keypair(): { publicKey: Uint8Array; secretKey: Uint8Array } {
++  return ml_kem768.keygen();
++}
++
++describe("nip44-v2 (M10, whitepaper 1.1)", () => {
++  it("exposes the canonical constants for the hybrid envelope", () => {
++    expect(NIP44_V2_PQC.PREFIX).toBe("pqc2:");
++    expect(NIP44_V2_PQC.HMAC_KEY_LEN).toBe(32);
++    expect(NIP44_V2_PQC.CHACHA_KEY_LEN).toBe(32);
++    expect(NIP44_V2_PQC.CHACHA_IV_LEN).toBe(12);
++    expect(NIP44_V2_PQC.PAD_ALIGNMENT).toBe(32);
++    expect(NIP44_V2_PQC.LENGTH_PREFIX_BYTES).toBe(2);
++    expect(NIP44_V2_PQC.ML_KEM_768_CT_BYTES).toBe(1088);
++    expect(NIP44_V2_PQC.ML_KEM_768_SS_BYTES).toBe(32);
++    expect(NIP44_V2_PQC.ML_KEM_768_PK_BYTES).toBe(1184);
++    expect(NIP44_V2_PQC.ML_KEM_768_SK_BYTES).toBe(2400);
++    expect(NIP44_V2_PQC.HMAC_TAG_LEN).toBe(32);
++  });
++
++  it("isPqcNip44Envelope auto-detects the pqc2: prefix and rejects everything else", () => {
++    expect(isPqcNip44Envelope("pqc2:abc.def.ghi")).toBe(true);
++    expect(isPqcNip44Envelope("")).toBe(false);
++    expect(isPqcNip44Envelope("v2:abc")).toBe(false);
++    expect(
++      isPqcNip44Envelope("nsec1xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"),
++    ).toBe(false);
++  });
++
++  it("deriveConversationKey produces a 76-byte OKM (32 hmac + 32 chacha + 12 nonce)", () => {
++    const ss = new Uint8Array(32);
++    const okm = deriveConversationKey(ss);
++    expect(okm.length).toBe(76);
++  });
++
++  it("deriveConversationKey rejects a sharedSecret of the wrong length", () => {
++    expect(() => deriveConversationKey(new Uint8Array(16))).toThrow(/32-byte Uint8Array/);
++  });
++
++  it("pad pads a 1-byte plaintext to 32 bytes and unpad round-trips", () => {
++    const pt = new TextEncoder().encode("x");
++    const padded = pad(pt);
++    expect(padded.length).toBe(32);
++    // Total length is a multiple of 32 — this is the NIP-44 v2 modulus.
++    expect(padded.length % 32).toBe(0);
++    const recovered = unpad(padded);
++    expect(new TextDecoder().decode(recovered)).toBe("x");
++  });
++
++  it("pad pads a 30-byte plaintext to 32 bytes (one length-byte + 30 bytes of content)", () => {
++    const pt = new Uint8Array(30);
++    const padded = pad(pt);
++    expect(padded.length).toBe(32);
++    expect(padded.length % 32).toBe(0);
++    const recovered = unpad(padded);
++    expect(recovered.length).toBe(30);
++  });
++
++  it("pad pads a 33-byte plaintext to 64 bytes (length-prefix overflows first 32-byte block)", () => {
++    const pt = new Uint8Array(33);
++    const padded = pad(pt);
++    expect(padded.length).toBe(64);
++    expect(padded.length % 32).toBe(0);
++    const recovered = unpad(padded);
++    expect(recovered.length).toBe(33);
++  });
++
++  it("unpad rejects a payload whose length is not a multiple of 32", () => {
++    const bogus = new Uint8Array(33); // 33 % 32 !== 0
++    bogus[0] = 0;
++    bogus[1] = 1;
++    expect(() => unpad(bogus)).toThrow(/padded length modulus check failed/);
++  });
++
++  it("unpad rejects a payload whose declared length is out of range", () => {
++    const padded = new Uint8Array(32);
++    // length = 0, which is below MIN_PLAINTEXT_LEN = 1.
++    padded[0] = 0;
++    padded[1] = 0;
++    expect(() => unpad(padded)).toThrow(/padded length field out of range/);
++  });
++
++  it("encryptNip44V2 + decryptNip44V2 round-trips a UTF-8 payload", () => {
++    const kp = genMlKem768Keypair();
++    const plaintext = new TextEncoder().encode("Hello, post-quantum Nostr!");
++    const envelope = encryptNip44V2(kp.publicKey, plaintext);
++    expect(isPqcNip44Envelope(envelope)).toBe(true);
++    expect(envelope).toMatch(/^pqc2:[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/);
++    const recovered = decryptNip44V2(kp.secretKey, envelope);
++    expect(new TextDecoder().decode(recovered)).toBe("Hello, post-quantum Nostr!");
++  });
++
++  it("encryptNip44V2 produces an ML-KEM-768 ciphertext of exactly 1088 bytes (after base64url decode)", () => {
++    const kp = genMlKem768Keypair();
++    const envelope = encryptNip44V2(kp.publicKey, new TextEncoder().encode("a"));
++    const parts = envelope.slice("pqc2:".length).split(".");
++    const kemCtLen = Buffer.from(parts[0]!, "base64url").length;
++    expect(kemCtLen).toBe(1088);
++  });
++
++  it("decryptNip44V2 rejects a tampered ML-KEM-768 ciphertext (MAC failure)", () => {
++    const kp = genMlKem768Keypair();
++    const envelope = encryptNip44V2(kp.publicKey, new TextEncoder().encode("a"));
++    const parts = envelope.slice("pqc2:".length).split(".");
++    const kemCt = Buffer.from(parts[0]!, "base64url");
++    // Flip one bit at a random position inside the ML-KEM ciphertext.
++    kemCt[100] = (kemCt[100]! ^ 0x01) & 0xff;
++    const tampered = "pqc2:" + kemCt.toString("base64url") + "." + parts[1] + "." + parts[2];
++    expect(() => decryptNip44V2(kp.secretKey, tampered)).toThrow(
++      /HMAC-SHA256 authentication failed/,
++    );
++  });
++
++  it("decryptNip44V2 rejects a tampered ChaCha20 ciphertext (MAC failure)", () => {
++    const kp = genMlKem768Keypair();
++    const envelope = encryptNip44V2(kp.publicKey, new TextEncoder().encode("a"));
++    const parts = envelope.slice("pqc2:".length).split(".");
++    const chachaCt = Buffer.from(parts[1]!, "base64url");
++    chachaCt[0] = (chachaCt[0]! ^ 0x01) & 0xff;
++    const tampered = "pqc2:" + parts[0] + "." + chachaCt.toString("base64url") + "." + parts[2];
++    expect(() => decryptNip44V2(kp.secretKey, tampered)).toThrow(
++      /HMAC-SHA256 authentication failed/,
++    );
++  });
++
++  it("decryptNip44V2 rejects a tampered MAC (HMAC failure)", () => {
++    const kp = genMlKem768Keypair();
++    const envelope = encryptNip44V2(kp.publicKey, new TextEncoder().encode("a"));
++    const parts = envelope.slice("pqc2:".length).split(".");
++    const mac = Buffer.from(parts[2]!, "base64url");
++    mac[0] = (mac[0]! ^ 0x01) & 0xff;
++    const tampered = "pqc2:" + parts[0] + "." + parts[1] + "." + mac.toString("base64url");
++    expect(() => decryptNip44V2(kp.secretKey, tampered)).toThrow(
++      /HMAC-SHA256 authentication failed/,
++    );
++  });
++
++  it("decryptNip44V2 rejects an envelope that is not in the pqc2: format", () => {
++    const kp = genMlKem768Keypair();
++    expect(() => decryptNip44V2(kp.secretKey, "v2:abc.def.ghi")).toThrow(/pqc2:/);
++  });
++
++  it("encryptNip44V2 rejects a recipient public key of the wrong length", () => {
++    expect(() => encryptNip44V2(new Uint8Array(16), new TextEncoder().encode("a"))).toThrow(
++      /public key must be 1184 bytes/,
++    );
++  });
++
++  it("decryptNip44V2 rejects a recipient secret key of the wrong length", () => {
++    expect(() => decryptNip44V2(new Uint8Array(16), "pqc2:aaa.bbb.ccc")).toThrow(
++      /secret key must be 2400 bytes/,
++    );
++  });
++
++  it("decryptNip44V2 rejects a malformed envelope (missing dot)", () => {
++    const kp = genMlKem768Keypair();
++    expect(() => decryptNip44V2(kp.secretKey, "pqc2:no-dots-here")).toThrow(/3 dot-separated/);
++  });
++});
+diff --git a/src/security/nip44-v2.ts b/src/security/nip44-v2.ts
+new file mode 100755
+index 00000000000..84d0ca48c66
+--- /dev/null
++++ b/src/security/nip44-v2.ts
+@@ -0,0 +1,311 @@
++// M10 (PQC migration, whitepaper 1.1): Nostr NIP-44 v2 + ML-KEM-768 hybrid
++// envelope.
++//
++// NIP-44 v2 (https://github.com/nostr-protocol/nips/blob/master/44.md)
++// upgrades the v1 ECDH conversation-key derivation to use HKDF-SHA256 over
++// a 32-byte shared secret, ChaCha20 + HMAC-SHA256 for the payload, and a
++// precise padding scheme. We replace the ECDH shared secret with an
++// ML-KEM-768 shared secret — the new "pqc2:" prefix marks the wire
++// format as the hybrid layer so a relay that only knows v1 can refuse to
++// forward it cleanly.
++//
++// The on-disk / on-wire envelope format is:
++//   pqc2:<base64url(ml-kem ciphertext)>.<base64url(chacha ciphertext)>.<base64url(hmac)>
++import { createCipheriv, createDecipheriv, createHmac, hkdfSync } from "node:crypto";
++import { ml_kem768 } from "@noble/post-quantum/ml-kem.js";
++
++const PREFIX = "pqc2:";
++const HKDF_INFO = new TextEncoder().encode("nip44-v2");
++const HKDF_SALT = new Uint8Array(0);
++const HMAC_KEY_LEN = 32;
++const CHACHA_KEY_LEN = 32;
++const CHACHA_IV_LEN = 12;
++const PAD_ALIGNMENT = 32;
++const LENGTH_PREFIX_BYTES = 2;
++const MIN_PADDED_PLAINTEXT = 1; // NIP-44 v2 forbids the zero-length plaintext path
++const MIN_PLAINTEXT_LEN = 1;
++const MAX_PLAINTEXT_LEN = 0xffff; // NIP-44 v2: max plaintext is 65535 bytes
++const ML_KEM_768_CT_BYTES = 1088;
++const ML_KEM_768_SS_BYTES = 32;
++const ML_KEM_768_PK_BYTES = 1184;
++const ML_KEM_768_SK_BYTES = 2400;
++const HMAC_TAG_LEN = 32;
++
++export const NIP44_V2_PQC = {
++  PREFIX,
++  HKDF_INFO,
++  CHACHA_KEY_LEN,
++  CHACHA_IV_LEN,
++  HMAC_KEY_LEN,
++  PAD_ALIGNMENT,
++  LENGTH_PREFIX_BYTES,
++  MAX_PLAINTEXT_LEN,
++  ML_KEM_768_CT_BYTES,
++  ML_KEM_768_SS_BYTES,
++  ML_KEM_768_PK_BYTES,
++  ML_KEM_768_SK_BYTES,
++  HMAC_TAG_LEN,
++} as const;
++
++export class Nip44V2Error extends Error {
++  constructor(message: string, options?: ErrorOptions) {
++    super(message, options);
++    this.name = "Nip44V2Error";
++  }
++}
++
++function toBase64Url(buf: Uint8Array): string {
++  return Buffer.from(buf).toString("base64url");
++}
++
++function fromBase64Url(s: string, label: string): Buffer {
++  try {
++    return Buffer.from(s, "base64url");
++  } catch (error) {
++    throw new Nip44V2Error(`${label} is not valid base64url`, { cause: error });
++  }
++}
++
++/**
++ * Derive the 32-byte conversation key from a 32-byte shared secret using
++ * HKDF-SHA256. Matches the NIP-44 v2 reference ("hkdf_sha256(shared_x, salt, info)").
++ */
++export function deriveConversationKey(sharedSecret: Uint8Array): Uint8Array {
++  if (!(sharedSecret instanceof Uint8Array) || sharedSecret.length !== 32) {
++    throw new Nip44V2Error("sharedSecret must be a 32-byte Uint8Array");
++  }
++  const okm = hkdfSync(
++    "sha256",
++    Buffer.from(sharedSecret),
++    HKDF_SALT,
++    HKDF_INFO,
++    HMAC_KEY_LEN + CHACHA_KEY_LEN + CHACHA_IV_LEN,
++  );
++  return new Uint8Array(okm);
++}
++
++function conversationKeys(sharedSecret: Uint8Array): {
++  chachaKey: Buffer;
++  chachaNonce: Buffer;
++  hmacKey: Buffer;
++} {
++  const okm = deriveConversationKey(sharedSecret);
++  return {
++    hmacKey: Buffer.from(okm.subarray(0, HMAC_KEY_LEN)),
++    chachaKey: Buffer.from(okm.subarray(HMAC_KEY_LEN, HMAC_KEY_LEN + CHACHA_KEY_LEN)),
++    chachaNonce: Buffer.from(
++      okm.subarray(HMAC_KEY_LEN + CHACHA_KEY_LEN, HMAC_KEY_LEN + CHACHA_KEY_LEN + CHACHA_IV_LEN),
++    ),
++  };
++}
++
++/**
++ * NIP-44 v2 padding: 2-byte big-endian length prefix, then zero-padded
++ * plaintext to the next multiple of 32 bytes. Minimum padded length is 32
++ * (one length byte + 30 zero bytes after a single byte of plaintext).
++ */
++export function pad(plaintext: Uint8Array): Uint8Array {
++  if (!(plaintext instanceof Uint8Array)) {
++    throw new Nip44V2Error("plaintext must be a Uint8Array");
++  }
++  if (plaintext.length < MIN_PLAINTEXT_LEN || plaintext.length > MAX_PLAINTEXT_LEN) {
++    throw new Nip44V2Error(
++      `plaintext length must be in [${MIN_PLAINTEXT_LEN}, ${MAX_PLAINTEXT_LEN}]; got ${plaintext.length}`,
++    );
++  }
++  const paddedLen = Math.max(
++    32,
++    Math.ceil((plaintext.length + LENGTH_PREFIX_BYTES) / PAD_ALIGNMENT) * PAD_ALIGNMENT,
++  );
++  const out = new Uint8Array(paddedLen);
++  // 2-byte big-endian length
++  out[0] = (plaintext.length >>> 8) & 0xff;
++  out[1] = plaintext.length & 0xff;
++  out.set(plaintext, LENGTH_PREFIX_BYTES);
++  // The remainder is already zero (Uint8Array initialises to zero).
++  return out;
++}
++
++/**
++ * Strip the NIP-44 v2 padding. The padded length must satisfy
++ * `padded.length % PAD_ALIGNMENT === 0`; this is the exact modulus that
++ * NIP-44 v2 specifies — the total length (2-byte length prefix + data +
++ * zero pad) is padded to a multiple of 32 bytes.
++ */
++export function unpad(padded: Uint8Array): Uint8Array {
++  if (
++    !(padded instanceof Uint8Array) ||
++    padded.length < LENGTH_PREFIX_BYTES + MIN_PADDED_PLAINTEXT
++  ) {
++    throw new Nip44V2Error("padded payload is too short");
++  }
++  if (padded.length % PAD_ALIGNMENT !== 0) {
++    throw new Nip44V2Error(
++      `padded length modulus check failed: padded.length % ${PAD_ALIGNMENT} must be 0`,
++    );
++  }
++  const length = (padded[0]! << 8) | padded[1]!;
++  // Range check first so callers get the more specific error before the
++  // structural "exceeds padded payload" check.
++  if (length < MIN_PLAINTEXT_LEN || length > MAX_PLAINTEXT_LEN) {
++    throw new Nip44V2Error(`padded length field out of range: ${length}`);
++  }
++  if (LENGTH_PREFIX_BYTES + length > padded.length) {
++    throw new Nip44V2Error("padded length field exceeds the padded payload");
++  }
++  return padded.subarray(LENGTH_PREFIX_BYTES, LENGTH_PREFIX_BYTES + length);
++}
++
++function chacha20Encrypt(key: Buffer, nonce: Buffer, plaintext: Uint8Array): Buffer {
++  // NIP-44 v2 uses the IETF ChaCha20 variant (12-byte nonce). Node's
++  // `chacha20` cipher takes a 16-byte IV (4-byte counter || 12-byte
++  // nonce), so we synthesize the IV with counter = 0 and the supplied
++  // 12-byte nonce in the tail. This matches RFC 8439 §2.4.
++  if (nonce.length !== CHACHA_IV_LEN) {
++    throw new Nip44V2Error(
++      `ChaCha20 nonce must be ${CHACHA_IV_LEN} bytes (IETF variant); got ${nonce.length}`,
++    );
++  }
++  const iv = Buffer.alloc(16);
++  iv.set(nonce, 4);
++  try {
++    const cipher = createCipheriv("chacha20", key, iv, { authTagLength: 0 });
++    return Buffer.concat([cipher.update(plaintext), cipher.final()]);
++  } catch (error) {
++    throw new Nip44V2Error(
++      "ChaCha20 is unavailable in this Node build; the hybrid envelope requires Node 18+ with OpenSSL 3",
++      { cause: error },
++    );
++  }
++}
++
++function chacha20Decrypt(key: Buffer, nonce: Buffer, ciphertext: Uint8Array): Buffer {
++  if (nonce.length !== CHACHA_IV_LEN) {
++    throw new Nip44V2Error(
++      `ChaCha20 nonce must be ${CHACHA_IV_LEN} bytes (IETF variant); got ${nonce.length}`,
++    );
++  }
++  const iv = Buffer.alloc(16);
++  iv.set(nonce, 4);
++  try {
++    const decipher = createDecipheriv("chacha20", key, iv, { authTagLength: 0 });
++    return Buffer.concat([decipher.update(ciphertext), decipher.final()]);
++  } catch (error) {
++    throw new Nip44V2Error(
++      "ChaCha20 is unavailable in this Node build; the hybrid envelope requires Node 18+ with OpenSSL 3",
++      { cause: error },
++    );
++  }
++}
++
++function hmacSha256(key: Buffer, message: Uint8Array): Buffer {
++  const h = createHmac("sha256", key);
++  h.update(message);
++  // Node 16+: h.digest() returns a Buffer; older fallbacks use h.read().
++  // `digest()` is the canonical name across all supported Node versions.
++  return h.digest();
++}
++
++function constantTimeEqual(a: Buffer, b: Buffer): boolean {
++  if (a.length !== b.length) return false;
++  let diff = 0;
++  for (let i = 0; i < a.length; i++) {
++    diff |= a[i]! ^ b[i]!;
++  }
++  return diff === 0;
++}
++
++/** Auto-detect a "pqc2:" envelope by prefix. */
++export function isPqcNip44Envelope(s: string): boolean {
++  return typeof s === "string" && s.startsWith(PREFIX);
++}
++
++/** Validate a length-prefix byte string is well-formed. */
++function assertMlKemCiphertext(blob: Buffer): void {
++  if (blob.length !== ML_KEM_768_CT_BYTES) {
++    throw new Nip44V2Error(
++      `ML-KEM-768 ciphertext must be ${ML_KEM_768_CT_BYTES} bytes; got ${blob.length}`,
++    );
++  }
++}
++
++function assertMlKemPublicKey(blob: Buffer): void {
++  if (blob.length !== ML_KEM_768_PK_BYTES) {
++    throw new Nip44V2Error(
++      `ML-KEM-768 public key must be ${ML_KEM_768_PK_BYTES} bytes; got ${blob.length}`,
++    );
++  }
++}
++
++function assertMlKemSecretKey(blob: Buffer): void {
++  if (blob.length !== ML_KEM_768_SK_BYTES) {
++    throw new Nip44V2Error(
++      `ML-KEM-768 secret key must be ${ML_KEM_768_SK_BYTES} bytes; got ${blob.length}`,
++    );
++  }
++}
++
++/**
++ * Encrypt a UTF-8 plaintext for `recipientPubMlKem` and return the
++ * `pqc2:` envelope. The ML-KEM-768 encapsulation produces a 32-byte
++ * shared secret that feeds the HKDF conversation-key derivation.
++ */
++export function encryptNip44V2(recipientPubMlKem: Uint8Array, plaintext: Uint8Array): string {
++  if (!(plaintext instanceof Uint8Array)) {
++    throw new Nip44V2Error("plaintext must be a Uint8Array");
++  }
++  assertMlKemPublicKey(Buffer.from(recipientPubMlKem));
++  const { sharedSecret, cipherText: kemCt } = ml_kem768.encapsulate(
++    new Uint8Array(recipientPubMlKem),
++  );
++  if (sharedSecret.length !== ML_KEM_768_SS_BYTES) {
++    throw new Nip44V2Error(
++      `ML-KEM-768 shared secret must be ${ML_KEM_768_SS_BYTES} bytes; got ${sharedSecret.length}`,
++    );
++  }
++  assertMlKemCiphertext(Buffer.from(kemCt));
++  const keys = conversationKeys(sharedSecret);
++  const padded = pad(plaintext);
++  const chachaCt = chacha20Encrypt(keys.chachaKey, keys.chachaNonce, padded);
++  const mac = hmacSha256(keys.hmacKey, Buffer.concat([Buffer.from(kemCt), Buffer.from(chachaCt)]));
++  return PREFIX + toBase64Url(kemCt) + "." + toBase64Url(chachaCt) + "." + toBase64Url(mac);
++}
++
++/** Decrypt a `pqc2:` envelope using the recipient's ML-KEM-768 secret key. */
++export function decryptNip44V2(recipientPrivMlKem: Uint8Array, envelope: string): Uint8Array {
++  if (typeof envelope !== "string" || !isPqcNip44Envelope(envelope)) {
++    throw new Nip44V2Error("envelope must be a pqc2: NIP-44 v2 hybrid envelope");
++  }
++  assertMlKemSecretKey(Buffer.from(recipientPrivMlKem));
++  const body = envelope.slice(PREFIX.length);
++  const parts = body.split(".");
++  if (parts.length !== 3) {
++    throw new Nip44V2Error("envelope must have exactly 3 dot-separated parts");
++  }
++  const [kemCtB64, chachaCtB64, macB64] = parts as [string, string, string];
++  const kemCt = fromBase64Url(kemCtB64, "kemCt");
++  const chachaCt = fromBase64Url(chachaCtB64, "chachaCt");
++  const mac = fromBase64Url(macB64, "mac");
++  assertMlKemCiphertext(kemCt);
++  if (mac.length !== HMAC_TAG_LEN) {
++    throw new Nip44V2Error(`MAC must be ${HMAC_TAG_LEN} bytes; got ${mac.length}`);
++  }
++  const sharedSecret = ml_kem768.decapsulate(
++    new Uint8Array(kemCt),
++    new Uint8Array(recipientPrivMlKem),
++  );
++  if (sharedSecret.length !== ML_KEM_768_SS_BYTES) {
++    throw new Nip44V2Error(
++      `ML-KEM-768 shared secret must be ${ML_KEM_768_SS_BYTES} bytes; got ${sharedSecret.length}`,
++    );
++  }
++  const keys = conversationKeys(sharedSecret);
++  const expectedMac = hmacSha256(keys.hmacKey, Buffer.concat([kemCt, chachaCt]));
++  if (!constantTimeEqual(mac, expectedMac)) {
++    throw new Nip44V2Error(
++      "HMAC-SHA256 authentication failed — wrong key, tampered ciphertext, or wrong ML-KEM ciphertext",
++    );
++  }
++  const padded = chacha20Decrypt(keys.chachaKey, keys.chachaNonce, chachaCt);
++  return unpad(padded);
++}
+-- 
+2.43.0
+

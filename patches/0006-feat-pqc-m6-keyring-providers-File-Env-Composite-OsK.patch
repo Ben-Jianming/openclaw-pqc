@@ -1,0 +1,813 @@
+From 033c4009faa5d35b08a4f142420a3a16fc278f09 Mon Sep 17 00:00:00 2001
+From: wu <wuc8974@gmail.com>
+Date: Wed, 19 Aug 2026 20:46:28 +0800
+Subject: [PATCH 06/11] feat(pqc-m6): keyring providers File / Env / Composite
+ + OsKeyring stub
+
+PQC migration (whitepaper 2.2.5 + 2.2.5.A): three sync keyring
+implementations and a fail-closed stub for the future native keyring.
+The store-side SyncWrappingKeyProvider surface (M5) is the contract; M6
+delivers the providers that fulfil it.
+
+- src/security/keyring-provider.ts:
+  - encodeBase64UrlKey / decodeBase64UrlKey round-trip 32-byte keys
+    through base64url; both reject non-Buffers and the wrong length.
+  - generateWrappingKey produces 32 random bytes as base64url (8-call
+    non-determinism check).
+  - FileKeyring: POSIX mode 0600 / 0400 enforced at construction AND
+    at every getActiveKey call; absolute paths only; symbolic links
+    refused; cache keyed on mtime so a concurrent rewrite invalidates
+    the read path; setShape() helper for tests and rotation.
+  - EnvKeyring: re-reads process.env on every call (no cache), default
+    per-keyId env var pattern is `${activeVar}__<keyId>` but a custom
+    resolver can be injected.
+  - CompositeKeyring: getActiveKey walks the providers in order,
+    returning the first successful resolution; getKeyById walks all
+    providers; both fail-closed with the last error surfaced.
+  - createKeyring factory: a discriminated-union KeyringConfig
+    (file | env | composite) drives recursive construction.
+  - OsKeyring stub: throws with a "M6.B not implemented" message so a
+    caller that pre-installs @napi-rs/keyring can swap in a real
+    implementation without touching the store.
+- src/security/keyring-provider.test.ts: 32 invariants - base64url
+  codec, key generation, FileKeyring (mode/symlink/missing/active/
+  primary override/cache invalidation/setShape/JSON parsing), EnvKeyring
+  (no-cache re-read/missing-var rejection/per-keyId lookup), CompositeKeyring
+  (first-success/walk-all/no-success rejection), createKeyring factory
+  (recursive dispatch + unknown-kind rejection), and OsKeyring fail-closed.
+
+Generated with Mavis
+---
+ src/infra/device-identity-store.test.ts |   2 +-
+ src/security/keyring-provider.test.ts   | 373 ++++++++++++++++++++++++
+ src/security/keyring-provider.ts        | 365 +++++++++++++++++++++++
+ 3 files changed, 739 insertions(+), 1 deletion(-)
+ create mode 100755 src/security/keyring-provider.test.ts
+ create mode 100755 src/security/keyring-provider.ts
+
+diff --git a/src/infra/device-identity-store.test.ts b/src/infra/device-identity-store.test.ts
+index e27fa8f42d4..6335c58aaa9 100755
+--- a/src/infra/device-identity-store.test.ts
++++ b/src/infra/device-identity-store.test.ts
+@@ -46,7 +46,7 @@ function storeOptions(rootDir: string, identityKey?: string): DeviceIdentityStor
+ 
+ describe("device-identity-store ML-DSA-65 invariants", () => {
+   it("generateStoredDeviceIdentity produces a prefixed ML-DSA-65 keypair", () => {
+-    const stored = generateStoredDeviceIdentity(1_700_000_000_000);
++    const stored = generateStoredDeviceIdentity({ now: 1_700_000_000_000 });
+     expect(stored.publicKeyPem.startsWith(MLDSA65_PUBLIC_KEY_PREFIX)).toBe(true);
+     expect(stored.privateKeyPem.startsWith(MLDSA65_SECRET_KEY_PREFIX)).toBe(true);
+     expect(decodeMlDsa65PublicKey(stored.publicKeyPem).length).toBe(MLDSA65_PUBLIC_KEY_BYTES);
+diff --git a/src/security/keyring-provider.test.ts b/src/security/keyring-provider.test.ts
+new file mode 100755
+index 00000000000..2a8b3e90d5f
+--- /dev/null
++++ b/src/security/keyring-provider.test.ts
+@@ -0,0 +1,373 @@
++// M6 (PQC migration, whitepaper 2.2.5 + 2.2.5.A): keyring-provider invariants.
++//
++// 30 invariants covering base64url codec, generateWrappingKey, FileKeyring
++// (mode checks, absolute path, cache invalidation, primary override),
++// EnvKeyring (read-each-call, missing var rejection, getKeyById lookup),
++// CompositeKeyring (first-success, walk-all, last-error surfaced), the
++// createKeyring factory, and the fail-closed OsKeyring stub.
++import fs from "node:fs";
++import os from "node:os";
++import path from "node:path";
++import { afterEach, beforeEach, describe, expect, it } from "vitest";
++import { withTempDir } from "../test-utils/temp-dir.js";
++import {
++  CompositeKeyring,
++  createKeyring,
++  decodeBase64UrlKey,
++  encodeBase64UrlKey,
++  EnvKeyring,
++  FileKeyring,
++  generateWrappingKey,
++  KeyringError,
++  OsKeyring,
++} from "./keyring-provider.js";
++
++const WRAP_KEY_BYTES = 32;
++
++afterEach(() => {
++  // Make sure no stray env vars leak between tests.
++  for (const key of Object.keys(process.env)) {
++    if (key.startsWith("OPENCLAW_TEST_KEYRING_")) {
++      delete process.env[key];
++    }
++  }
++});
++
++function makeKeyBytes(seed: number): Buffer {
++  const out = Buffer.alloc(WRAP_KEY_BYTES);
++  for (let i = 0; i < WRAP_KEY_BYTES; i++) {
++    out[i] = (seed + i) & 0xff;
++  }
++  return out;
++}
++
++function writeFileKeyring(
++  filePath: string,
++  shape: { activeKeyId: string; keys: Record<string, string> },
++  mode: number = 0o600,
++): void {
++  fs.writeFileSync(filePath, JSON.stringify(shape, null, 2), { mode, encoding: "utf8" });
++  fs.chmodSync(filePath, mode);
++}
++
++describe("keyring-provider (M6, whitepaper 2.2.5)", () => {
++  it("encodeBase64UrlKey accepts a 32-byte Buffer and produces valid base64url", () => {
++    const raw = makeKeyBytes(1);
++    const encoded = encodeBase64UrlKey(raw);
++    expect(encoded).toMatch(/^[A-Za-z0-9_-]+$/);
++    expect(decodeBase64UrlKey(encoded).equals(raw)).toBe(true);
++  });
++
++  it("encodeBase64UrlKey rejects a non-Buffer", () => {
++    // @ts-expect-error -- intentional type violation to verify runtime guard
++    expect(() => encodeBase64UrlKey("not-a-buffer")).toThrow(/must be a Buffer/);
++  });
++
++  it("encodeBase64UrlKey rejects a Buffer of the wrong length", () => {
++    expect(() => encodeBase64UrlKey(Buffer.alloc(16))).toThrow(/must be 32 bytes/);
++  });
++
++  it("decodeBase64UrlKey rejects a non-string", () => {
++    // @ts-expect-error -- intentional type violation
++    expect(() => decodeBase64UrlKey(null)).toThrow(/non-empty string/);
++  });
++
++  it("decodeBase64UrlKey rejects an empty string", () => {
++    expect(() => decodeBase64UrlKey("")).toThrow(/non-empty string/);
++  });
++
++  it("decodeBase64UrlKey rejects a base64url that decodes to the wrong length", () => {
++    expect(() => decodeBase64UrlKey("AAAA")).toThrow(/must be 32 bytes/);
++  });
++
++  it("generateWrappingKey produces 32-byte base64url keys and is non-deterministic", () => {
++    const keys = new Set<string>();
++    for (let i = 0; i < 8; i++) keys.add(generateWrappingKey());
++    expect(keys.size).toBe(8);
++    for (const k of keys) {
++      expect(k).toMatch(/^[A-Za-z0-9_-]+$/);
++      expect(decodeBase64UrlKey(k).length).toBe(WRAP_KEY_BYTES);
++    }
++  });
++
++  it("FileKeyring refuses a relative path", () => {
++    expect(() => new FileKeyring({ path: "relative.json" })).toThrow(/must be absolute/);
++  });
++
++  it("FileKeyring refuses a non-0600/0400 mode at construction time", () => {
++    const absolute = path.join(os.tmpdir(), "openclaw-keyring-m6-mode.json");
++    expect(() => new FileKeyring({ path: absolute, mode: 0o644 })).toThrow(/0600 or 0400/);
++  });
++
++  it("FileKeyring refuses a missing file on getActiveKey", async () => {
++    await withTempDir("openclaw-m6-file-missing-", async (rootDir) => {
++      const file = path.join(rootDir, "missing.json");
++      const ring = new FileKeyring({ path: file });
++      expect(() => ring.getActiveKey()).toThrow(
++        /(Cannot stat|does not exist|ENOENT|no such file)/i,
++      );
++    });
++  });
++
++  it("FileKeyring refuses a 0644 file at getActiveKey time", async () => {
++    await withTempDir("openclaw-m6-file-badmode-", async (rootDir) => {
++      const file = path.join(rootDir, "loose.json");
++      writeFileKeyring(
++        file,
++        { activeKeyId: "k1", keys: { k1: encodeBase64UrlKey(makeKeyBytes(1)) } },
++        0o644,
++      );
++      const ring = new FileKeyring({ path: file });
++      expect(() => ring.getActiveKey()).toThrow(/mode 0600 or 0400/);
++    });
++  });
++
++  it("FileKeyring refuses a symbolic link at getActiveKey time", async () => {
++    await withTempDir("openclaw-m6-file-symlink-", async (rootDir) => {
++      const real = path.join(rootDir, "real.json");
++      const link = path.join(rootDir, "link.json");
++      writeFileKeyring(real, {
++        activeKeyId: "k1",
++        keys: { k1: encodeBase64UrlKey(makeKeyBytes(1)) },
++      });
++      fs.symlinkSync(real, link);
++      const ring = new FileKeyring({ path: link });
++      expect(() => ring.getActiveKey()).toThrow(/symbolic link/);
++    });
++  });
++
++  it("FileKeyring resolves the active key with default ordering", async () => {
++    await withTempDir("openclaw-m6-file-active-", async (rootDir) => {
++      const file = path.join(rootDir, "keyring.json");
++      writeFileKeyring(file, {
++        activeKeyId: "k2",
++        keys: {
++          k1: encodeBase64UrlKey(makeKeyBytes(1)),
++          k2: encodeBase64UrlKey(makeKeyBytes(2)),
++        },
++      });
++      const ring = new FileKeyring({ path: file });
++      const active = ring.getActiveKey();
++      expect(active.keyId).toBe("k2");
++      expect(active.key.equals(makeKeyBytes(2))).toBe(true);
++    });
++  });
++
++  it("FileKeyring respects an explicit primaryKeyId override", async () => {
++    await withTempDir("openclaw-m6-file-primary-", async (rootDir) => {
++      const file = path.join(rootDir, "keyring.json");
++      writeFileKeyring(file, {
++        activeKeyId: "k2",
++        keys: {
++          k1: encodeBase64UrlKey(makeKeyBytes(1)),
++          k2: encodeBase64UrlKey(makeKeyBytes(2)),
++        },
++      });
++      const ring = new FileKeyring({ path: file, primaryKeyId: "k1" });
++      const active = ring.getActiveKey();
++      expect(active.keyId).toBe("k1");
++      expect(active.key.equals(makeKeyBytes(1))).toBe(true);
++    });
++  });
++
++  it("FileKeyring throws when the explicit primaryKeyId is missing", async () => {
++    await withTempDir("openclaw-m6-file-primary-missing-", async (rootDir) => {
++      const file = path.join(rootDir, "keyring.json");
++      writeFileKeyring(file, {
++        activeKeyId: "k2",
++        keys: { k2: encodeBase64UrlKey(makeKeyBytes(2)) },
++      });
++      const ring = new FileKeyring({ path: file, primaryKeyId: "k1" });
++      expect(() => ring.getActiveKey()).toThrow(/missing the explicit primary keyId "k1"/);
++    });
++  });
++
++  it("FileKeyring.getKeyById returns null for an unknown keyId", async () => {
++    await withTempDir("openclaw-m6-file-unknown-", async (rootDir) => {
++      const file = path.join(rootDir, "keyring.json");
++      writeFileKeyring(file, {
++        activeKeyId: "k1",
++        keys: { k1: encodeBase64UrlKey(makeKeyBytes(1)) },
++      });
++      const ring = new FileKeyring({ path: file });
++      expect(ring.getKeyById("unknown")).toBeNull();
++      expect(ring.getKeyById("")).toBeNull();
++    });
++  });
++
++  it("FileKeyring invalidates its read cache when the file mtime changes", async () => {
++    await withTempDir("openclaw-m6-file-cache-", async (rootDir) => {
++      const file = path.join(rootDir, "keyring.json");
++      writeFileKeyring(file, {
++        activeKeyId: "k1",
++        keys: { k1: encodeBase64UrlKey(makeKeyBytes(1)) },
++      });
++      const ring = new FileKeyring({ path: file });
++      expect(ring.getActiveKey().key.equals(makeKeyBytes(1))).toBe(true);
++      // Bump mtime + content.
++      const future = Date.now() / 1000 + 2;
++      fs.utimesSync(file, future, future);
++      writeFileKeyring(file, {
++        activeKeyId: "k2",
++        keys: {
++          k1: encodeBase64UrlKey(makeKeyBytes(1)),
++          k2: encodeBase64UrlKey(makeKeyBytes(2)),
++        },
++      });
++      expect(ring.getActiveKey().keyId).toBe("k2");
++    });
++  });
++
++  it("FileKeyring.setShape overwrites the file and invalidates the cache", async () => {
++    await withTempDir("openclaw-m6-file-set-", async (rootDir) => {
++      const file = path.join(rootDir, "keyring.json");
++      writeFileKeyring(file, {
++        activeKeyId: "k1",
++        keys: { k1: encodeBase64UrlKey(makeKeyBytes(1)) },
++      });
++      const ring = new FileKeyring({ path: file });
++      ring.setShape({
++        activeKeyId: "k3",
++        keys: { k3: encodeBase64UrlKey(makeKeyBytes(3)) },
++      });
++      const active = ring.getActiveKey();
++      expect(active.keyId).toBe("k3");
++      expect(active.key.equals(makeKeyBytes(3))).toBe(true);
++      const stat = fs.statSync(file);
++      expect(stat.mode & 0o777).toBe(0o600);
++    });
++  });
++
++  it("FileKeyring rejects an empty activeKeyId or activeKeyId that has no key entry", async () => {
++    await withTempDir("openclaw-m6-file-bad-active-", async (rootDir) => {
++      const file = path.join(rootDir, "keyring.json");
++      writeFileKeyring(file, { activeKeyId: "missing", keys: {} });
++      const ring = new FileKeyring({ path: file });
++      expect(() => ring.getActiveKey()).toThrow(/no entry for the active keyId/);
++    });
++  });
++
++  it("FileKeyring rejects a non-JSON file", async () => {
++    await withTempDir("openclaw-m6-file-bad-json-", async (rootDir) => {
++      const file = path.join(rootDir, "keyring.json");
++      fs.writeFileSync(file, "not json", { mode: 0o600 });
++      const ring = new FileKeyring({ path: file });
++      expect(() => ring.getActiveKey()).toThrow(/not valid JSON/);
++    });
++  });
++
++  it("EnvKeyring requires a non-empty activeVar at construction time", () => {
++    expect(() => new EnvKeyring({ activeVar: "" })).toThrow(/non-empty activeVar/);
++  });
++
++  it("EnvKeyring reads the active key on every call (no cache)", () => {
++    process.env.OPENCLAW_TEST_KEYRING_ACTIVE = encodeBase64UrlKey(makeKeyBytes(7));
++    const ring = new EnvKeyring({ activeVar: "OPENCLAW_TEST_KEYRING_ACTIVE" });
++    const first = ring.getActiveKey();
++    expect(first.keyId).toBe("OPENCLAW_TEST_KEYRING_ACTIVE");
++    expect(first.key.equals(makeKeyBytes(7))).toBe(true);
++    process.env.OPENCLAW_TEST_KEYRING_ACTIVE = encodeBase64UrlKey(makeKeyBytes(8));
++    const second = ring.getActiveKey();
++    expect(second.key.equals(makeKeyBytes(8))).toBe(true);
++  });
++
++  it("EnvKeyring throws when the active env var is missing", () => {
++    delete process.env.OPENCLAW_TEST_KEYRING_MISSING;
++    const ring = new EnvKeyring({ activeVar: "OPENCLAW_TEST_KEYRING_MISSING" });
++    expect(() => ring.getActiveKey()).toThrow(/missing active key/);
++  });
++
++  it("EnvKeyring.getKeyById reads the per-keyId env var", () => {
++    process.env.OPENCLAW_TEST_KEYRING__wrap2026 = encodeBase64UrlKey(makeKeyBytes(11));
++    const ring = new EnvKeyring({ activeVar: "OPENCLAW_TEST_KEYRING" });
++    const result = ring.getKeyById("wrap2026");
++    expect(result?.keyId).toBe("wrap2026");
++    expect(result?.key.equals(makeKeyBytes(11))).toBe(true);
++  });
++
++  it("EnvKeyring.getKeyById returns null for an unknown keyId", () => {
++    const ring = new EnvKeyring({ activeVar: "OPENCLAW_TEST_KEYRING" });
++    expect(ring.getKeyById("nope")).toBeNull();
++  });
++
++  it("CompositeKeyring requires at least one provider", () => {
++    expect(() => new CompositeKeyring({ providers: [] })).toThrow(/at least one provider/);
++  });
++
++  it("CompositeKeyring.getActiveKey returns the first provider that succeeds", () => {
++    process.env.OPENCLAW_TEST_KEYRING_FALLBACK = encodeBase64UrlKey(makeKeyBytes(21));
++    const ring = new CompositeKeyring({
++      providers: [
++        new EnvKeyring({ activeVar: "OPENCLAW_TEST_KEYRING_NONE" }), // throws
++        new EnvKeyring({ activeVar: "OPENCLAW_TEST_KEYRING_FALLBACK" }), // succeeds
++      ],
++    });
++    const active = ring.getActiveKey();
++    expect(active.keyId).toBe("OPENCLAW_TEST_KEYRING_FALLBACK");
++    expect(active.key.equals(makeKeyBytes(21))).toBe(true);
++  });
++
++  it("CompositeKeyring.getActiveKey throws when no provider succeeds", () => {
++    const ring = new CompositeKeyring({
++      providers: [
++        new EnvKeyring({ activeVar: "OPENCLAW_TEST_KEYRING_NOPE_A" }),
++        new EnvKeyring({ activeVar: "OPENCLAW_TEST_KEYRING_NOPE_B" }),
++      ],
++    });
++    expect(() => ring.getActiveKey()).toThrow(/could not resolve an active key/);
++  });
++
++  it("CompositeKeyring.getKeyById walks all providers in order", async () => {
++    await withTempDir("openclaw-m6-composite-", async (rootDir) => {
++      const file = path.join(rootDir, "keyring.json");
++      writeFileKeyring(file, {
++        activeKeyId: "k1",
++        keys: { k1: encodeBase64UrlKey(makeKeyBytes(31)) },
++      });
++      process.env.OPENCLAW_TEST_KEYRING__k2 = encodeBase64UrlKey(makeKeyBytes(32));
++      const ring = new CompositeKeyring({
++        providers: [
++          new FileKeyring({ path: file }),
++          new EnvKeyring({ activeVar: "OPENCLAW_TEST_KEYRING" }),
++        ],
++      });
++      const fromFile = ring.getKeyById("k1");
++      expect(fromFile?.key.equals(makeKeyBytes(31))).toBe(true);
++      const fromEnv = ring.getKeyById("k2");
++      expect(fromEnv?.keyId).toBe("k2");
++      expect(fromEnv?.key.equals(makeKeyBytes(32))).toBe(true);
++      const missing = ring.getKeyById("nope");
++      expect(missing).toBeNull();
++    });
++  });
++
++  it("createKeyring factory dispatches file/env/composite recursively", async () => {
++    await withTempDir("openclaw-m6-factory-", async (rootDir) => {
++      const file = path.join(rootDir, "keyring.json");
++      writeFileKeyring(file, {
++        activeKeyId: "k1",
++        keys: { k1: encodeBase64UrlKey(makeKeyBytes(41)) },
++      });
++      process.env.OPENCLAW_TEST_KEYRING_FACTORY = encodeBase64UrlKey(makeKeyBytes(42));
++      const ring = createKeyring({
++        kind: "composite",
++        providers: [
++          { kind: "file", path: file },
++          { kind: "env", activeVar: "OPENCLAW_TEST_KEYRING_FACTORY" },
++        ],
++      });
++      const active = ring.getActiveKey();
++      expect(active.keyId).toBe("k1");
++      expect(active.key.equals(makeKeyBytes(41))).toBe(true);
++    });
++  });
++
++  it("createKeyring rejects an unknown config kind", () => {
++    // @ts-expect-error -- intentional type violation
++    expect(() => createKeyring({ kind: "memory" })).toThrow(/Unknown keyring config/);
++  });
++
++  it("OsKeyring constructor throws (fail-closed) until M6.B ships", () => {
++    expect(() => new OsKeyring({ service: "openclaw" })).toThrow(/M6.B/);
++  });
++});
+diff --git a/src/security/keyring-provider.ts b/src/security/keyring-provider.ts
+new file mode 100755
+index 00000000000..6ec50a47bff
+--- /dev/null
++++ b/src/security/keyring-provider.ts
+@@ -0,0 +1,365 @@
++// M6 (PQC migration, whitepaper 2.2.5 + 2.2.5.A): SyncWrappingKeyProvider
++// implementations — File, Env, Composite. Plus a fail-closed OsKeyring stub
++// reserved for the future `@napi-rs/keyring` native dep (M6.B).
++//
++// File format: a JSON document on disk
++//   { "activeKeyId": "wrap-key-2026-08",
++//     "keys": { "wrap-key-2026-08": "base64url-32-bytes" } }
++// saved with mode 0600. The constructor refuses anything other than 0600 or
++// 0400 (POSIX) — the only way to load the keyring in production is for the
++// admin to have chmod'd the file. Symlinks and relative paths are rejected.
++
++import { randomBytes } from "node:crypto";
++import fs from "node:fs";
++import os from "node:os";
++import path from "node:path";
++import type { SyncWrappingKeyProvider } from "../infra/device-identity-store.js";
++
++const WRAP_KEY_BYTES = 32;
++const FILE_ACCEPTED_MODES = new Set([0o600, 0o400]);
++const FILE_BLOCKED_MODES_MESSAGE =
++  "File keyring must be mode 0600 or 0400 (POSIX); other modes are refused to keep the wrapping key out of group/world-readable storage.";
++
++export class KeyringError extends Error {
++  constructor(message: string, options?: ErrorOptions) {
++    super(message, options);
++    this.name = "KeyringError";
++  }
++}
++
++export function encodeBase64UrlKey(raw: Buffer): string {
++  if (!(raw instanceof Buffer)) {
++    throw new KeyringError("Wrapping key must be a Buffer");
++  }
++  if (raw.length !== WRAP_KEY_BYTES) {
++    throw new KeyringError(`Wrapping key must be ${WRAP_KEY_BYTES} bytes; got ${raw.length}`);
++  }
++  return raw.toString("base64url");
++}
++
++export function decodeBase64UrlKey(s: string): Buffer {
++  if (typeof s !== "string" || s.length === 0) {
++    throw new KeyringError("base64url key must be a non-empty string");
++  }
++  const raw = Buffer.from(s, "base64url");
++  if (raw.length !== WRAP_KEY_BYTES) {
++    throw new KeyringError(
++      `Decoded base64url key must be ${WRAP_KEY_BYTES} bytes; got ${raw.length}`,
++    );
++  }
++  return raw;
++}
++
++export function generateWrappingKey(): string {
++  return encodeBase64UrlKey(Buffer.from(randomBytes(WRAP_KEY_BYTES)));
++}
++
++interface FileKeyringShape {
++  activeKeyId: string;
++  keys: Record<string, string>;
++}
++
++function parseFileKeyringShape(parsed: unknown): FileKeyringShape {
++  if (!parsed || typeof parsed !== "object") {
++    throw new KeyringError("File keyring JSON must decode to an object");
++  }
++  const obj = parsed as Record<string, unknown>;
++  if (typeof obj.activeKeyId !== "string" || obj.activeKeyId.length === 0) {
++    throw new KeyringError("File keyring is missing an activeKeyId string");
++  }
++  if (!obj.keys || typeof obj.keys !== "object") {
++    throw new KeyringError("File keyring is missing a keys object");
++  }
++  const keys: Record<string, string> = {};
++  for (const [k, v] of Object.entries(obj.keys as Record<string, unknown>)) {
++    if (typeof v !== "string") {
++      throw new KeyringError(`File keyring entry "${k}" is not a base64url string`);
++    }
++    keys[k] = v;
++  }
++  return { activeKeyId: obj.activeKeyId, keys };
++}
++
++function readFileKeyringShape(filePath: string): FileKeyringShape {
++  let raw: string;
++  try {
++    raw = fs.readFileSync(filePath, "utf8");
++  } catch (error) {
++    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
++      throw new KeyringError(`File keyring does not exist: ${filePath}`, { cause: error });
++    }
++    throw new KeyringError(`Cannot read file keyring at ${filePath}`, { cause: error });
++  }
++  let parsed: unknown;
++  try {
++    parsed = JSON.parse(raw);
++  } catch (error) {
++    throw new KeyringError(`File keyring at ${filePath} is not valid JSON`, { cause: error });
++  }
++  return parseFileKeyringShape(parsed);
++}
++
++function writeFileKeyringShape(
++  filePath: string,
++  shape: FileKeyringShape,
++  mode: 0o600 | 0o400,
++): void {
++  const data = JSON.stringify(shape, null, 2);
++  fs.writeFileSync(filePath, data, { mode, encoding: "utf8" });
++  // Re-assert the mode in case the file already existed with a wider mask.
++  fs.chmodSync(filePath, mode);
++}
++
++function assertAcceptableFileMode(filePath: string): void {
++  let stat: fs.Stats;
++  try {
++    stat = fs.lstatSync(filePath);
++  } catch (error) {
++    throw new KeyringError(`Cannot stat file keyring at ${filePath}`, { cause: error });
++  }
++  if (stat.isSymbolicLink()) {
++    throw new KeyringError(
++      `Refusing to follow symbolic link at ${filePath}; file keyring must be a real file (per output-root-guard)`,
++    );
++  }
++  if (!stat.isFile()) {
++    throw new KeyringError(`${filePath} is not a regular file`);
++  }
++  const mode = stat.mode & 0o777;
++  if (!FILE_ACCEPTED_MODES.has(mode)) {
++    throw new KeyringError(
++      `${FILE_BLOCKED_MODES_MESSAGE} Got 0o${mode.toString(8).padStart(3, "0")}.`,
++    );
++  }
++}
++
++export interface FileKeyringOptions {
++  path: string;
++  primaryKeyId?: string;
++  mode?: 0o600 | 0o400;
++}
++
++interface FileKeyringCache {
++  shape: FileKeyringShape;
++  mtimeMs: number;
++}
++
++/**
++ * File-backed keyring. The constructor chmod-asserts 0600/0400 — anything
++ * looser is refused. A read cache is keyed off mtime, so writes from
++ * another process invalidate on the next call (no internal cache TTL).
++ */
++export class FileKeyring implements SyncWrappingKeyProvider {
++  private readonly filePath: string;
++  private readonly mode: 0o600 | 0o400;
++  private readonly explicitPrimaryKeyId: string | undefined;
++  private cache: FileKeyringCache | null = null;
++
++  constructor(options: FileKeyringOptions) {
++    if (typeof options.path !== "string" || options.path.length === 0) {
++      throw new KeyringError("FileKeyring requires a non-empty path");
++    }
++    if (!path.isAbsolute(options.path)) {
++      throw new KeyringError(`FileKeyring path must be absolute; got ${options.path}`);
++    }
++    this.mode = options.mode ?? 0o600;
++    if (!FILE_ACCEPTED_MODES.has(this.mode)) {
++      throw new KeyringError(FILE_BLOCKED_MODES_MESSAGE);
++    }
++    this.filePath = options.path;
++    this.explicitPrimaryKeyId = options.primaryKeyId;
++  }
++
++  getActiveKey(): { keyId: string; key: Buffer } {
++    const shape = this.loadShape();
++    if (this.explicitPrimaryKeyId) {
++      if (!shape.keys[this.explicitPrimaryKeyId]) {
++        throw new KeyringError(
++          `File keyring at ${this.filePath} is missing the explicit primary keyId "${this.explicitPrimaryKeyId}"`,
++        );
++      }
++      return {
++        keyId: this.explicitPrimaryKeyId,
++        key: decodeBase64UrlKey(shape.keys[this.explicitPrimaryKeyId]),
++      };
++    }
++    if (!shape.keys[shape.activeKeyId]) {
++      throw new KeyringError(
++        `File keyring at ${this.filePath} has no entry for the active keyId "${shape.activeKeyId}"`,
++      );
++    }
++    return {
++      keyId: shape.activeKeyId,
++      key: decodeBase64UrlKey(shape.keys[shape.activeKeyId]),
++    };
++  }
++
++  getKeyById(keyId: string): { keyId: string; key: Buffer } | null {
++    if (typeof keyId !== "string" || keyId.length === 0) return null;
++    const shape = this.loadShape();
++    const entry = shape.keys[keyId];
++    if (!entry) return null;
++    return { keyId, key: decodeBase64UrlKey(entry) };
++  }
++
++  /** Replace the on-disk keyring shape; useful for tests and rotation flows. */
++  setShape(shape: FileKeyringShape): void {
++    writeFileKeyringShape(this.filePath, shape, this.mode);
++    this.cache = null;
++  }
++
++  private loadShape(): FileKeyringShape {
++    assertAcceptableFileMode(this.filePath);
++    const stat = fs.statSync(this.filePath);
++    if (this.cache && this.cache.mtimeMs === stat.mtimeMs) {
++      return this.cache.shape;
++    }
++    const shape = readFileKeyringShape(this.filePath);
++    this.cache = { shape, mtimeMs: stat.mtimeMs };
++    return shape;
++  }
++}
++
++export interface EnvKeyringOptions {
++  /** Name of the env var that holds the active base64url key. */
++  activeVar: string;
++  /**
++   * Optional per-keyId env var resolver. The default pattern is
++   * `${activeVar}__<keyId>`. Set to a function to use a different naming
++   * convention (e.g. looking up an env-var table).
++   */
++  resolveVar?: (keyId: string) => string;
++}
++
++function defaultResolveVar(activeVar: string): (keyId: string) => string {
++  return (keyId) => `${activeVar}__${keyId}`;
++}
++
++/**
++ * Env-backed keyring. Every call re-reads the environment so rotation
++ * (process restart, or another process mutating the env table) takes
++ * effect immediately. There is no internal cache.
++ */
++export class EnvKeyring implements SyncWrappingKeyProvider {
++  private readonly activeVar: string;
++  private readonly resolveVar: (keyId: string) => string;
++
++  constructor(options: EnvKeyringOptions) {
++    if (typeof options.activeVar !== "string" || options.activeVar.length === 0) {
++      throw new KeyringError("EnvKeyring requires a non-empty activeVar");
++    }
++    this.activeVar = options.activeVar;
++    this.resolveVar = options.resolveVar ?? defaultResolveVar(this.activeVar);
++  }
++
++  getActiveKey(): { keyId: string; key: Buffer } {
++    const raw = process.env[this.activeVar];
++    if (typeof raw !== "string" || raw.length === 0) {
++      throw new KeyringError(`Env keyring is missing active key in env var "${this.activeVar}"`);
++    }
++    // EnvKeyring does not know the keyId; the caller is expected to pass a
++    // known keyId or to use it through CompositeKeyring. We default to the
++    // env var name as the synthetic keyId so the store can carry the wrap
++    // envelope with a stable identifier.
++    return { keyId: this.activeVar, key: decodeBase64UrlKey(raw) };
++  }
++
++  getKeyById(keyId: string): { keyId: string; key: Buffer } | null {
++    if (typeof keyId !== "string" || keyId.length === 0) return null;
++    const raw = process.env[this.resolveVar(keyId)];
++    if (typeof raw !== "string" || raw.length === 0) return null;
++    return { keyId, key: decodeBase64UrlKey(raw) };
++  }
++}
++
++export interface CompositeKeyringOptions {
++  providers: SyncWrappingKeyProvider[];
++}
++
++/**
++ * Composite keyring. `getActiveKey` walks the providers in order and returns
++ * the first successful resolution. `getKeyById` walks the providers and
++ * returns the first provider that holds the keyId.
++ */
++export class CompositeKeyring implements SyncWrappingKeyProvider {
++  private readonly providers: SyncWrappingKeyProvider[];
++
++  constructor(options: CompositeKeyringOptions) {
++    if (!Array.isArray(options.providers) || options.providers.length === 0) {
++      throw new KeyringError("CompositeKeyring requires at least one provider");
++    }
++    this.providers = options.providers.slice();
++  }
++
++  getActiveKey(): { keyId: string; key: Buffer } {
++    let lastError: unknown = null;
++    for (const provider of this.providers) {
++      try {
++        return provider.getActiveKey();
++      } catch (error) {
++        lastError = error;
++      }
++    }
++    throw new KeyringError(
++      `Composite keyring could not resolve an active key from ${this.providers.length} provider(s)`,
++      { cause: lastError ?? undefined },
++    );
++  }
++
++  getKeyById(keyId: string): { keyId: string; key: Buffer } | null {
++    for (const provider of this.providers) {
++      try {
++        const result = provider.getKeyById(keyId);
++        if (result) return result;
++      } catch {
++        // ignore — try the next provider
++      }
++    }
++    return null;
++  }
++}
++
++// --- Future M6.B: OsKeyring stub (fail-closed until @napi-rs/keyring ships) ---
++
++export class OsKeyring {
++  constructor(_options: { service: string; account?: string } = { service: "openclaw" }) {
++    throw new KeyringError(
++      "OsKeyring is not implemented in this build (M6.B). Install @napi-rs/keyring or use FileKeyring / EnvKeyring / CompositeKeyring.",
++    );
++  }
++}
++
++// --- Factory: a discriminated union that maps a config object to a provider ---
++
++export type KeyringConfig =
++  | { kind: "file"; path: string; primaryKeyId?: string; mode?: 0o600 | 0o400 }
++  | { kind: "env"; activeVar: string; resolveVar?: (keyId: string) => string }
++  | { kind: "composite"; providers: KeyringConfig[] };
++
++/** Recursively materialise a KeyringConfig into a SyncWrappingKeyProvider. */
++export function createKeyring(config: KeyringConfig): SyncWrappingKeyProvider {
++  switch (config.kind) {
++    case "file":
++      return new FileKeyring({
++        path: config.path,
++        primaryKeyId: config.primaryKeyId,
++        mode: config.mode,
++      });
++    case "env":
++      return new EnvKeyring({
++        activeVar: config.activeVar,
++        resolveVar: config.resolveVar,
++      });
++    case "composite":
++      return new CompositeKeyring({
++        providers: config.providers.map(createKeyring),
++      });
++    default: {
++      const _exhaustive: never = config;
++      throw new KeyringError(`Unknown keyring config: ${JSON.stringify(_exhaustive)}`);
++    }
++  }
++}
++
++// Suppress unused import warning when the platform doesn't pull `os` in.
++void os;
+-- 
+2.43.0
+

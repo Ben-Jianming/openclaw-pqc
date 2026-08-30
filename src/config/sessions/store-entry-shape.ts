@@ -1,0 +1,97 @@
+// Store entry shape normalization rejects unsafe persisted metadata before runtime use.
+import { isRecord } from "@openclaw/normalization-core/record-coerce";
+import { parseAgentSessionKey } from "../../routing/session-key.js";
+import { validateSessionId } from "./paths.js";
+import type { SessionEntry } from "./types.js";
+
+// Persisted stores may contain old or malformed ids; reject path-like ids before use.
+function isSafeSessionId(value: unknown): value is string {
+  if (typeof value !== "string") {
+    return false;
+  }
+  const trimmed = value.trim();
+  if (!trimmed || trimmed.length > 255) {
+    return false;
+  }
+  if (trimmed.includes("/") || trimmed.includes("\\") || trimmed === "." || trimmed === "..") {
+    return false;
+  }
+  return /^[A-Za-z0-9][A-Za-z0-9._:@-]*$/.test(trimmed);
+}
+
+function normalizeTranscriptSessionId(value: string): string | undefined {
+  try {
+    return validateSessionId(value);
+  } catch {
+    return undefined;
+  }
+}
+
+function normalizeOptionalTimestamp(value: unknown): number | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : 0;
+}
+
+/** Removes retired runtime locator fields before a session entry is persisted or returned. */
+export function projectCanonicalSessionEntryShape(value: Record<string, unknown>): SessionEntry {
+  const {
+    sessionFile: _retiredSessionFile,
+    transcriptPath: _retiredTranscriptPath,
+    ...canonicalValue
+  } = value;
+  return canonicalValue as unknown as SessionEntry;
+}
+
+/** Normalizes persisted session store entries before they reach runtime callers. */
+export function normalizePersistedSessionEntryShape(
+  value: unknown,
+  options: { sessionKey?: string } = {},
+): SessionEntry | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+
+  const modelSelectionLocked = value.modelSelectionLocked === true;
+  let next = projectCanonicalSessionEntryShape(value);
+  if (value.sessionId !== undefined) {
+    if (!isSafeSessionId(value.sessionId)) {
+      return undefined;
+    }
+    const sessionId = value.sessionId.trim();
+    const legacySessionFile = value.sessionFile;
+    const pendingLegacyKeyId =
+      !modelSelectionLocked &&
+      options.sessionKey !== undefined &&
+      parseAgentSessionKey(options.sessionKey) !== null &&
+      sessionId === options.sessionKey &&
+      (value.initializationPending === true ||
+        typeof legacySessionFile !== "string" ||
+        !legacySessionFile.trim());
+    if (pendingLegacyKeyId) {
+      const { sessionId: _legacyPendingSessionId, ...pendingEntry } = next;
+      next = { ...pendingEntry, initializationPending: true } as SessionEntry;
+    } else {
+      if (modelSelectionLocked && sessionId !== value.sessionId) {
+        // A harness lock protects the exact durable identity. Repairing it here
+        // would make a corrupted row look valid before ownership validation.
+        return undefined;
+      }
+      const transcriptSessionId = normalizeTranscriptSessionId(sessionId);
+      if (!transcriptSessionId) {
+        return undefined;
+      }
+      if (sessionId !== value.sessionId) {
+        next = { ...next, sessionId };
+      }
+    }
+  }
+
+  const updatedAt = normalizeOptionalTimestamp(value.updatedAt);
+  if (updatedAt !== value.updatedAt) {
+    next.updatedAt = updatedAt ?? 0;
+  }
+
+  return next;
+}

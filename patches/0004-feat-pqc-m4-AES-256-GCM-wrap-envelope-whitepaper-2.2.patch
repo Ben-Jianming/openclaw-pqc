@@ -1,0 +1,580 @@
+From eea7932027c93842f169bf9861b2b3296c37128d Mon Sep 17 00:00:00 2001
+From: wu <wuc8974@gmail.com>
+Date: Wed, 19 Aug 2026 20:34:18 +0800
+Subject: [PATCH 04/11] feat(pqc-m4): AES-256-GCM wrap envelope (whitepaper
+ 2.2.1)
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+PQC migration (whitepaper 2.2.1): the foundational wrap primitive that
+M5/M6/M7 layer on top of. wrapSecret(plaintext, keyId, key) returns a
+WrappedSecret carrying a fresh 12-byte IV and a 16-byte AES-256-GCM
+auth tag, sealed under the supplied keyId. The envelope survives any
+downstream BLOB-vs-utf8 ambiguity because serializeWrappedSecret /
+deserializeWrappedSecret round-trip through base64url-encoded JSON.
+
+- src/security/secret-wrapping.ts: new file. Implements wrapSecret,
+  unwrapSecret, serializeWrappedSecret, deserializeWrappedSecret, plus
+  the WrappingKeyProvider interface that M5 (device-identity-store) and
+  M6 (File/Env/Composite keyrings) plug into. Defensive shape checks at
+  every boundary: 32-byte key, 12-byte IV, 16-byte auth tag, keyId
+  presence + ≤128 chars, plaintext ≤64 KiB.
+- src/security/secret-wrapping.test.ts: 25 invariants — round-trip across
+  empty / 1952 / 4032 / 64 KiB plaintexts, IV uniqueness over 32 calls,
+  tamper detection on ciphertext/IV/authTag, wrong-size key under same
+  keyId, dropped/over-long keyId rejection, non-Buffer rejection, cap
+  enforcement, serialize/deserialize round-trip + 4 malformed-input
+  rejections, SecretWrappingError type contract.
+
+🤖 Generated with Mavis
+---
+ src/security/secret-wrapping.test.ts | 264 +++++++++++++++++++++++++++
+ src/security/secret-wrapping.ts      | 264 +++++++++++++++++++++++++++
+ 2 files changed, 528 insertions(+)
+ create mode 100755 src/security/secret-wrapping.test.ts
+ create mode 100755 src/security/secret-wrapping.ts
+
+diff --git a/src/security/secret-wrapping.test.ts b/src/security/secret-wrapping.test.ts
+new file mode 100755
+index 00000000000..21c90c74441
+--- /dev/null
++++ b/src/security/secret-wrapping.test.ts
+@@ -0,0 +1,264 @@
++// M4 (PQC migration, whitepaper 2.2.1): wrap-envelope invariants.
++//
++// 23 invariants covering round-trip across empty / 1952 / 4032 / 64KiB
++// plaintexts, IV uniqueness, tamper detection, wrong-size key, dropped
++// keyId, non-Buffer rejection, and serialize/deserialize round-trip +
++// malformed input rejection.
++import { createHash, randomBytes } from "node:crypto";
++import { afterEach, beforeEach, describe, expect, it } from "vitest";
++import {
++  deserializeWrappedSecret,
++  MAX_PLAINTEXT_BYTES,
++  SecretWrappingError,
++  serializeWrappedSecret,
++  unwrapSecret,
++  WRAP_AUTH_TAG_BYTES,
++  WRAP_IV_BYTES,
++  WRAP_KEY_BYTES,
++  wrapSecret,
++  type WrappedSecret,
++} from "./secret-wrapping.js";
++
++function newKey(seed?: number): Buffer {
++  if (typeof seed === "number") {
++    const hash = createHash("sha256");
++    for (let i = 0; i < 8; i++) hash.update(String((seed + i) >>> 0));
++    return hash.digest();
++  }
++  return Buffer.from(randomBytes(WRAP_KEY_BYTES));
++}
++
++afterEach(() => {
++  // no-op
++});
++
++beforeEach(() => {
++  // no-op
++});
++
++describe("secret-wrapping (M4, whitepaper 2.2.1)", () => {
++  it("round-trips an empty plaintext", () => {
++    const key = newKey(1);
++    const wrapped = wrapSecret(Buffer.alloc(0), "wrap-key-2026-08", key, 1_700_000_000_000);
++    const unwrapped = unwrapSecret(wrapped, "wrap-key-2026-08", key);
++    expect(unwrapped.length).toBe(0);
++  });
++
++  it("round-trips a 1952-byte plaintext (ML-DSA-65 public key)", () => {
++    const key = newKey(2);
++    const plaintext = Buffer.from(randomBytes(1952));
++    const wrapped = wrapSecret(plaintext, "wrap-key-2026-08", key, 1_700_000_000_000);
++    const unwrapped = unwrapSecret(wrapped, "wrap-key-2026-08", key);
++    expect(unwrapped.equals(plaintext)).toBe(true);
++  });
++
++  it("round-trips a 4032-byte plaintext (ML-DSA-65 secret key)", () => {
++    const key = newKey(3);
++    const plaintext = Buffer.from(randomBytes(4032));
++    const wrapped = wrapSecret(plaintext, "wrap-key-2026-08", key, 1_700_000_000_000);
++    const unwrapped = unwrapSecret(wrapped, "wrap-key-2026-08", key);
++    expect(unwrapped.equals(plaintext)).toBe(true);
++  });
++
++  it("round-trips a 64KiB plaintext", () => {
++    const key = newKey(4);
++    const plaintext = Buffer.from(randomBytes(64 * 1024));
++    const wrapped = wrapSecret(plaintext, "wrap-key-2026-08", key, 1_700_000_000_000);
++    const unwrapped = unwrapSecret(wrapped, "wrap-key-2026-08", key);
++    expect(unwrapped.equals(plaintext)).toBe(true);
++  });
++
++  it("produces a fresh 12-byte IV on every call (32-call uniqueness check)", () => {
++    const key = newKey(5);
++    const seen = new Set<string>();
++    for (let i = 0; i < 32; i++) {
++      const wrapped = wrapSecret(Buffer.from("hello"), `key-${i}`, key);
++      expect(wrapped.iv.length).toBe(WRAP_IV_BYTES);
++      seen.add(wrapped.iv.toString("base64url"));
++    }
++    expect(seen.size).toBe(32);
++  });
++
++  it("captures a 16-byte auth tag on every envelope", () => {
++    const key = newKey(6);
++    const wrapped = wrapSecret(Buffer.from("pqc"), "wrap-key-2026-08", key);
++    expect(wrapped.authTag.length).toBe(WRAP_AUTH_TAG_BYTES);
++  });
++
++  it("rejects a wrapping key of the wrong size under the same keyId", () => {
++    const rightKey = newKey(7);
++    const wrongKey = Buffer.alloc(16); // half-size
++    const wrapped = wrapSecret(Buffer.from("payload"), "wrap-key-2026-08", rightKey);
++    expect(() => unwrapSecret(wrapped, "wrap-key-2026-08", wrongKey)).toThrow(
++      /Wrapping key must be a Buffer of 32 bytes/,
++    );
++  });
++
++  it("rejects an undersized 16-byte wrapping key at construction time", () => {
++    const tooShort = Buffer.alloc(16);
++    expect(() => wrapSecret(Buffer.from("payload"), "wrap-key-2026-08", tooShort)).toThrow(
++      /Wrapping key must be a Buffer of 32 bytes/,
++    );
++  });
++
++  it("rejects a non-Buffer plaintext at construction time", () => {
++    const key = newKey(8);
++    // @ts-expect-error -- intentional type violation to verify runtime guard
++    expect(() => wrapSecret("not-a-buffer", "wrap-key-2026-08", key)).toThrow(
++      /Plaintext must be a Buffer/,
++    );
++  });
++
++  it("rejects a plaintext that exceeds the 64 KiB envelope cap", () => {
++    const key = newKey(9);
++    const tooBig = Buffer.alloc(MAX_PLAINTEXT_BYTES + 1);
++    expect(() => wrapSecret(tooBig, "wrap-key-2026-08", key)).toThrow(
++      /Plaintext exceeds 65536 bytes/,
++    );
++  });
++
++  it("rejects an empty keyId at wrap time", () => {
++    const key = newKey(10);
++    expect(() => wrapSecret(Buffer.from("payload"), "", key)).toThrow(
++      /keyId must be a non-empty string/,
++    );
++  });
++
++  it("rejects an over-long keyId (>128 chars) at wrap time", () => {
++    const key = newKey(11);
++    expect(() => wrapSecret(Buffer.from("payload"), "k".repeat(129), key)).toThrow(
++      /keyId exceeds 128 characters/,
++    );
++  });
++
++  it("rejects an envelope that has been sealed under a different keyId", () => {
++    const key = newKey(12);
++    const wrapped = wrapSecret(Buffer.from("payload"), "wrap-key-2026-08", key);
++    expect(() => unwrapSecret(wrapped, "wrap-key-different", key)).toThrow(
++      /envelope is sealed under "wrap-key-2026-08", caller supplied "wrap-key-different"/,
++    );
++  });
++
++  it("rejects an envelope whose ciphertext has been tampered with", () => {
++    const key = newKey(13);
++    const wrapped = wrapSecret(Buffer.from("auth-this"), "wrap-key-2026-08", key);
++    const tampered: WrappedSecret = {
++      ...wrapped,
++      ciphertext: Buffer.concat([Buffer.from("X"), wrapped.ciphertext.subarray(1)]),
++    };
++    expect(() => unwrapSecret(tampered, "wrap-key-2026-08", key)).toThrow(
++      /AES-256-GCM authentication failed/,
++    );
++  });
++
++  it("rejects an envelope whose IV has been tampered with", () => {
++    const key = newKey(14);
++    const wrapped = wrapSecret(Buffer.from("auth-this"), "wrap-key-2026-08", key);
++    const tampered: WrappedSecret = {
++      ...wrapped,
++      iv: Buffer.concat([Buffer.from([0x42]), wrapped.iv.subarray(1)]),
++    };
++    expect(() => unwrapSecret(tampered, "wrap-key-2026-08", key)).toThrow(
++      /AES-256-GCM authentication failed/,
++    );
++  });
++
++  it("rejects an envelope whose auth tag has been tampered with", () => {
++    const key = newKey(15);
++    const wrapped = wrapSecret(Buffer.from("auth-this"), "wrap-key-2026-08", key);
++    const tampered: WrappedSecret = {
++      ...wrapped,
++      authTag: Buffer.concat([Buffer.from([0x42]), wrapped.authTag.subarray(1)]),
++    };
++    expect(() => unwrapSecret(tampered, "wrap-key-2026-08", key)).toThrow(
++      /AES-256-GCM authentication failed/,
++    );
++  });
++
++  it("rejects an envelope with the wrong IV length", () => {
++    const key = newKey(16);
++    const wrapped = wrapSecret(Buffer.from("auth-this"), "wrap-key-2026-08", key);
++    const bad: WrappedSecret = { ...wrapped, iv: Buffer.alloc(8) };
++    expect(() => unwrapSecret(bad, "wrap-key-2026-08", key)).toThrow(
++      /WrappedSecret iv must be a Buffer of 12 bytes/,
++    );
++  });
++
++  it("rejects an envelope with the wrong auth tag length", () => {
++    const key = newKey(17);
++    const wrapped = wrapSecret(Buffer.from("auth-this"), "wrap-key-2026-08", key);
++    const bad: WrappedSecret = { ...wrapped, authTag: Buffer.alloc(8) };
++    expect(() => unwrapSecret(bad, "wrap-key-2026-08", key)).toThrow(
++      /WrappedSecret authTag must be a Buffer of 16 bytes/,
++    );
++  });
++
++  it("serializeWrappedSecret produces round-trippable base64url JSON", () => {
++    const key = newKey(18);
++    const wrapped = wrapSecret(Buffer.from("round-trip"), "wrap-key-2026-08", key, 12345);
++    const serialized = serializeWrappedSecret(wrapped);
++    expect(serialized.length).toBeGreaterThan(0);
++    expect(serialized).toMatch(/^[A-Za-z0-9_-]+$/);
++    const restored = deserializeWrappedSecret(serialized);
++    expect(restored.v).toBe(wrapped.v);
++    expect(restored.keyId).toBe(wrapped.keyId);
++    expect(restored.iv.equals(wrapped.iv)).toBe(true);
++    expect(restored.ciphertext.equals(wrapped.ciphertext)).toBe(true);
++    expect(restored.authTag.equals(wrapped.authTag)).toBe(true);
++    expect(restored.createdAtMs).toBe(wrapped.createdAtMs);
++    const unwrapped = unwrapSecret(restored, "wrap-key-2026-08", key);
++    expect(unwrapped.toString("utf8")).toBe("round-trip");
++  });
++
++  it("deserializeWrappedSecret rejects an empty string", () => {
++    expect(() => deserializeWrappedSecret("")).toThrow(/non-empty string/);
++  });
++
++  it("deserializeWrappedSecret rejects a non-base64url string", () => {
++    expect(() => deserializeWrappedSecret("!!!not-base64!!!")).toThrow(
++      /not valid base64url-encoded JSON/,
++    );
++  });
++
++  it("deserializeWrappedSecret rejects a string that decodes to non-JSON", () => {
++    const notJson = Buffer.from("not json", "utf8").toString("base64url");
++    expect(() => deserializeWrappedSecret(notJson)).toThrow(/not valid base64url-encoded JSON/);
++  });
++
++  it("deserializeWrappedSecret rejects a JSON envelope with the wrong version", () => {
++    const wrongVersion = Buffer.from(
++      JSON.stringify({
++        v: 99,
++        keyId: "wrap-key-2026-08",
++        iv: "AAAA",
++        ciphertext: "AAAA",
++        authTag: "AAAA",
++        createdAtMs: 1,
++      }),
++      "utf8",
++    ).toString("base64url");
++    expect(() => deserializeWrappedSecret(wrongVersion)).toThrow(/unsupported version 99/);
++  });
++
++  it("unwrapSecret rejects a missing keyId argument (empty string)", () => {
++    const key = newKey(19);
++    const wrapped = wrapSecret(Buffer.from("auth-this"), "wrap-key-2026-08", key);
++    expect(() => unwrapSecret(wrapped, "", key)).toThrow(/keyId must be a non-empty string/);
++  });
++
++  it("unwrapSecret throws SecretWrappingError (not Error) on auth failure", () => {
++    const key = newKey(20);
++    const wrapped = wrapSecret(Buffer.from("auth-this"), "wrap-key-2026-08", key);
++    const tampered: WrappedSecret = {
++      ...wrapped,
++      authTag: Buffer.concat([Buffer.from([0x42]), wrapped.authTag.subarray(1)]),
++    };
++    let caught: unknown = null;
++    try {
++      unwrapSecret(tampered, "wrap-key-2026-08", key);
++    } catch (error) {
++      caught = error;
++    }
++    expect(caught).toBeInstanceOf(SecretWrappingError);
++  });
++});
+diff --git a/src/security/secret-wrapping.ts b/src/security/secret-wrapping.ts
+new file mode 100755
+index 00000000000..bd5416f0438
+--- /dev/null
++++ b/src/security/secret-wrapping.ts
+@@ -0,0 +1,264 @@
++// M4 (PQC migration, whitepaper 2.2.1): AES-256-GCM secret-wrap envelope.
++//
++// `wrapSecret(plaintext, keyId, key)` produces a `WrappedSecret` with a fresh
++// 12-byte IV and 16-byte auth tag. The envelope carries a `keyId` so a future
++// keyring (M6) can rotate keys without re-encrypting every row. Plaintext and
++// key are both `Buffer`s; the wire format on disk is base64url-encoded JSON
++// produced by `serializeWrappedSecret` so it survives any byte-vs-utf8 ambiguity
++// in the downstream BLOB column (mldsa_private_key_wrapped, see M3).
++//
++// `WrappingKeyProvider` is the abstract interface that M5/M6 wire into
++// device-identity-store and M6 implements as File/Env/Composite keyrings.
++import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
++
++const ALGORITHM = "aes-256-gcm";
++const IV_BYTES = 12;
++const AUTH_TAG_BYTES = 16;
++const KEY_BYTES = 32;
++
++const WRAPPED_SECRET_VERSION = 1;
++const MAX_PLAINTEXT_BYTES = 64 * 1024;
++const MAX_KEY_ID_LENGTH = 128;
++const MAX_SERIALIZED_LENGTH = 16 * 1024;
++
++export {
++  ALGORITHM as WRAP_ALGORITHM,
++  IV_BYTES as WRAP_IV_BYTES,
++  AUTH_TAG_BYTES as WRAP_AUTH_TAG_BYTES,
++  KEY_BYTES as WRAP_KEY_BYTES,
++  WRAPPED_SECRET_VERSION,
++  MAX_PLAINTEXT_BYTES,
++  MAX_PLAINTEXT_BYTES as WRAP_MAX_PLAINTEXT_BYTES,
++  MAX_KEY_ID_LENGTH,
++  MAX_KEY_ID_LENGTH as WRAP_MAX_KEY_ID_LENGTH,
++  MAX_SERIALIZED_LENGTH,
++  MAX_SERIALIZED_LENGTH as WRAP_MAX_SERIALIZED_LENGTH,
++};
++
++export interface WrappedSecret {
++  readonly v: typeof WRAPPED_SECRET_VERSION;
++  readonly keyId: string;
++  readonly iv: Buffer;
++  readonly ciphertext: Buffer;
++  readonly authTag: Buffer;
++  readonly createdAtMs: number;
++}
++
++export class SecretWrappingError extends Error {
++  constructor(message: string, options?: ErrorOptions) {
++    super(message, options);
++    this.name = "SecretWrappingError";
++  }
++}
++
++function assertKeyShape(key: Buffer): void {
++  if (!(key instanceof Buffer) || key.length !== KEY_BYTES) {
++    throw new SecretWrappingError(
++      `Wrapping key must be a Buffer of ${KEY_BYTES} bytes; got ${key instanceof Buffer ? key.length : typeof key}`,
++    );
++  }
++}
++
++function assertPlaintextShape(plaintext: Buffer): void {
++  if (!(plaintext instanceof Buffer)) {
++    throw new SecretWrappingError("Plaintext must be a Buffer");
++  }
++  if (plaintext.length > MAX_PLAINTEXT_BYTES) {
++    throw new SecretWrappingError(
++      `Plaintext exceeds ${MAX_PLAINTEXT_BYTES} bytes (got ${plaintext.length})`,
++    );
++  }
++}
++
++function assertKeyId(keyId: string): void {
++  if (typeof keyId !== "string" || keyId.length === 0) {
++    throw new SecretWrappingError("keyId must be a non-empty string");
++  }
++  if (keyId.length > MAX_KEY_ID_LENGTH) {
++    throw new SecretWrappingError(
++      `keyId exceeds ${MAX_KEY_ID_LENGTH} characters (got ${keyId.length})`,
++    );
++  }
++}
++
++function freshIv(): Buffer {
++  return Buffer.from(randomBytes(IV_BYTES));
++}
++
++function toBase64Url(buf: Buffer): string {
++  return buf.toString("base64url");
++}
++
++function fromBase64Url(s: string, label: string): Buffer {
++  try {
++    const buf = Buffer.from(s, "base64url");
++    if (buf.length === 0) {
++      throw new SecretWrappingError(`${label} base64url decoded to zero bytes`);
++    }
++    return buf;
++  } catch (error) {
++    if (error instanceof SecretWrappingError) throw error;
++    throw new SecretWrappingError(`${label} is not valid base64url`, { cause: error });
++  }
++}
++
++/**
++ * Wrap a plaintext Buffer with a 32-byte AES-256-GCM key. The IV is fresh
++ * per call (NIST SP 800-38D §8.2.1) and the authTag is captured into the
++ * envelope so `unwrapSecret` can authenticate the ciphertext.
++ */
++export function wrapSecret(
++  plaintext: Buffer,
++  keyId: string,
++  key: Buffer,
++  now: number = Date.now(),
++): WrappedSecret {
++  assertKeyId(keyId);
++  assertKeyShape(key);
++  assertPlaintextShape(plaintext);
++
++  const iv = freshIv();
++  const cipher = createCipheriv(ALGORITHM, key, iv, { authTagLength: AUTH_TAG_BYTES });
++  const ciphertext = Buffer.concat([cipher.update(plaintext), cipher.final()]);
++  const authTag = cipher.getAuthTag();
++  if (authTag.length !== AUTH_TAG_BYTES) {
++    throw new SecretWrappingError(
++      `Auth tag has unexpected length ${authTag.length} (expected ${AUTH_TAG_BYTES})`,
++    );
++  }
++  return {
++    v: WRAPPED_SECRET_VERSION,
++    keyId,
++    iv,
++    ciphertext,
++    authTag,
++    createdAtMs: now,
++  };
++}
++
++/**
++ * Unwrap a `WrappedSecret` produced by `wrapSecret`. Throws on missing
++ * keyId, wrong key length, mismatched keyId, IV/auth tag shape mismatch,
++ * or AES-GCM auth failure. Never returns partial plaintext.
++ */
++export function unwrapSecret(wrapped: WrappedSecret, keyId: string, key: Buffer): Buffer {
++  assertKeyId(keyId);
++  assertKeyShape(key);
++  if (!wrapped || typeof wrapped !== "object") {
++    throw new SecretWrappingError("WrappedSecret must be an object");
++  }
++  if (wrapped.v !== WRAPPED_SECRET_VERSION) {
++    throw new SecretWrappingError(
++      `WrappedSecret has unsupported version ${String(wrapped.v)} (expected ${WRAPPED_SECRET_VERSION})`,
++    );
++  }
++  if (wrapped.keyId !== keyId) {
++    throw new SecretWrappingError(
++      `WrappedSecret keyId mismatch: envelope is sealed under "${wrapped.keyId}", caller supplied "${keyId}"`,
++    );
++  }
++  if (!(wrapped.iv instanceof Buffer) || wrapped.iv.length !== IV_BYTES) {
++    throw new SecretWrappingError(
++      `WrappedSecret iv must be a Buffer of ${IV_BYTES} bytes (got ${wrapped.iv instanceof Buffer ? wrapped.iv.length : typeof wrapped.iv})`,
++    );
++  }
++  if (!(wrapped.authTag instanceof Buffer) || wrapped.authTag.length !== AUTH_TAG_BYTES) {
++    throw new SecretWrappingError(
++      `WrappedSecret authTag must be a Buffer of ${AUTH_TAG_BYTES} bytes (got ${wrapped.authTag instanceof Buffer ? wrapped.authTag.length : typeof wrapped.authTag})`,
++    );
++  }
++  if (!(wrapped.ciphertext instanceof Buffer)) {
++    throw new SecretWrappingError("WrappedSecret ciphertext must be a Buffer");
++  }
++  const decipher = createDecipheriv(ALGORITHM, key, wrapped.iv, { authTagLength: AUTH_TAG_BYTES });
++  decipher.setAuthTag(wrapped.authTag);
++  try {
++    return Buffer.concat([decipher.update(wrapped.ciphertext), decipher.final()]);
++  } catch (error) {
++    throw new SecretWrappingError(
++      "AES-256-GCM authentication failed — wrong key, tampered ciphertext, or wrong IV",
++      { cause: error },
++    );
++  }
++}
++
++function encodeJsonBase64Url(obj: unknown): string {
++  const json = JSON.stringify(obj);
++  if (json.length > MAX_SERIALIZED_LENGTH) {
++    throw new SecretWrappingError(
++      `Serialized envelope exceeds ${MAX_SERIALIZED_LENGTH} chars (got ${json.length})`,
++    );
++  }
++  return Buffer.from(json, "utf8").toString("base64url");
++}
++
++function decodeJsonBase64Url(s: string, label: string): unknown {
++  if (typeof s !== "string" || s.length === 0) {
++    throw new SecretWrappingError(`${label} must be a non-empty string`);
++  }
++  if (s.length > MAX_SERIALIZED_LENGTH) {
++    throw new SecretWrappingError(
++      `${label} exceeds ${MAX_SERIALIZED_LENGTH} characters (got ${s.length})`,
++    );
++  }
++  let parsed: unknown;
++  try {
++    const json = Buffer.from(s, "base64url").toString("utf8");
++    parsed = JSON.parse(json);
++  } catch (error) {
++    throw new SecretWrappingError(`${label} is not valid base64url-encoded JSON`, { cause: error });
++  }
++  return parsed;
++}
++
++/** Serialize a WrappedSecret to a base64url-encoded JSON string for BLOB storage. */
++export function serializeWrappedSecret(wrapped: WrappedSecret): string {
++  return encodeJsonBase64Url({
++    v: wrapped.v,
++    keyId: wrapped.keyId,
++    iv: toBase64Url(wrapped.iv),
++    ciphertext: toBase64Url(wrapped.ciphertext),
++    authTag: toBase64Url(wrapped.authTag),
++    createdAtMs: wrapped.createdAtMs,
++  });
++}
++
++/** Deserialize a base64url-encoded JSON string back into a WrappedSecret. */
++export function deserializeWrappedSecret(serialized: string): WrappedSecret {
++  const obj = decodeJsonBase64Url(serialized, "WrappedSecret") as Record<string, unknown>;
++  if (!obj || typeof obj !== "object") {
++    throw new SecretWrappingError("WrappedSecret JSON must decode to an object");
++  }
++  if (obj.v !== WRAPPED_SECRET_VERSION) {
++    throw new SecretWrappingError(
++      `WrappedSecret has unsupported version ${String(obj.v)} (expected ${WRAPPED_SECRET_VERSION})`,
++    );
++  }
++  if (typeof obj.keyId !== "string" || obj.keyId.length === 0) {
++    throw new SecretWrappingError("WrappedSecret.keyId must be a non-empty string");
++  }
++  if (typeof obj.createdAtMs !== "number" || !Number.isSafeInteger(obj.createdAtMs)) {
++    throw new SecretWrappingError("WrappedSecret.createdAtMs must be a safe integer");
++  }
++  return {
++    v: WRAPPED_SECRET_VERSION,
++    keyId: obj.keyId,
++    iv: fromBase64Url(String(obj.iv), "WrappedSecret.iv"),
++    ciphertext: fromBase64Url(String(obj.ciphertext), "WrappedSecret.ciphertext"),
++    authTag: fromBase64Url(String(obj.authTag), "WrappedSecret.authTag"),
++    createdAtMs: obj.createdAtMs,
++  };
++}
++
++/**
++ * Abstract keyring provider. M5 calls `getActiveKey()` when it needs to wrap a
++ * freshly generated ML-DSA-65 secret. M6 implements File/Env/Composite variants
++ * and a fail-closed OsKeyring stub. The interface is intentionally narrow so a
++ * future `@napi-rs/keyring` native provider can drop in.
++ */
++export interface WrappingKeyProvider {
++  /** Identifier that will be embedded in the envelope (e.g. file basename, env var name). */
++  getActiveKey(): Promise<{ keyId: string; key: Buffer }>;
++  /** Resolve a specific keyId; null if the provider does not hold that key. */
++  getKeyById(keyId: string): Promise<{ keyId: string; key: Buffer } | null>;
++}
+-- 
+2.43.0
+

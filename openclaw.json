@@ -1,0 +1,43 @@
+{
+  "gateway": {
+    "port": 18789,
+    "bind": "127.0.0.1",
+    "auth": {
+      "mode": "token",
+      "token": ""
+    }
+  },
+  "channels": {
+    "feishu": {
+      "enabled": true,
+      "defaultAccount": "primary",
+      "connectionMode": "websocket",
+      "renderMode": "auto",
+      "accounts": {
+        "primary": {
+          "enabled": true,
+          "name": "openclaw-pqc-primary",
+          "appId": "cli_aaaffea2b138dbfc",
+          "appSecret": "JUfFJ51N0Nw9kNRk0ymUj5MsA2HMMfaf",
+          "domain": "feishu",
+          "connectionMode": "websocket",
+          "renderMode": "auto"
+        }
+      }
+    }
+  },
+  "agents": {
+    "default": "openclaw-pqc",
+    "list": {
+      "openclaw-pqc": {
+        "id": "openclaw-pqc",
+        "model": "claude-sonnet",
+        "system": "You are a PQC-aware chat assistant. Be concise, accurate, and helpful."
+      }
+    }
+  },
+  "logging": {
+    "level": "info",
+    "redactSecrets": true
+  }
+}

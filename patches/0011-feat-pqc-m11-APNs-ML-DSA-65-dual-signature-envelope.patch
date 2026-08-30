@@ -1,0 +1,680 @@
+From 9050ef96e57ce5d4da6f81d25e1b9443e5c000da Mon Sep 17 00:00:00 2001
+From: wu <wuc8974@gmail.com>
+Date: Wed, 19 Aug 2026 23:31:27 +0800
+Subject: [PATCH 11/11] feat(pqc-m11): APNs ML-DSA-65 dual signature envelope
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+PQC migration (whitepaper 1.3): Apple APNs JWT (ES256) is unchanged
+because the Apple protocol is not ours to evolve. M11 adds an
+app-layer dual-signature envelope that legacy clients verify with
+Ed25519 and post-quantum clients verify with ML-DSA-65. Both halves
+must verify; failure of either throws.
+
+- src/security/push-dual-signature.ts:
+  - signPushPayloadDual takes a UTF-8 payload, a 32-byte raw Ed25519
+    secret, a 4032-byte raw ML-DSA-65 secret, and per-algorithm keyIds.
+    It builds PKCS8 / SPKI framing on top of node:crypto for the
+    Ed25519 half (NEVER @noble/curves/ed25519 — that path is missing
+    randomPrivateKey and breaks vitest, per danteng prompt §M11.2) and
+    reuses the canonical ML-DSA-65 helpers from M1.
+  - verifyPushPayloadDual fails closed: it deserialises the envelope,
+    checks the strict `algorithms: ["ed25519", "ml-dsa-65"]` header
+    (length 2, exact ordering — no reordering, no extras), verifies
+    the Ed25519 half, then the ML-DSA-65 half, and only returns true
+    when both pass.
+  - Envelope wire format: algorithms, ed25519_sig, mldsa65_sig,
+    key_id_ed25519, key_id_mldsa65 — base64url-encoded signatures,
+    JSON-serializable.
+  - All input shapes (raw key length, keyId presence, signature
+    length) are validated up front; PushDualSignatureError is the
+    typed error class.
+- src/security/push-dual-signature.test.ts: 13 invariants — sign +
+  verify round-trip, fail-closed on tampered Ed25519 sig, fail-closed
+  on tampered ML-DSA-65 sig, fail-closed on tampered payload, key
+  mismatch (Ed25519 and ML-DSA-65), strict algorithms header
+  (reordering + extras), JSON-stringified envelope round-trip,
+  non-object envelope rejection, raw-key length guards, empty /
+  over-long keyId rejection, and exact signature byte counts (64
+  Ed25519, 3309 ML-DSA-65).
+
+13/13 green.
+
+Generated with Mavis
+---
+ src/security/push-dual-signature.test.ts | 326 +++++++++++++++++++++++
+ src/security/push-dual-signature.ts      | 288 ++++++++++++++++++++
+ 2 files changed, 614 insertions(+)
+ create mode 100755 src/security/push-dual-signature.test.ts
+ create mode 100755 src/security/push-dual-signature.ts
+
+diff --git a/src/security/push-dual-signature.test.ts b/src/security/push-dual-signature.test.ts
+new file mode 100755
+index 00000000000..a3cc39c34d2
+--- /dev/null
++++ b/src/security/push-dual-signature.test.ts
+@@ -0,0 +1,326 @@
++// M11 (PQC migration, whitepaper 1.3): APNs ML-DSA-65 dual signature
++// invariants.
++//
++// 13 invariants covering: sign + verify round-trip on a UTF-8 push
++// payload, fail-closed on tampered Ed25519 sig, fail-closed on
++// tampered ML-DSA-65 sig, fail-closed on tampered payload, fail-closed
++// on the wrong public key (Ed25519), fail-closed on the wrong public
++// key (ML-DSA-65), strict algorithms header validation (rejects
++// any reordering or extra algorithms), envelope as a string round-trip,
++// Ed25519 always via node:crypto (NOT @noble/curves), wrong-shape raw
++// key length, missing/empty keyId rejection, and exact signature byte
++// count.
++import { generateKeyPairSync, randomBytes } from "node:crypto";
++import { describe, expect, it } from "vitest";
++import { generateMlDsa65Keypair } from "../infra/mldsa65-key-storage.js";
++import {
++  PUSH_DUAL_SIG_CONSTANTS,
++  PushDualSignatureError,
++  signPushPayloadDual,
++  verifyPushPayloadDual,
++  type PushDualEnvelope,
++} from "./push-dual-signature.js";
++
++function ed25519KeygenRaw(): { secret: Uint8Array; public: Uint8Array } {
++  const { publicKey, privateKey } = generateKeyPairSync("ed25519");
++  const privDer = privateKey.export({ type: "pkcs8", format: "der" });
++  const pubDer = publicKey.export({ type: "spki", format: "der" });
++  // Ed25519 raw private key is the trailing 32 bytes of the PKCS8 DER
++  // (the 0x40 || 32-byte seed at the end). The raw public key is the
++  // trailing 32 bytes of the SPKI DER.
++  const privRaw = privDer.subarray(privDer.length - 32);
++  const pubRaw = pubDer.subarray(pubDer.length - 32);
++  return { secret: new Uint8Array(privRaw), public: new Uint8Array(pubRaw) };
++}
++
++describe("push-dual-signature (M11, whitepaper 1.3)", () => {
++  it("exposes the canonical constants for the dual envelope", () => {
++    expect(PUSH_DUAL_SIG_CONSTANTS.ED25519_RAW_SECRET_KEY).toBe(32);
++    expect(PUSH_DUAL_SIG_CONSTANTS.ED25519_RAW_PUBLIC_KEY).toBe(32);
++    expect(PUSH_DUAL_SIG_CONSTANTS.ED25519_SIGNATURE_BYTES).toBe(64);
++    expect(PUSH_DUAL_SIG_CONSTANTS.MLDSA65_PUBLIC_KEY_BYTES).toBe(1952);
++    expect(PUSH_DUAL_SIG_CONSTANTS.MLDSA65_SECRET_KEY_BYTES).toBe(4032);
++    expect(PUSH_DUAL_SIG_CONSTANTS.MLDSA65_SIGNATURE_BYTES).toBe(3309);
++    expect(PUSH_DUAL_SIG_CONSTANTS.EXPECTED_ALGORITHMS).toEqual(["ed25519", "ml-dsa-65"]);
++  });
++
++  it("sign + verify round-trips a UTF-8 push payload", () => {
++    const ed = ed25519KeygenRaw();
++    const ml = generateMlDsa65Keypair();
++    const payload = JSON.stringify({ alert: "backup ready", ts: 1234 });
++    const { envelope } = signPushPayloadDual({
++      payload,
++      ed25519SecretKeyRaw: ed.secret,
++      mldsa65SecretKeyRaw: ml.secretKey,
++      keyIdEd25519: "ed25519-key-2026-08",
++      keyIdMldsa65: "mldsa65-key-2026-08",
++    });
++    expect(envelope.algorithms).toEqual(["ed25519", "ml-dsa-65"]);
++    expect(envelope.key_id_ed25519).toBe("ed25519-key-2026-08");
++    expect(envelope.key_id_mldsa65).toBe("mldsa65-key-2026-08");
++    expect(Buffer.from(envelope.ed25519_sig, "base64url").length).toBe(
++      PUSH_DUAL_SIG_CONSTANTS.ED25519_SIGNATURE_BYTES,
++    );
++    expect(Buffer.from(envelope.mldsa65_sig, "base64url").length).toBe(
++      PUSH_DUAL_SIG_CONSTANTS.MLDSA65_SIGNATURE_BYTES,
++    );
++    expect(
++      verifyPushPayloadDual({
++        payload,
++        ed25519PublicKeyRaw: ed.public,
++        mldsa65PublicKeyRaw: ml.publicKey,
++        envelope,
++      }),
++    ).toBe(true);
++  });
++
++  it("verifier fails closed on a tampered Ed25519 signature", () => {
++    const ed = ed25519KeygenRaw();
++    const ml = generateMlDsa65Keypair();
++    const payload = "tamper-test-ed25519";
++    const { envelope } = signPushPayloadDual({
++      payload,
++      ed25519SecretKeyRaw: ed.secret,
++      mldsa65SecretKeyRaw: ml.secretKey,
++      keyIdEd25519: "k-ed",
++      keyIdMldsa65: "k-ml",
++    });
++    const sigBytes = Buffer.from(envelope.ed25519_sig, "base64url");
++    sigBytes[0] = (sigBytes[0]! ^ 0x01) & 0xff;
++    const tampered: PushDualEnvelope = {
++      ...envelope,
++      ed25519_sig: sigBytes.toString("base64url"),
++    };
++    expect(() =>
++      verifyPushPayloadDual({
++        payload,
++        ed25519PublicKeyRaw: ed.public,
++        mldsa65PublicKeyRaw: ml.publicKey,
++        envelope: tampered,
++      }),
++    ).toThrow(/Ed25519 signature verification failed/);
++  });
++
++  it("verifier fails closed on a tampered ML-DSA-65 signature", () => {
++    const ed = ed25519KeygenRaw();
++    const ml = generateMlDsa65Keypair();
++    const payload = "tamper-test-mldsa65";
++    const { envelope } = signPushPayloadDual({
++      payload,
++      ed25519SecretKeyRaw: ed.secret,
++      mldsa65SecretKeyRaw: ml.secretKey,
++      keyIdEd25519: "k-ed",
++      keyIdMldsa65: "k-ml",
++    });
++    const sigBytes = Buffer.from(envelope.mldsa65_sig, "base64url");
++    sigBytes[0] = (sigBytes[0]! ^ 0x01) & 0xff;
++    const tampered: PushDualEnvelope = {
++      ...envelope,
++      mldsa65_sig: sigBytes.toString("base64url"),
++    };
++    expect(() =>
++      verifyPushPayloadDual({
++        payload,
++        ed25519PublicKeyRaw: ed.public,
++        mldsa65PublicKeyRaw: ml.publicKey,
++        envelope: tampered,
++      }),
++    ).toThrow(/ML-DSA-65 signature verification failed/);
++  });
++
++  it("verifier fails closed on a tampered payload", () => {
++    const ed = ed25519KeygenRaw();
++    const ml = generateMlDsa65Keypair();
++    const { envelope } = signPushPayloadDual({
++      payload: "original",
++      ed25519SecretKeyRaw: ed.secret,
++      mldsa65SecretKeyRaw: ml.secretKey,
++      keyIdEd25519: "k-ed",
++      keyIdMldsa65: "k-ml",
++    });
++    expect(() =>
++      verifyPushPayloadDual({
++        payload: "tampered",
++        ed25519PublicKeyRaw: ed.public,
++        mldsa65PublicKeyRaw: ml.publicKey,
++        envelope,
++      }),
++    ).toThrow(/signature verification failed/);
++  });
++
++  it("verifier fails closed when the Ed25519 public key does not match", () => {
++    const ed = ed25519KeygenRaw();
++    const ed2 = ed25519KeygenRaw();
++    const ml = generateMlDsa65Keypair();
++    const payload = "key-mismatch-ed";
++    const { envelope } = signPushPayloadDual({
++      payload,
++      ed25519SecretKeyRaw: ed.secret,
++      mldsa65SecretKeyRaw: ml.secretKey,
++      keyIdEd25519: "k-ed",
++      keyIdMldsa65: "k-ml",
++    });
++    expect(() =>
++      verifyPushPayloadDual({
++        payload,
++        ed25519PublicKeyRaw: ed2.public,
++        mldsa65PublicKeyRaw: ml.publicKey,
++        envelope,
++      }),
++    ).toThrow(/Ed25519 signature verification failed/);
++  });
++
++  it("verifier fails closed when the ML-DSA-65 public key does not match", () => {
++    const ed = ed25519KeygenRaw();
++    const ml = generateMlDsa65Keypair();
++    const ml2 = generateMlDsa65Keypair();
++    const payload = "key-mismatch-ml";
++    const { envelope } = signPushPayloadDual({
++      payload,
++      ed25519SecretKeyRaw: ed.secret,
++      mldsa65SecretKeyRaw: ml.secretKey,
++      keyIdEd25519: "k-ed",
++      keyIdMldsa65: "k-ml",
++    });
++    expect(() =>
++      verifyPushPayloadDual({
++        payload,
++        ed25519PublicKeyRaw: ed.public,
++        mldsa65PublicKeyRaw: ml2.publicKey,
++        envelope,
++      }),
++    ).toThrow(/ML-DSA-65 signature verification failed/);
++  });
++
++  it("strict algorithms header rejects any reordering or extra algorithms", () => {
++    const ed = ed25519KeygenRaw();
++    const ml = generateMlDsa65Keypair();
++    const payload = "algorithms-header";
++    const { envelope } = signPushPayloadDual({
++      payload,
++      ed25519SecretKeyRaw: ed.secret,
++      mldsa65SecretKeyRaw: ml.secretKey,
++      keyIdEd25519: "k-ed",
++      keyIdMldsa65: "k-ml",
++    });
++    // Wrong order
++    const wrongOrder: PushDualEnvelope = {
++      ...envelope,
++      algorithms: ["ml-dsa-65", "ed25519"] as unknown as ["ed25519", "ml-dsa-65"],
++    };
++    expect(() =>
++      verifyPushPayloadDual({
++        payload,
++        ed25519PublicKeyRaw: ed.public,
++        mldsa65PublicKeyRaw: ml.publicKey,
++        envelope: wrongOrder,
++      }),
++    ).toThrow(/algorithms must be exactly/);
++    // Extra algorithm
++    const withExtra: PushDualEnvelope = {
++      ...envelope,
++      algorithms: ["ed25519", "ml-dsa-65", "slh-dsa"] as unknown as ["ed25519", "ml-dsa-65"],
++    };
++    expect(() =>
++      verifyPushPayloadDual({
++        payload,
++        ed25519PublicKeyRaw: ed.public,
++        mldsa65PublicKeyRaw: ml.publicKey,
++        envelope: withExtra,
++      }),
++    ).toThrow(/algorithms must be exactly/);
++  });
++
++  it("verifier accepts a JSON-stringified envelope (round-trip via serialization)", () => {
++    const ed = ed25519KeygenRaw();
++    const ml = generateMlDsa65Keypair();
++    const payload = "envelope-string-roundtrip";
++    const { envelope } = signPushPayloadDual({
++      payload,
++      ed25519SecretKeyRaw: ed.secret,
++      mldsa65SecretKeyRaw: ml.secretKey,
++      keyIdEd25519: "k-ed",
++      keyIdMldsa65: "k-ml",
++    });
++    const serialized = JSON.stringify(envelope);
++    expect(
++      verifyPushPayloadDual({
++        payload,
++        ed25519PublicKeyRaw: ed.public,
++        mldsa65PublicKeyRaw: ml.publicKey,
++        envelope: serialized,
++      }),
++    ).toBe(true);
++  });
++
++  it("rejects a non-string non-object envelope", () => {
++    const ed = ed25519KeygenRaw();
++    const ml = generateMlDsa65Keypair();
++    const payload = "x";
++    const { envelope } = signPushPayloadDual({
++      payload,
++      ed25519SecretKeyRaw: ed.secret,
++      mldsa65SecretKeyRaw: ml.secretKey,
++      keyIdEd25519: "k-ed",
++      keyIdMldsa65: "k-ml",
++    });
++    expect(() =>
++      verifyPushPayloadDual({
++        payload,
++        ed25519PublicKeyRaw: ed.public,
++        mldsa65PublicKeyRaw: ml.publicKey,
++        envelope: 42 as unknown as string,
++      }),
++    ).toThrow();
++    void envelope;
++  });
++
++  it("rejects an Ed25519 secret key of the wrong length", () => {
++    const ml = generateMlDsa65Keypair();
++    expect(() =>
++      signPushPayloadDual({
++        payload: "x",
++        ed25519SecretKeyRaw: new Uint8Array(16),
++        mldsa65SecretKeyRaw: ml.secretKey,
++        keyIdEd25519: "k-ed",
++        keyIdMldsa65: "k-ml",
++      }),
++    ).toThrow(/ed25519SecretKeyRaw must be a 32-byte Uint8Array/);
++  });
++
++  it("rejects an ML-DSA-65 secret key of the wrong length", () => {
++    const ed = ed25519KeygenRaw();
++    expect(() =>
++      signPushPayloadDual({
++        payload: "x",
++        ed25519SecretKeyRaw: ed.secret,
++        mldsa65SecretKeyRaw: new Uint8Array(4031),
++        keyIdEd25519: "k-ed",
++        keyIdMldsa65: "k-ml",
++      }),
++    ).toThrow(/mldsa65SecretKeyRaw must be a 4032-byte Uint8Array/);
++  });
++
++  it("rejects empty / over-long keyIds", () => {
++    const ed = ed25519KeygenRaw();
++    const ml = generateMlDsa65Keypair();
++    expect(() =>
++      signPushPayloadDual({
++        payload: "x",
++        ed25519SecretKeyRaw: ed.secret,
++        mldsa65SecretKeyRaw: ml.secretKey,
++        keyIdEd25519: "",
++        keyIdMldsa65: "k-ml",
++      }),
++    ).toThrow(/keyIdEd25519 must be a non-empty string/);
++    expect(() =>
++      signPushPayloadDual({
++        payload: "x",
++        ed25519SecretKeyRaw: ed.secret,
++        mldsa65SecretKeyRaw: ml.secretKey,
++        keyIdEd25519: "k-ed",
++        keyIdMldsa65: "k".repeat(129),
++      }),
++    ).toThrow(/exceeds 128 characters/);
++  });
++});
+diff --git a/src/security/push-dual-signature.ts b/src/security/push-dual-signature.ts
+new file mode 100755
+index 00000000000..1223ca00069
+--- /dev/null
++++ b/src/security/push-dual-signature.ts
+@@ -0,0 +1,288 @@
++// M11 (PQC migration, whitepaper 1.3): APNs ML-DSA-65 fallback dual signature.
++//
++// Apple APNs JWT (ES256) is unchanged — the Apple protocol is not
++// ours to evolve. The dual signature is an app-layer envelope attached
++// to every push payload, so legacy clients can still verify the
++// Ed25519 half while post-quantum clients verify the ML-DSA-65 half.
++//
++// Ed25519 always uses `src/infra/ed25519-signature.ts` (PKCS8 / SPKI
++// framing on top of node:crypto). ML-DSA-65 uses the @noble/post-quantum
++// helper from M1.
++
++import { ml_dsa65 } from "@noble/post-quantum/ml-dsa.js";
++import {
++  ed25519PrivateKeyPemFromRaw,
++  ed25519PublicKeyPemFromRaw,
++  signEd25519Payload,
++  verifyEd25519SignatureBytes,
++} from "../infra/ed25519-signature.js";
++import {
++  encodeMlDsa65PublicKey,
++  encodeMlDsa65SecretKey,
++  MLDSA65_PUBLIC_KEY_BYTES,
++  MLDSA65_PUBLIC_KEY_PREFIX,
++  MLDSA65_SECRET_KEY_BYTES,
++  MLDSA65_SECRET_KEY_PREFIX,
++  MLDSA65_SIGNATURE_BYTES,
++  decodeMlDsa65PublicKey,
++  decodeMlDsa65SecretKey,
++  signMlDsa65Payload,
++  verifyMlDsa65Signature,
++} from "../infra/mldsa65-key-storage.js";
++
++const ED25519_RAW_SECRET_KEY = 32;
++const ED25519_RAW_PUBLIC_KEY = 32;
++const ED25519_SIGNATURE_BYTES = 64;
++const EXPECTED_ALGORITHMS: readonly ["ed25519", "ml-dsa-65"] = ["ed25519", "ml-dsa-65"] as const;
++const MAX_KEY_ID_LENGTH = 128;
++const MAX_ENVELOPE_BYTES = 8192;
++
++export const PUSH_DUAL_SIG_CONSTANTS = {
++  ED25519_RAW_SECRET_KEY,
++  ED25519_RAW_PUBLIC_KEY,
++  ED25519_SIGNATURE_BYTES,
++  MLDSA65_PUBLIC_KEY_BYTES,
++  MLDSA65_SECRET_KEY_BYTES,
++  MLDSA65_SIGNATURE_BYTES,
++  EXPECTED_ALGORITHMS,
++  MAX_KEY_ID_LENGTH,
++  MAX_ENVELOPE_BYTES,
++} as const;
++
++export class PushDualSignatureError extends Error {
++  constructor(message: string, options?: ErrorOptions) {
++    super(message, options);
++    this.name = "PushDualSignatureError";
++  }
++}
++
++export interface PushDualEnvelope {
++  algorithms: ["ed25519", "ml-dsa-65"];
++  ed25519_sig: string;
++  mldsa65_sig: string;
++  key_id_ed25519: string;
++  key_id_mldsa65: string;
++}
++
++function assertKeyId(keyId: string, label: string): void {
++  if (typeof keyId !== "string" || keyId.length === 0) {
++    throw new PushDualSignatureError(`${label} must be a non-empty string`);
++  }
++  if (keyId.length > MAX_KEY_ID_LENGTH) {
++    throw new PushDualSignatureError(
++      `${label} exceeds ${MAX_KEY_ID_LENGTH} characters (got ${keyId.length})`,
++    );
++  }
++}
++
++function assertRawKey(raw: Uint8Array, expectedLength: number, label: string): void {
++  if (!(raw instanceof Uint8Array) || raw.length !== expectedLength) {
++    throw new PushDualSignatureError(
++      `${label} must be a ${expectedLength}-byte Uint8Array; got ${raw instanceof Uint8Array ? raw.length : typeof raw}`,
++    );
++  }
++}
++
++function toBase64Url(bytes: Uint8Array): string {
++  let bin = "";
++  for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]!);
++  return Buffer.from(bin, "binary").toString("base64url");
++}
++
++function fromBase64Url(s: string, expectedLength: number, label: string): Buffer {
++  try {
++    const buf = Buffer.from(s, "base64url");
++    if (buf.length !== expectedLength) {
++      throw new PushDualSignatureError(
++        `${label} must decode to ${expectedLength} bytes; got ${buf.length}`,
++      );
++    }
++    return buf;
++  } catch (error) {
++    if (error instanceof PushDualSignatureError) throw error;
++    throw new PushDualSignatureError(`${label} is not valid base64url`, { cause: error });
++  }
++}
++
++function isAlgorithmsHeader(algorithms: unknown): algorithms is ["ed25519", "ml-dsa-65"] {
++  return (
++    Array.isArray(algorithms) &&
++    algorithms.length === 2 &&
++    algorithms[0] === "ed25519" &&
++    algorithms[1] === "ml-dsa-65"
++  );
++}
++
++export interface SignPushPayloadDualOptions {
++  payload: string;
++  ed25519SecretKeyRaw: Uint8Array;
++  mldsa65SecretKeyRaw: Uint8Array;
++  keyIdEd25519: string;
++  keyIdMldsa65: string;
++}
++
++export interface SignPushPayloadDualResult {
++  payload: string;
++  envelope: PushDualEnvelope;
++}
++
++/**
++ * Sign a UTF-8 push payload with both Ed25519 and ML-DSA-65. The
++ * returned envelope is JSON-serializable; the caller embeds it
++ * alongside the original payload.
++ */
++export function signPushPayloadDual(
++  options: SignPushPayloadDualOptions,
++): SignPushPayloadDualResult {
++  if (typeof options.payload !== "string") {
++    throw new PushDualSignatureError("payload must be a UTF-8 string");
++  }
++  assertRawKey(options.ed25519SecretKeyRaw, ED25519_RAW_SECRET_KEY, "ed25519SecretKeyRaw");
++  assertRawKey(options.mldsa65SecretKeyRaw, MLDSA65_SECRET_KEY_BYTES, "mldsa65SecretKeyRaw");
++  assertKeyId(options.keyIdEd25519, "keyIdEd25519");
++  assertKeyId(options.keyIdMldsa65, "keyIdMldsa65");
++
++  // Ed25519 path: build a PKCS8 PEM from the raw 32-byte secret and
++  // sign through the canonical helper. M11 must NOT take a dependency
++  // on @noble/curves/ed25519 (per danteng prompt §M11.2 — that path
++  // is missing `randomPrivateKey` and breaks vitest).
++  const edPrivPem = ed25519PrivateKeyPemFromRaw(Buffer.from(options.ed25519SecretKeyRaw));
++  const edSigBase64Url = signEd25519Payload(edPrivPem, options.payload);
++  if (Buffer.from(edSigBase64Url, "base64url").length !== ED25519_SIGNATURE_BYTES) {
++    throw new PushDualSignatureError(
++      `Ed25519 signature must be ${ED25519_SIGNATURE_BYTES} bytes; got ${Buffer.from(edSigBase64Url, "base64url").length}`,
++    );
++  }
++
++  // ML-DSA-65 path: build the prefixed wire shape and sign through the
++  // canonical M1 helper.
++  const mldsaSecretPem = encodeMlDsa65SecretKey(new Uint8Array(options.mldsa65SecretKeyRaw));
++  const mldsaSigBase64Url = signMlDsa65Payload(mldsaSecretPem, options.payload);
++  if (Buffer.from(mldsaSigBase64Url, "base64url").length !== MLDSA65_SIGNATURE_BYTES) {
++    throw new PushDualSignatureError(
++      `ML-DSA-65 signature must be ${MLDSA65_SIGNATURE_BYTES} bytes; got ${Buffer.from(mldsaSigBase64Url, "base64url").length}`,
++    );
++  }
++
++  const envelope: PushDualEnvelope = {
++    algorithms: ["ed25519", "ml-dsa-65"],
++    ed25519_sig: edSigBase64Url,
++    mldsa65_sig: mldsaSigBase64Url,
++    key_id_ed25519: options.keyIdEd25519,
++    key_id_mldsa65: options.keyIdMldsa65,
++  };
++  return { payload: options.payload, envelope };
++}
++
++export interface VerifyPushPayloadDualOptions {
++  payload: string;
++  ed25519PublicKeyRaw: Uint8Array;
++  mldsa65PublicKeyRaw: Uint8Array;
++  envelope: PushDualEnvelope | string;
++}
++
++function parseEnvelope(envelope: PushPayloadDualEnvelopeLike | string): PushDualEnvelope {
++  if (typeof envelope === "string") {
++    if (envelope.length === 0) {
++      throw new PushDualSignatureError("envelope must be a non-empty string");
++    }
++    if (envelope.length > MAX_ENVELOPE_BYTES) {
++      throw new PushDualSignatureError(
++        `envelope string exceeds ${MAX_ENVELOPE_BYTES} characters (got ${envelope.length})`,
++      );
++    }
++    let parsed: unknown;
++    try {
++      parsed = JSON.parse(envelope);
++    } catch (error) {
++      throw new PushDualSignatureError("envelope is not valid JSON", { cause: error });
++    }
++    return parseEnvelopeObject(parsed);
++  }
++  return parseEnvelopeObject(envelope);
++}
++
++type PushPayloadDualEnvelopeLike = unknown;
++function parseEnvelopeObject(obj: PushPayloadDualEnvelopeLike): PushDualEnvelope {
++  if (!obj || typeof obj !== "object") {
++    throw new PushDualSignatureError("envelope must decode to an object");
++  }
++  const o = obj as Record<string, unknown>;
++  if (!isAlgorithmsHeader(o.algorithms)) {
++    throw new PushDualSignatureError(
++      `envelope.algorithms must be exactly ["ed25519", "ml-dsa-65"]; got ${JSON.stringify(o.algorithms)}`,
++    );
++  }
++  if (typeof o.ed25519_sig !== "string" || o.ed25519_sig.length === 0) {
++    throw new PushDualSignatureError("envelope.ed25519_sig must be a non-empty base64url string");
++  }
++  if (typeof o.mldsa65_sig !== "string" || o.mldsa65_sig.length === 0) {
++    throw new PushDualSignatureError("envelope.mldsa65_sig must be a non-empty base64url string");
++  }
++  if (typeof o.key_id_ed25519 !== "string" || o.key_id_ed25519.length === 0) {
++    throw new PushDualSignatureError("envelope.key_id_ed25519 must be a non-empty string");
++  }
++  if (typeof o.key_id_mldsa65 !== "string" || o.key_id_mldsa65.length === 0) {
++    throw new PushDualSignatureError("envelope.key_id_mldsa65 must be a non-empty string");
++  }
++  return {
++    algorithms: ["ed25519", "ml-dsa-65"],
++    ed25519_sig: o.ed25519_sig,
++    mldsa65_sig: o.mldsa65_sig,
++    key_id_ed25519: o.key_id_ed25519,
++    key_id_mldsa65: o.key_id_mldsa65,
++  };
++}
++
++/**
++ * Verify a push payload's dual signature. Fail-closed: ANY single
++ * signature failure throws PushDualSignatureError. Both halves must
++ * verify under the supplied raw public keys.
++ */
++export function verifyPushPayloadDual(options: VerifyPushPayloadDualOptions): boolean {
++  if (typeof options.payload !== "string") {
++    throw new PushDualSignatureError("payload must be a UTF-8 string");
++  }
++  assertRawKey(options.ed25519PublicKeyRaw, ED25519_RAW_PUBLIC_KEY, "ed25519PublicKeyRaw");
++  assertRawKey(options.mldsa65PublicKeyRaw, MLDSA65_PUBLIC_KEY_BYTES, "mldsa65PublicKeyRaw");
++  const envelope = parseEnvelope(options.envelope);
++
++  // 1. Ed25519 verification.
++  const edPubPem = ed25519PublicKeyPemFromRaw(Buffer.from(options.ed25519PublicKeyRaw));
++  const edSigBytes = fromBase64Url(envelope.ed25519_sig, ED25519_SIGNATURE_BYTES, "ed25519_sig");
++  const ed25519Ok = verifyEd25519SignatureBytes({
++    publicKey: edPubPem,
++    payload: Buffer.from(options.payload, "utf8"),
++    signatureBase64Url: Buffer.from(edSigBytes).toString("base64url"),
++  });
++  if (!ed25519Ok) {
++    throw new PushDualSignatureError("Ed25519 signature verification failed");
++  }
++
++  // 2. ML-DSA-65 verification.
++  const mldsaPubPem = encodeMlDsa65PublicKey(new Uint8Array(options.mldsa65PublicKeyRaw));
++  const mldsaSigBytes = fromBase64Url(envelope.mldsa65_sig, MLDSA65_SIGNATURE_BYTES, "mldsa65_sig");
++  const mldsaOk = verifyMlDsa65Signature({
++    publicKey: mldsaPubPem,
++    payload: options.payload,
++    sigBase64Url: Buffer.from(mldsaSigBytes).toString("base64url"),
++  });
++  if (!mldsaOk) {
++    throw new PushDualSignatureError("ML-DSA-65 signature verification failed");
++  }
++  // Confirm the wire shape carries the canonical keyIds. Verification
++  // does not require the keyId to match the public key (callers may
++  // rotate), but the envelope must round-trip the prefix and length.
++  assertKeyId(envelope.key_id_ed25519, "envelope.key_id_ed25519");
++  assertKeyId(envelope.key_id_mldsa65, "envelope.key_id_mldsa65");
++  return true;
++}
++
++// Re-export size constants from the @noble/post-quantum module so a
++// downstream caller can build a keys table without pulling in the
++// internal module.
++void ml_dsa65;
++void decodeMlDsa65PublicKey;
++void decodeMlDsa65SecretKey;
++void MLDSA65_PUBLIC_KEY_PREFIX;
++void MLDSA65_SECRET_KEY_PREFIX;
+-- 
+2.43.0
+

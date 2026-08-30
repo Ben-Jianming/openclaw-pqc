@@ -1,0 +1,414 @@
+From 9bf366f0c2788ba31f2e5aead163d42156ca6dbe Mon Sep 17 00:00:00 2001
+From: wu <wuc8974@gmail.com>
+Date: Wed, 19 Aug 2026 21:09:06 +0800
+Subject: [PATCH 09/11] feat(pqc-m9): structured PQC log with redaction at the
+ emit boundary
+
+PQC migration (whitepaper 2.2.9): every PQC event flows through a
+single `pqcLog.{info,warn,error,debug}` chokepoint. The emit
+boundary applies a uniform redaction pass so subscribers (real loggers
+or test recorders) only ever see safe data.
+
+- src/logging/pqc-log.ts:
+  - PQC_EVENT vocabulary (wrap-secret, unwrap-secret, device-identity,
+    keyring, rotation, backup, restore, doctor) - exported as a
+    readonly tuple so a downstream consumer can derive the union type.
+  - PqcLogPayload typed shape with optional identityKey, keyId, detail,
+    and free-form aux fields. The extra fields flow through redaction.
+  - redactPqcLogPayload drops undefined values, drops Buffer / TypedArray
+    values, replaces any key matching /passphrase/i, /raw[-_]?key/i,
+    /private[-_]?key/i, /secret/i with a [REDACTED] marker, and
+    recursively redacts nested plain objects and arrays.
+  - setPqcEmit / getPqcEmit / resetPqcEmit are the in-process swap
+    surface. bindOpenClawLogger routes the redacted record to the
+    appropriate sink (info / warn / error / debug) and tags it with
+    `{ tag: "PQC" }` for downstream filtering.
+  - pqcLog chokepoint is a stable object reference so M4 and M5 can
+    import it without re-creating a closure per call.
+- src/logging/pqc-log.test.ts: 10 invariants - PQC_EVENT membership,
+  secret-name redaction (case-insensitive, all 4 patterns), Buffer /
+  TypedArray drop, undefined drop, nested-object / nested-array
+  recursion, chokepoint routing through the swapped emitter,
+  bindOpenClawLogger level routing, default-emitter console fallback,
+  Buffer-drop inside arrays, and emitter swap identity.
+
+10/10 green.
+
+Generated with Mavis
+---
+ src/logging/pqc-log.test.ts | 182 ++++++++++++++++++++++++++++++++++++
+ src/logging/pqc-log.ts      | 173 ++++++++++++++++++++++++++++++++++
+ 2 files changed, 355 insertions(+)
+ create mode 100755 src/logging/pqc-log.test.ts
+ create mode 100755 src/logging/pqc-log.ts
+
+diff --git a/src/logging/pqc-log.test.ts b/src/logging/pqc-log.test.ts
+new file mode 100755
+index 00000000000..eddb8865be7
+--- /dev/null
++++ b/src/logging/pqc-log.test.ts
+@@ -0,0 +1,182 @@
++// M9 (PQC migration, whitepaper 2.2.9): structured PQC log invariants.
++//
++// 9 invariants covering: redaction of undefined / Buffer / TypedArray
++// values, redaction of secret-named fields (passphrase / rawkey /
++// privatekey, case-insensitive), the level-routing pass through
++// bindOpenClawLogger, the default-emitter console fallback, and the
++// pqcLog chokepoint itself.
++import { afterEach, describe, expect, it } from "vitest";
++import {
++  bindOpenClawLogger,
++  getPqcEmit,
++  pqcLog,
++  PQC_EVENT,
++  redactPqcLogPayload,
++  resetPqcEmit,
++  setPqcEmit,
++  type OpenClawLogger,
++  type PqcLogPayload,
++} from "./pqc-log.js";
++
++afterEach(() => {
++  resetPqcEmit();
++});
++
++function captureOne(record: PqcLogPayload): PqcLogPayload {
++  return record;
++}
++
++describe("pqc-log (M9, whitepaper 2.2.9)", () => {
++  it("exposes the canonical PQC_EVENT vocabulary", () => {
++    expect(PQC_EVENT).toContain("wrap-secret");
++    expect(PQC_EVENT).toContain("unwrap-secret");
++    expect(PQC_EVENT).toContain("device-identity");
++    expect(PQC_EVENT).toContain("keyring");
++    expect(PQC_EVENT).toContain("rotation");
++    expect(PQC_EVENT).toContain("backup");
++    expect(PQC_EVENT).toContain("restore");
++    expect(PQC_EVENT).toContain("doctor");
++    expect(PQC_EVENT.length).toBe(8);
++  });
++
++  it("redacts fields whose name matches passphrase / rawkey / privatekey (case-insensitive)", () => {
++    const out = redactPqcLogPayload({
++      event: "wrap-secret",
++      level: "info",
++      status: "ok",
++      passphrase: "hunter2-very-secret",
++      rawKey: Buffer.from("a-32-byte-secret-key-here-here-he"),
++      privateKeyPem: "MLDSA65-SECRET-KEY:secret",
++      PASSPHRASE_BACKUP: "openclaw-rotates-wrapping-keys-2026",
++      keyId: "wrap-key-2026-08",
++    });
++    expect(out.passphrase).toBe("[REDACTED]");
++    expect(out.rawKey).toBe("[REDACTED]");
++    expect(out.privateKeyPem).toBe("[REDACTED]");
++    expect(out.PASSPHRASE_BACKUP).toBe("[REDACTED]");
++    expect(out.keyId).toBe("wrap-key-2026-08");
++  });
++
++  it("drops Buffer / TypedArray values entirely (no [REDACTED] marker)", () => {
++    const out = redactPqcLogPayload({
++      event: "unwrap-secret",
++      level: "info",
++      status: "ok",
++      ciphertext: Buffer.alloc(32),
++      payload: new Uint8Array(8),
++      identityKey: "primary",
++    });
++    expect(Object.prototype.hasOwnProperty.call(out, "ciphertext")).toBe(false);
++    expect(Object.prototype.hasOwnProperty.call(out, "payload")).toBe(false);
++    expect(out.identityKey).toBe("primary");
++  });
++
++  it("drops undefined values from the output", () => {
++    const out = redactPqcLogPayload({
++      event: "device-identity",
++      level: "info",
++      status: "ok",
++      identityKey: undefined,
++      keyId: undefined,
++      detail: "fingerprint match",
++    });
++    expect(Object.prototype.hasOwnProperty.call(out, "identityKey")).toBe(false);
++    expect(Object.prototype.hasOwnProperty.call(out, "keyId")).toBe(false);
++    expect(out.detail).toBe("fingerprint match");
++  });
++
++  it("recurses into nested plain objects and arrays, redacting as it goes", () => {
++    const out = redactPqcLogPayload({
++      event: "rotation",
++      level: "info",
++      status: "ok",
++      rotated: [
++        { identityKey: "primary", passphrase: "should-be-redacted" },
++        { identityKey: "secondary", rawKey: "should-be-redacted" },
++      ],
++      summary: { totalRotated: 2, secretBackup: "should-be-redacted" },
++    });
++    const rotated = out.rotated as Array<Record<string, unknown>>;
++    expect(rotated[0].passphrase).toBe("[REDACTED]");
++    expect(rotated[1].rawKey).toBe("[REDACTED]");
++    const summary = out.summary as Record<string, unknown>;
++    expect(summary.totalRotated).toBe(2);
++    expect(summary.secretBackup).toBe("[REDACTED]");
++  });
++
++  it("setPqcEmit / getPqcEmit swap the emitter and the chokepoint routes through it", () => {
++    const seen: PqcLogPayload[] = [];
++    const myEmitter = (record: PqcLogPayload): void => {
++      seen.push(record);
++    };
++    setPqcEmit(myEmitter);
++    expect(getPqcEmit()).toBe(myEmitter);
++    pqcLog.info({ event: "device-identity", status: "ok", detail: "rotated identity" });
++    pqcLog.warn({ event: "keyring", status: "fail", detail: "active key missing" });
++    pqcLog.error({ event: "doctor", status: "fail", detail: "stale wrap" });
++    pqcLog.debug({ event: "wrap-secret", status: "ok", detail: "test debug" });
++    expect(seen).toHaveLength(4);
++    expect(seen.map((r) => r.level)).toEqual(["info", "warn", "error", "debug"]);
++    expect(seen[0].event).toBe("device-identity");
++  });
++
++  it("bindOpenClawLogger routes records by level to the correct sink", () => {
++    const info: Record<string, unknown>[] = [];
++    const warn: Record<string, unknown>[] = [];
++    const error: Record<string, unknown>[] = [];
++    const debug: Record<string, unknown>[] = [];
++    const logger: OpenClawLogger = {
++      info: (r) => info.push(r),
++      warn: (r) => warn.push(r),
++      error: (r) => error.push(r),
++      debug: (r) => debug.push(r),
++    };
++    bindOpenClawLogger(logger);
++    pqcLog.info({ event: "device-identity", status: "ok" });
++    pqcLog.warn({ event: "keyring", status: "fail", detail: "no active key" });
++    pqcLog.error({ event: "doctor", status: "fail", detail: "needs repair" });
++    pqcLog.debug({ event: "wrap-secret", status: "ok" });
++    expect(info).toHaveLength(1);
++    expect(warn).toHaveLength(1);
++    expect(error).toHaveLength(1);
++    expect(debug).toHaveLength(1);
++    expect(info[0].tag).toBe("PQC");
++    expect(info[0].event).toBe("device-identity");
++  });
++
++  it("captures the default emitter via console fallback when no other sink is bound", () => {
++    const lines: string[] = [];
++    const originalLog = console.log;
++    console.log = (line: string) => lines.push(line);
++    try {
++      resetPqcEmit();
++      pqcLog.info({ event: "device-identity", status: "ok", detail: "fallback" });
++    } finally {
++      console.log = originalLog;
++    }
++    expect(lines).toHaveLength(1);
++    expect(lines[0]).toMatch(/^\[PQC\] /);
++    const parsed = JSON.parse(lines[0].slice("[PQC] ".length));
++    expect(parsed.event).toBe("device-identity");
++  });
++
++  it("rejects Buffer / TypedArray values inside arrays as well as top-level", () => {
++    const out = redactPqcLogPayload({
++      event: "backup",
++      level: "info",
++      status: "ok",
++      backups: [{ envelope: Buffer.from("opaque-payload") }, { envelope: "valid-string-envelope" }],
++    });
++    const backups = out.backups as Array<Record<string, unknown>>;
++    expect(backups[0].envelope).toBeUndefined();
++    expect(backups[1].envelope).toBe("valid-string-envelope");
++  });
++
++  it("captures the captureOne helper and confirms emitter swap identity", () => {
++    const original = getPqcEmit();
++    setPqcEmit(captureOne);
++    expect(getPqcEmit()).not.toBe(original);
++    expect(getPqcEmit()).toBe(captureOne);
++    setPqcEmit(original);
++  });
++});
+diff --git a/src/logging/pqc-log.ts b/src/logging/pqc-log.ts
+new file mode 100755
+index 00000000000..b20492f3042
+--- /dev/null
++++ b/src/logging/pqc-log.ts
+@@ -0,0 +1,173 @@
++// M9 (PQC migration, whitepaper 2.2.9): structured PQC logging chokepoint.
++//
++// Every PQC event flows through `pqcLog.{info,warn,error,debug}`. The emit
++// boundary applies a uniform redaction pass so the surface that
++// subscribers see never carries secret fields, undefined values, or raw
++// buffer payloads. A default in-process recorder captures the events
++// when no other sink has been bound — useful for tests, and a no-op for
++// production callers that wire their own logger via
++// `bindOpenClawLogger`.
++
++export const PQC_EVENT = [
++  "wrap-secret",
++  "unwrap-secret",
++  "device-identity",
++  "keyring",
++  "rotation",
++  "backup",
++  "restore",
++  "doctor",
++] as const;
++
++export type PqcEvent = (typeof PQC_EVENT)[number];
++
++export type PqcLogLevel = "info" | "warn" | "error" | "debug";
++export type PqcLogStatus = "ok" | "fail";
++
++export interface PqcLogPayload {
++  event: PqcEvent;
++  level: PqcLogLevel;
++  status: PqcLogStatus;
++  identityKey?: string;
++  keyId?: string;
++  detail?: string;
++  /** Optional auxiliary fields. The emitter applies the redaction pass
++   *  to every nested key; values that cannot survive redaction (Buffer /
++   *  TypedArray) are dropped. */
++  [extra: string]: unknown;
++}
++
++export type PqcEmit = (record: PqcLogPayload) => void;
++
++const REDACTED_FIELD_PATTERNS: RegExp[] = [
++  /passphrase/i,
++  /raw[-_]?key/i,
++  /private[-_]?key/i,
++  /secret/i,
++];
++
++function isBufferLike(value: unknown): boolean {
++  if (value === null || value === undefined) return false;
++  if (value instanceof Buffer) return true;
++  if (value instanceof Uint8Array) return true;
++  if (value instanceof ArrayBuffer) return true;
++  if (ArrayBuffer.isView(value)) return true;
++  return false;
++}
++
++function isPlainObject(value: unknown): value is Record<string, unknown> {
++  if (value === null || typeof value !== "object") return false;
++  if (Array.isArray(value)) return false;
++  if (isBufferLike(value)) return false;
++  const proto = Object.getPrototypeOf(value);
++  return proto === Object.prototype || proto === null;
++}
++
++/**
++ * Redact a payload in place: drop undefined values, drop Buffer /
++ * TypedArray values, and drop keys whose name matches a secret pattern.
++ * Returns a new object; the input is left untouched. Nested objects are
++ * redacted recursively; nested arrays are mapped over.
++ */
++export function redactPqcLogPayload(payload: PqcLogPayload): PqcLogPayload {
++  const out: Record<string, unknown> = {};
++  for (const [k, v] of Object.entries(payload)) {
++    if (v === undefined) continue;
++    if (REDACTED_FIELD_PATTERNS.some((re) => re.test(k))) {
++      // Match the whitepaper 2.2.9 contract: refuse to emit any field
++      // whose name is even slightly secret. Replace with a marker so the
++      // downstream log still knows a value was attempted.
++      out[k] = "[REDACTED]";
++      continue;
++    }
++    if (isBufferLike(v)) {
++      // Buffer / TypedArray fields are never safe to log. Drop.
++      continue;
++    }
++    if (isPlainObject(v)) {
++      out[k] = redactPqcLogPayload(v as unknown as PqcLogPayload);
++      continue;
++    }
++    if (Array.isArray(v)) {
++      out[k] = v
++        .map((item) =>
++          isPlainObject(item)
++            ? redactPqcLogPayload(item as unknown as PqcLogPayload)
++            : isBufferLike(item)
++              ? undefined
++              : item,
++        )
++        .filter((item) => item !== undefined);
++      continue;
++    }
++    out[k] = v;
++  }
++  return out as PqcLogPayload;
++}
++
++let installedEmitter: PqcEmit = defaultEmitter;
++
++export function setPqcEmit(emit: PqcEmit): void {
++  installedEmitter = emit;
++}
++
++export function getPqcEmit(): PqcEmit {
++  return installedEmitter;
++}
++
++export function resetPqcEmit(): void {
++  installedEmitter = defaultEmitter;
++}
++
++export interface OpenClawLogger {
++  info: (record: Record<string, unknown>) => void;
++  warn: (record: Record<string, unknown>) => void;
++  error: (record: Record<string, unknown>) => void;
++  debug: (record: Record<string, unknown>) => void;
++}
++
++export function bindOpenClawLogger(logger: OpenClawLogger): void {
++  installedEmitter = (record) => {
++    const redacted = redactPqcLogPayload(record);
++    const enriched = {
++      ...redacted,
++      tag: "PQC",
++    };
++    switch (redacted.level) {
++      case "warn":
++        logger.warn(enriched);
++        return;
++      case "error":
++        logger.error(enriched);
++        return;
++      case "debug":
++        logger.debug(enriched);
++        return;
++      case "info":
++      default:
++        logger.info(enriched);
++        return;
++    }
++  };
++}
++
++function defaultEmitter(record: PqcLogPayload): void {
++  const redacted = redactPqcLogPayload(record);
++  // eslint-disable-next-line no-console -- this is the in-process fallback
++  console.log(`[PQC] ${JSON.stringify(redacted)}`);
++}
++
++export const pqcLog = {
++  info(payload: Omit<PqcLogPayload, "level">): void {
++    installedEmitter({ ...payload, level: "info" });
++  },
++  warn(payload: Omit<PqcLogPayload, "level">): void {
++    installedEmitter({ ...payload, level: "warn" });
++  },
++  error(payload: Omit<PqcLogPayload, "level">): void {
++    installedEmitter({ ...payload, level: "error" });
++  },
++  debug(payload: Omit<PqcLogPayload, "level">): void {
++    installedEmitter({ ...payload, level: "debug" });
++  },
++};
+-- 
+2.43.0
+
