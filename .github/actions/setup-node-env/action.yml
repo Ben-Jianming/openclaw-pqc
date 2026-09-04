@@ -476,19 +476,13 @@ runs:
         fi
 
     - name: Upload regenerated lockfile (A-mode)
-      if: always()
-      shell: bash
-      run: |
-        set -euo pipefail
-        mkdir -p /tmp/openclaw-lockfile-out
-        cp -f pnpm-lock.yaml /tmp/openclaw-lockfile-out/pnpm-lock.yaml 2>/dev/null || true
-        cd /tmp/openclaw-lockfile-out
-        if [ -s pnpm-lock.yaml ]; then
-          # Strip the sticky-disk overrides pnpm 11 sometimes adds on top of the
-          # user-authored overrides, so the regenerated lockfile matches package.json.
-          pnpm -v >/dev/null 2>&1 || true
-        fi
-        ls -la pnpm-lock.yaml || true
+      if: always() && hashFiles('pnpm-lock.yaml') != ''
+      uses: actions/upload-artifact@v4
+      with:
+        name: regenerated-pnpm-lock-${{ github.run_id }}-${{ github.run_attempt }}
+        path: pnpm-lock.yaml
+        if-no-files-found: ignore
+        retention-days: 1
     - name: Restore and save build-all cache
       if: inputs.build-all-cache-scope != ''
       uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
