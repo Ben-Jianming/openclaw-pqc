@@ -324,7 +324,7 @@ runs:
         node -v
         pnpm -v
         case "$FROZEN_LOCKFILE" in
-          true) LOCKFILE_FLAG="--force" ;;
+          true) LOCKFILE_FLAG="--frozen-lockfile" ;;
           false) LOCKFILE_FLAG="" ;;
           *)
             echo "::error::Invalid frozen-lockfile input: '$FROZEN_LOCKFILE' (expected true or false)"
