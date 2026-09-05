@@ -13,6 +13,7 @@ registries:
 updates:
   # npm dependencies (root)
   - package-ecosystem: npm
+    enabled: false
     directory: /
     schedule:
       interval: daily
@@ -35,6 +36,7 @@ updates:
 
   # GitHub Actions
   - package-ecosystem: github-actions
+    enabled: false
     directory: /
     schedule:
       interval: daily
@@ -51,6 +53,7 @@ updates:
 
   # Swift Package Manager - macOS app
   - package-ecosystem: swift
+    enabled: false
     directory: /apps/macos
     schedule:
       interval: daily
@@ -67,6 +70,7 @@ updates:
 
   # Swift Package Manager - shared OpenClawKit
   - package-ecosystem: swift
+    enabled: false
     directory: /apps/shared/OpenClawKit
     schedule:
       interval: daily
@@ -83,6 +87,7 @@ updates:
 
   # Swift Package Manager - isolated MLX TTS helper
   - package-ecosystem: swift
+    enabled: false
     directory: /apps/macos-mlx-tts
     schedule:
       interval: daily
@@ -99,6 +104,7 @@ updates:
 
   # Swift Package Manager - Swabble
   - package-ecosystem: swift
+    enabled: false
     directory: /apps/swabble
     schedule:
       interval: daily
@@ -115,6 +121,7 @@ updates:
 
   # Gradle - Android app
   - package-ecosystem: gradle
+    enabled: false
     directory: /apps/android
     schedule:
       interval: daily
@@ -131,6 +138,7 @@ updates:
 
   # Docker base images
   - package-ecosystem: docker
+    enabled: false
     directory: /
     schedule:
       interval: weekly
