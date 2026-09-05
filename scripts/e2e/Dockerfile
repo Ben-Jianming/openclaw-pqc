@@ -60,6 +60,14 @@ const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
 for (const name of manifest.bundleDependencies ?? []) {
   delete manifest.dependencies?.[name];
 }
+// Drop pnpm workspace / npm link protocol deps: the later full tarball
+// extraction in the 'functional' stage re-installs them as on-disk links,
+// so npm does not need to resolve them here.
+for (const [name, spec] of Object.entries(manifest.dependencies ?? {})) {
+  if (typeof spec === "string" && (spec.startsWith("workspace:") || spec.startsWith("link:"))) {
+    delete manifest.dependencies[name];
+  }
+}
 delete manifest.bundleDependencies;
 delete manifest.devDependencies;
 delete manifest.scripts;
