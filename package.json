@@ -1910,6 +1910,8 @@
     "@mistralai/mistralai": "2.5.0",
     "@modelcontextprotocol/sdk": "1.29.0",
     "@mozilla/readability": "0.6.0",
+    "@noble/curves": "1.9.7",
+    "@noble/hashes": "1.8.0",
     "@noble/post-quantum": "0.5.4",
     "@openclaw/ai": "workspace:*",
     "@openclaw/fs-safe": "0.4.7",
