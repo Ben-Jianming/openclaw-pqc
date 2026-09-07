@@ -4,6 +4,7 @@ import { normalizeOptionalString } from "@openclaw/normalization-core/string-coe
 import { truncateUtf16Safe } from "@openclaw/normalization-core/utf16-slice";
 import type { DeviceIdentity } from "./device-identity.js";
 import { toErrorObject } from "./errors.js";
+import { APNS_PQC_ENVELOPE_HEADER, buildApnsEnvelopeHeader } from "./push-apns-http2-m11.js";
 import { getApnsBearerToken, type ApnsAuthConfig } from "./push-apns-auth.js";
 import {
   APNS_HTTP2_CANCEL_CODE,
@@ -232,6 +233,12 @@ async function sendApnsRequest(params: {
           return;
         }
 
+        // M11 (PQC migration): attach dual-signature envelope as a custom
+        // APNs HTTP/2 header. APNs body is 4 KB; the envelope alone is
+        // ~4.5 KB so it cannot go in the body. Receiver (iOS app) reads
+        // the apns-pqc-envelope header and verifies against the body.
+        const envelopeResult = buildApnsEnvelopeHeader(params.payload);
+
         const req = client.request({
           ":method": "POST",
           ":path": requestPath,
@@ -242,6 +249,9 @@ async function sendApnsRequest(params: {
           "apns-expiration": "0",
           "content-type": "application/json",
           "content-length": Buffer.byteLength(body).toString(),
+          ...(envelopeResult.header
+            ? { [APNS_PQC_ENVELOPE_HEADER]: envelopeResult.header }
+            : {}),
         });
         activeRequest = req;
 

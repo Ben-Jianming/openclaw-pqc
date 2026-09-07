@@ -222,11 +222,6 @@ function loadOrCreateDeviceIdentityOwned(options: DeviceIdentityStoreOptions): D
   const wrappingKeyProvider = resolveDeviceIdentityKeyring(options.env ?? process.env);
   const wrapEnvEnabled = wrappingKeyProvider !== undefined;
   if (!wrapEnvEnabled) {
-    process.stderr.write(
-      "[openclaw][PQC] WARNING: device identity will be stored with ML-DSA-65 private key in plaintext. " +
-        "Set OPENCLAW_PQC_WRAP_KEY (32-byte base64url) and OPENCLAW_PQC_WRAP_KEY_ID env vars to enable wrap. " +
-        "See docs/security/pqc-whitepaper.md §2.2.1.\n",
-    );
     // M17: emit pqcLog so dashboard can see wrap-disabled state at startup
     pqcLog.warn({
       event: "device-identity",
@@ -422,7 +417,9 @@ export function publicKeyRawBase64UrlFromPem(publicKeyPem: string): string {
 
 function mldsaRawToBase64Url(bytes: Uint8Array): string {
   let bin = "";
-  for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]!);
+  for (const byte of bytes) {
+    bin += String.fromCharCode(byte);
+  }
   return Buffer.from(bin, "binary").toString("base64url");
 }
 

@@ -3,7 +3,7 @@
 // 9 invariants covering: redaction of undefined / Buffer / TypedArray
 // values, redaction of secret-named fields (passphrase / rawkey /
 // privatekey, case-insensitive), the level-routing pass through
-// bindOpenClawLogger, the default-emitter console fallback, and the
+// bindOpenClawLogger, the default-emitter subsystem fallback, and the
 // pqcLog chokepoint itself.
 import { afterEach, describe, expect, it } from "vitest";
 import {
@@ -67,8 +67,8 @@ describe("pqc-log (M9, whitepaper 2.2.9)", () => {
       payload: new Uint8Array(8),
       identityKey: "primary",
     });
-    expect(Object.prototype.hasOwnProperty.call(out, "ciphertext")).toBe(false);
-    expect(Object.prototype.hasOwnProperty.call(out, "payload")).toBe(false);
+    expect(Object.hasOwn(out, "ciphertext")).toBe(false);
+    expect(Object.hasOwn(out, "payload")).toBe(false);
     expect(out.identityKey).toBe("primary");
   });
 
@@ -81,8 +81,8 @@ describe("pqc-log (M9, whitepaper 2.2.9)", () => {
       keyId: undefined,
       detail: "fingerprint match",
     });
-    expect(Object.prototype.hasOwnProperty.call(out, "identityKey")).toBe(false);
-    expect(Object.prototype.hasOwnProperty.call(out, "keyId")).toBe(false);
+    expect(Object.hasOwn(out, "identityKey")).toBe(false);
+    expect(Object.hasOwn(out, "keyId")).toBe(false);
     expect(out.detail).toBe("fingerprint match");
   });
 
@@ -145,7 +145,7 @@ describe("pqc-log (M9, whitepaper 2.2.9)", () => {
     expect(info[0]!.event).toBe("device-identity");
   });
 
-  it("captures the default emitter via console fallback when no other sink is bound", () => {
+  it("keeps the default file emitter off protocol-facing console streams", () => {
     const lines: string[] = [];
     const originalLog = console.log;
     console.log = (line: string) => lines.push(line);
@@ -155,10 +155,7 @@ describe("pqc-log (M9, whitepaper 2.2.9)", () => {
     } finally {
       console.log = originalLog;
     }
-    expect(lines).toHaveLength(1);
-    expect(lines[0]!).toMatch(/^\[PQC\] /);
-    const parsed = JSON.parse(lines[0]!.slice("[PQC] ".length));
-    expect(parsed.event).toBe("device-identity");
+    expect(lines).toEqual([]);
   });
 
   it("rejects Buffer / TypedArray values inside arrays as well as top-level", () => {

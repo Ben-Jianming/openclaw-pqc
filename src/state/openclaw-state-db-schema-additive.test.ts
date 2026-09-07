@@ -12,7 +12,6 @@ import { ensureAdditiveStateColumns } from "./openclaw-state-db-schema-additive.
 import {
   closeOpenClawStateDatabaseForTest,
   openOpenClawStateDatabase,
-  runOpenClawStateWriteTransaction,
 } from "./openclaw-state-db.js";
 
 afterEach(() => {
@@ -23,24 +22,12 @@ function freshStatePath(rootDir: string): string {
   return path.join(rootDir, "state", "openclaw.sqlite");
 }
 
-async function openDbWithM3Columns(databasePath: string) {
-  const database = openOpenClawStateDatabase({ path: databasePath });
-  runOpenClawStateWriteTransaction(
-    ({ db }) => {
-      ensureAdditiveStateColumns(db);
-    },
-    { path: databasePath },
-    { operationLabel: "schema-additive.m3" },
-  );
-  return database;
-}
-
 describe("device_identities schema additive (M3, whitepaper 2.1.3)", () => {
   it("adds the 4 ML-DSA-65 columns to a fresh database", async () => {
     await withTempDir("openclaw-m3-additive-", async (rootDir) => {
       const databasePath = freshStatePath(rootDir);
       fs.mkdirSync(path.dirname(databasePath), { recursive: true });
-      const database = openOpenClawStateDatabase({ path: databasePath });
+      openOpenClawStateDatabase({ path: databasePath });
       // Force the canonical schema to land first; the additive columns are
       // injected by the migration pass.
       const sqlite = await import("node:sqlite");

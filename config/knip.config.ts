@@ -672,6 +672,7 @@ const config = {
     ]),
     [`${BUNDLED_PLUGIN_ROOT_DIR}/elevenlabs`]: bundledPluginWorkspace(),
     [`${BUNDLED_PLUGIN_ROOT_DIR}/featherless`]: bundledPluginWorkspace(),
+    [`${BUNDLED_PLUGIN_ROOT_DIR}/feishu`]: bundledPluginWorkspace(["src/feishu-m11-audit.ts!"]),
     [`${BUNDLED_PLUGIN_ROOT_DIR}/fal`]: bundledPluginWorkspace(),
     [`${BUNDLED_PLUGIN_ROOT_DIR}/fireworks`]: bundledPluginWorkspace(),
     [`${BUNDLED_PLUGIN_ROOT_DIR}/google`]: bundledPluginWorkspace(),
@@ -709,6 +710,7 @@ const config = {
       // Copied to dist and spawned by the MXC backend.
       "src/mxc-spawn-launcher.mjs!",
     ]),
+    [`${BUNDLED_PLUGIN_ROOT_DIR}/nostr`]: bundledPluginWorkspace(["src/nostr-bus.ts!"]),
     [`${BUNDLED_PLUGIN_ROOT_DIR}/nvidia`]: bundledPluginWorkspace(),
     [`${BUNDLED_PLUGIN_ROOT_DIR}/openai`]: bundledPluginWorkspace([
       // OpenAI exposes provider, OAuth, overlay, media, usage, and realtime

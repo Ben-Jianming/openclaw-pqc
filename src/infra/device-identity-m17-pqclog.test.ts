@@ -15,7 +15,7 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { setPqcEmit, resetPqcEmit, type PqcLogPayload } from "../logging/pqc-log.js";
 import { closeOpenClawStateDatabaseForTest } from "../state/openclaw-state-db.js";
-import { type DeviceIdentityStoreOptions } from "./device-identity-store.js";
+import type { DeviceIdentityStoreOptions } from "./device-identity-store.js";
 import { loadOrCreateDeviceIdentity } from "./device-identity.js";
 
 const WRAP_KEY = "XYU5RKqbBTfbrFvLrcSlgmMSyM5LnlLZk7vUUhKbEVg";
@@ -45,8 +45,11 @@ beforeEach(() => {
 
 afterEach(() => {
   for (const [k, v] of Object.entries(savedEnv)) {
-    if (v === undefined) delete process.env[k];
-    else process.env[k] = v;
+    if (v === undefined) {
+      delete process.env[k];
+    } else {
+      process.env[k] = v;
+    }
   }
   resetPqcEmit();
   closeOpenClawStateDatabaseForTest();
@@ -54,7 +57,7 @@ afterEach(() => {
 });
 
 function options(): DeviceIdentityStoreOptions {
-  return { env: { ...process.env, OPENCLAW_STATE_DIR: tempDir } as any };
+  return { env: { ...process.env, OPENCLAW_STATE_DIR: tempDir } as NodeJS.ProcessEnv };
 }
 
 function deviceIdentityEvents(events: PqcLogPayload[]): PqcLogPayload[] {

@@ -22,7 +22,9 @@ import {
 function newKey(seed?: number): Buffer {
   if (typeof seed === "number") {
     const hash = createHash("sha256");
-    for (let i = 0; i < 8; i++) hash.update(String((seed + i) >>> 0));
+    for (let i = 0; i < 8; i++) {
+      hash.update(String((seed + i) >>> 0));
+    }
     return hash.digest();
   }
   return Buffer.from(randomBytes(WRAP_KEY_BYTES));

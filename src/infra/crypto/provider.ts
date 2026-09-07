@@ -36,21 +36,26 @@ export class UnsupportedAlgorithmError extends CryptoError {
   }
 }
 export type BackendName = "noble" | "node-builtin" | "liboqs";
-let _cached: CryptoProvider | null = null;
+let cachedProvider: CryptoProvider | null = null;
 export async function getCryptoProvider(b: BackendName = "noble"): Promise<CryptoProvider> {
-  if (_cached) return _cached;
+  if (cachedProvider) {
+    return cachedProvider;
+  }
   if (b === "noble") {
     const m = await import("./provider-noble.js");
-    _cached = new m.NobleCryptoProvider();
+    cachedProvider = new m.NobleCryptoProvider();
   } else if (b === "node-builtin") {
     const m = await import("./provider-node-builtin.js");
-    _cached = new m.NodeBuiltinCryptoProvider();
-  } else throw new Error("liboqs not implemented");
-  return _cached;
+    cachedProvider = new m.NodeBuiltinCryptoProvider();
+  } else {
+    throw new Error("liboqs not implemented");
+  }
+  return cachedProvider;
 }
-export function _resetProviderForTesting(): void {
-  _cached = null;
+function resetProviderForTesting(): void {
+  cachedProvider = null;
 }
+export { resetProviderForTesting as _resetProviderForTesting };
 export interface DualSignature {
   readonly ed25519?: Uint8Array;
   readonly mlDsa44?: Uint8Array;
@@ -67,7 +72,9 @@ export async function dualSignDevice(
   } catch (e) {
     console.warn("ed25519 fail:", e);
   }
-  if (mlKey) sig.mlDsa44 = await p.sign("ml-dsa-44", mlKey, message);
+  if (mlKey) {
+    sig.mlDsa44 = await p.sign("ml-dsa-44", mlKey, message);
+  }
   return sig;
 }
 export async function dualVerifyDevice(
@@ -78,10 +85,14 @@ export async function dualVerifyDevice(
 ): Promise<boolean> {
   const p = await getCryptoProvider();
   if (sig.ed25519 && edKey) {
-    if (await p.verify("ed25519", edKey, message, sig.ed25519)) return true;
+    if (await p.verify("ed25519", edKey, message, sig.ed25519)) {
+      return true;
+    }
   }
   if (sig.mlDsa44 && mlKey) {
-    if (await p.verify("ml-dsa-44", mlKey, message, sig.mlDsa44)) return true;
+    if (await p.verify("ml-dsa-44", mlKey, message, sig.mlDsa44)) {
+      return true;
+    }
   }
   return false;
 }

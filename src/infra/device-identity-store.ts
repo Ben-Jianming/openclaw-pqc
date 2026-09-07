@@ -185,13 +185,23 @@ export function generateStoredDeviceIdentity(
  */
 function keyPairMatches(publicKeyPem: string, privateKeyPem: string): boolean {
   try {
-    if (typeof publicKeyPem !== "string" || typeof privateKeyPem !== "string") return false;
-    if (!publicKeyPem.startsWith(MLDSA65_PUBLIC_KEY_PREFIX)) return false;
-    if (!privateKeyPem.startsWith(MLDSA65_SECRET_KEY_PREFIX)) return false;
+    if (typeof publicKeyPem !== "string" || typeof privateKeyPem !== "string") {
+      return false;
+    }
+    if (!publicKeyPem.startsWith(MLDSA65_PUBLIC_KEY_PREFIX)) {
+      return false;
+    }
+    if (!privateKeyPem.startsWith(MLDSA65_SECRET_KEY_PREFIX)) {
+      return false;
+    }
     const rawPk = decodeMlDsa65PublicKey(publicKeyPem);
     const rawSk = decodeMlDsa65SecretKey(privateKeyPem);
-    if (rawPk.length !== MLDSA65_PUBLIC_KEY_BYTES) return false;
-    if (rawSk.length !== MLDSA65_SECRET_KEY_BYTES) return false;
+    if (rawPk.length !== MLDSA65_PUBLIC_KEY_BYTES) {
+      return false;
+    }
+    if (rawSk.length !== MLDSA65_SECRET_KEY_BYTES) {
+      return false;
+    }
     const probePayload = `ml-dsa-65-roundtrip-${Date.now()}-${Math.random().toString(36).slice(2)}`;
     const sig = signMlDsa65Payload(privateKeyPem, probePayload);
     return verifyMlDsa65Signature({

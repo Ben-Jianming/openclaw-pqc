@@ -477,7 +477,7 @@ runs:
 
     - name: Upload regenerated lockfile (A-mode)
       if: always() && hashFiles('pnpm-lock.yaml') != ''
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
       with:
         name: regenerated-pnpm-lock-${{ github.run_id }}-${{ github.run_attempt }}
         path: pnpm-lock.yaml

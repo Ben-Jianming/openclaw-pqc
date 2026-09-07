@@ -231,10 +231,12 @@
     "!dist/plugin-sdk/web-content-extractor.d.ts",
     "!dist/plugin-sdk/webhook-targets.d.ts",
     "!dist/plugin-sdk/windows-spawn.d.ts",
+    "!dist/plugin-sdk/session-catalog-runtime.d.ts",
     "!dist/plugin-sdk/src/agents/test-helpers/**",
     "!dist/plugin-sdk/src/test-helpers/**",
     "!dist/plugin-sdk/src/test-utils/**",
     "!dist/plugin-sdk/src/plugin-sdk/test-helpers/**",
+    "!dist/extensions/buzz/**",
     "!dist/extensions/acpx/**",
     "!dist/extensions/amazon-bedrock/**",
     "!dist/extensions/amazon-bedrock-mantle/**",
@@ -346,7 +348,9 @@
     "scripts/lib/package-dist-imports.mjs",
     "scripts/lib/recommended-tool-installs.json",
     "scripts/postinstall-bundled-plugins.mjs",
-    "scripts/windows-cmd-helpers.mjs"
+    "scripts/windows-cmd-helpers.mjs",
+    "!dist/plugin-sdk/test-state.js",
+    "!dist/plugin-sdk/test-state.d.ts"
   ],
   "type": "module",
   "main": "dist/index.js",
@@ -1372,9 +1376,12 @@
       "default": "./dist/plugin-sdk/llm.js"
     },
     "./cli-entry": "./openclaw.mjs",
-    "./plugin-sdk/*": "./packages/plugin-sdk/src/index.ts",
     "./plugin-sdk/cli-argv": "./packages/plugin-sdk/src/index.ts",
-    "./plugin-sdk/channel-dm-policy": "./packages/plugin-sdk/src/index.ts"
+    "./plugin-sdk/channel-dm-policy": "./packages/plugin-sdk/src/index.ts",
+    "./plugin-sdk/media-local-roots": {
+      "types": "./dist/plugin-sdk/media-local-roots.d.ts",
+      "default": "./dist/plugin-sdk/media-local-roots.js"
+    }
   },
   "scripts": {
     "android:assemble": "node scripts/run-android-gradle.mjs :app:assemblePlayDebug :wear-shared:assembleDebug",
@@ -1475,12 +1482,12 @@
     "deps:changes:report": "node scripts/dependency-changes-report.mjs",
     "deps:patches:check": "node scripts/check-package-patches.mjs",
     "deps:pins:check": "node scripts/check-dependency-pins.mjs",
-    "deps:shrinkwrap:check": "node scripts/generate-npm-shrinkwrap.mjs --all --check",
-    "deps:shrinkwrap:changed:check": "node scripts/generate-npm-shrinkwrap.mjs --changed --check",
-    "deps:shrinkwrap:changed:generate": "node scripts/generate-npm-shrinkwrap.mjs --changed",
-    "deps:shrinkwrap:generate": "node scripts/generate-npm-shrinkwrap.mjs --all",
-    "deps:shrinkwrap:root:check": "node scripts/generate-npm-shrinkwrap.mjs --check",
-    "deps:shrinkwrap:root:generate": "node scripts/generate-npm-shrinkwrap.mjs",
+    "deps:shrinkwrap:check": "node scripts/generate-npm-package-lock.mjs --all",
+    "deps:shrinkwrap:changed:check": "node scripts/generate-npm-package-lock.mjs --changed",
+    "deps:shrinkwrap:changed:generate": "node scripts/generate-npm-package-lock.mjs --changed",
+    "deps:shrinkwrap:generate": "node scripts/generate-npm-package-lock.mjs --all",
+    "deps:shrinkwrap:root:check": "node scripts/generate-npm-package-lock.mjs",
+    "deps:shrinkwrap:root:generate": "node scripts/generate-npm-package-lock.mjs",
     "deps:ownership-surface:check": "node scripts/dependency-ownership-surface-report.mjs --check",
     "deps:ownership-surface:report": "node scripts/dependency-ownership-surface-report.mjs",
     "deps:transitive-risk:report": "node scripts/transitive-manifest-risk-report.mjs",
@@ -1844,7 +1851,7 @@
     "test:unit:fast:audit": "node scripts/test-unit-fast-audit.mjs",
     "test:voicecall:closedloop": "node scripts/test-voicecall-closedloop.mjs",
     "test:watch": "node scripts/test-projects.mjs --watch",
-    "test:windows:ci": "node scripts/test-projects.mjs src/shared/runtime-import.test.ts src/infra/state-migrations.legacy-session-store.test.ts src/agents/sessions/windows-git-bash-path.test.ts src/process/exec.windows.test.ts src/process/exec.windows.integration.test.ts src/process/windows-command.test.ts src/infra/windows-install-roots.test.ts src/node-host/invoke-system-run-allowlist.test.ts src/daemon/schtasks.startup-fallback.test.ts extensions/lobster/src/lobster-runner.test.ts test/scripts/format-generated-module.test.ts test/scripts/npm-runner.test.ts test/scripts/openclaw-cross-os-installer.windows.test.ts test/scripts/openclaw-cross-os-release-workflow.test.ts test/scripts/pnpm-runner.test.ts test/scripts/run-with-env.test.ts test/scripts/ts-topology.test.ts test/scripts/ui.test.ts test/scripts/vitest-process-group.test.ts",
+    "test:windows:ci": "node scripts/test-projects.mjs src/shared/runtime-import.test.ts src/infra/state-migrations.legacy-session-store.test.ts src/agents/sessions/windows-git-bash-path.test.ts src/process/exec.windows.test.ts src/process/exec.windows.integration.test.ts src/process/windows-command.test.ts src/infra/windows-install-roots.test.ts src/node-host/invoke-system-run-allowlist.test.ts src/daemon/schtasks.startup-fallback.test.ts extensions/lobster/src/lobster-runner.test.ts test/scripts/format-generated-module.test.ts test/scripts/npm-runner.test.ts test/scripts/openclaw-cross-os-installer.windows.test.ts test/scripts/openclaw-cross-os-release-workflow.test.ts test/scripts/pnpm-runner.test.ts test/scripts/run-with-env.test.ts test/scripts/ts-topology.test.ts test/scripts/ui.test.ts test/scripts/vitest-process-group.test.ts test/e2e/qa-lab/runtime/package-openclaw-for-docker.e2e.test.ts src/infra/sqlite-snapshot.test.ts src/test-utils/openclaw-test-state.test.ts src/snapshot/local-repository.windows.test.ts src/commands/backup-verify.test.ts",
     "tool-display:check": "node --import tsx scripts/tool-display.ts --check",
     "tool-display:write": "node --import tsx scripts/tool-display.ts --write",
     "ts-topology": "node --import tsx scripts/ts-topology.ts",
@@ -1886,7 +1893,8 @@
     "android:i18n:check": "node --import tsx scripts/android-app-i18n.ts check",
     "apple:i18n:check": "node --import tsx scripts/apple-app-i18n.ts check",
     "ui:install": "node scripts/ui.js install",
-    "verify": "node scripts/verify.mjs"
+    "verify": "node scripts/verify.mjs",
+    "deps:npm-lock:check:changed": "node scripts/generate-npm-package-lock.mjs --changed"
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "1.2.1",
@@ -1902,8 +1910,6 @@
     "@mistralai/mistralai": "2.5.0",
     "@modelcontextprotocol/sdk": "1.29.0",
     "@mozilla/readability": "0.6.0",
-    "@noble/curves": "1.9.7",
-    "@noble/hashes": "1.8.0",
     "@noble/post-quantum": "0.5.4",
     "@openclaw/ai": "workspace:*",
     "@openclaw/fs-safe": "0.4.7",

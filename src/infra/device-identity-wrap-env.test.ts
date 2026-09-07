@@ -1,17 +1,12 @@
-/**
- * M5 runtime fix: env-var-based wrap auto-wiring.
- */
-import {
-  afterEach,
-  beforeEach,
-  describe,
-  expect,
-  it,
-} from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { loadOrCreateDeviceIdentity } from "./device-identity.js";
+/**
+ * M5 runtime fix: env-var-based wrap auto-wiring.
+ */
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { decodeBase64UrlKey } from "../security/keyring-provider.js";
+import { closeOpenClawStateDatabaseForTest } from "../state/openclaw-state-db.js";
 import {
   readStoredDeviceIdentity,
   readStoredDeviceIdentityReadOnly,
@@ -19,8 +14,7 @@ import {
   type DeviceIdentityStoreOptions,
   type SyncWrappingKeyProvider,
 } from "./device-identity-store.js";
-import { decodeBase64UrlKey } from "../security/keyring-provider.js";
-import { closeOpenClawStateDatabaseForTest } from "../state/openclaw-state-db.js";
+import { loadOrCreateDeviceIdentity } from "./device-identity.js";
 
 const WRAP_KEY = "XYU5RKqbBTfbrFvLrcSlgmMSyM5LnlLZk7vUUhKbEVg";
 const WRAP_KEY_ID = "test-env-wrap-2026-08";
@@ -49,20 +43,23 @@ beforeEach(() => {
 
 afterEach(() => {
   for (const [k, v] of Object.entries(savedEnv)) {
-    if (v === undefined) delete process.env[k];
-    else process.env[k] = v;
+    if (v === undefined) {
+      delete process.env[k];
+    } else {
+      process.env[k] = v;
+    }
   }
   closeOpenClawStateDatabaseForTest();
   fs.rmSync(tempDir, { recursive: true, force: true });
 });
 
 function options(): DeviceIdentityStoreOptions {
-  return { env: { ...process.env, OPENCLAW_STATE_DIR: tempDir } as any };
+  return { env: { ...process.env, OPENCLAW_STATE_DIR: tempDir } as NodeJS.ProcessEnv };
 }
 
 function readOptions(): DeviceIdentityReadOptions {
   return {
-    env: { ...process.env, OPENCLAW_STATE_DIR: tempDir } as any,
+    env: { ...process.env, OPENCLAW_STATE_DIR: tempDir } as NodeJS.ProcessEnv,
     wrappingKeyProvider: makeKeyring(WRAP_KEY, WRAP_KEY_ID),
   };
 }
@@ -93,7 +90,10 @@ describe("device-identity env-var wrap auto-wiring", () => {
     delete process.env.OPENCLAW_PQC_WRAP_KEY_ID;
     const stderrBuf: string[] = [];
     const origWrite = process.stderr.write.bind(process.stderr);
-    process.stderr.write = ((s: any) => { stderrBuf.push(String(s)); return true; }) as any;
+    process.stderr.write = ((s: string | Uint8Array) => {
+      stderrBuf.push(String(s));
+      return true;
+    }) as typeof process.stderr.write;
     try {
       loadOrCreateDeviceIdentity(options());
     } finally {
@@ -117,7 +117,7 @@ describe("device-identity env-var wrap auto-wiring", () => {
     delete process.env.OPENCLAW_PQC_WRAP_KEY_ID;
     loadOrCreateDeviceIdentity(options());
     const stored = readStoredDeviceIdentity({
-      env: { ...process.env, OPENCLAW_STATE_DIR: tempDir } as any,
+      env: { ...process.env, OPENCLAW_STATE_DIR: tempDir } as NodeJS.ProcessEnv,
       wrappingKeyProvider: makeKeyring(WRAP_KEY, "env-default"),
     });
     expect(stored!.mldsaPrivateKeyWrapKeyId).toBe("env-default");

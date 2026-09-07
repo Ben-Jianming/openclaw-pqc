@@ -169,7 +169,7 @@ describe("device-identity-store ML-DSA-65 invariants", () => {
   it("validateStoredDeviceIdentity rejects a key that decodes but does not sign", () => {
     const valid = generateStoredDeviceIdentity();
     // Truncate the secret key so it is well-formed but unusable.
-    const truncatedBody = valid.privateKeyPem.slice(0, valid.privateKeyPem.length - 8);
+    const truncatedBody = valid.privateKeyPem.slice(0, -8);
     expect(() =>
       validateStoredDeviceIdentity({
         ...valid,

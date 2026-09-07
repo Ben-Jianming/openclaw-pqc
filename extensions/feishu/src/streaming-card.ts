@@ -15,6 +15,7 @@ import { getFeishuUserAgent } from "./client.js";
 import { requestFeishuApi } from "./comment-shared.js";
 import { readFeishuJsonResponse } from "./json-response.js";
 import { resolveFeishuCardTemplate, type CardHeaderConfig } from "./send.js";
+import { auditFeishuSendWithM11 } from "./feishu-m11-audit.js";
 import { resolveStreamingCardSendMode } from "./streaming-card-send-mode.js";
 import type { FeishuDomain } from "./types.js";
 
@@ -399,6 +400,10 @@ export class FeishuStreamingSession {
       sentText: "",
       hasNote: Boolean(options?.note),
     };
+    // M11 (PQC migration): audit initial card template so dashboard sees a
+    // push-signature event as soon as the streaming card is created (matches
+    // the audit-only contract of send.ts sendCardFeishu).
+    auditFeishuSendWithM11(JSON.stringify(cardJson));
     this.log?.(`Started streaming: cardId=${cardId}, messageId=${sendRes.data.message_id}`);
   }
 
@@ -625,6 +630,11 @@ export class FeishuStreamingSession {
     await this.queue;
 
     const text = finalText ?? this.pendingText ?? this.state.currentText;
+    // M11 (PQC migration): audit final streaming card content for the
+    // dashboard push-signature event count. This is the equivalent of
+    // signing the outgoing message in sendTextFeishu/sendCardFeishu; the
+    // envelope is never transmitted to Lark (audit-only).
+    auditFeishuSendWithM11(text);
     const apiBase = resolveApiBase(this.creds.domain);
     // A failed final rewrite does not erase previously accepted visible content.
     // sentText advances only for an accepted write; the return value reports any visible content.

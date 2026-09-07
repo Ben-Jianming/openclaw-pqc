@@ -207,7 +207,9 @@ function hmacSha256(key: Buffer, message: Uint8Array): Buffer {
 }
 
 function constantTimeEqual(a: Buffer, b: Buffer): boolean {
-  if (a.length !== b.length) return false;
+  if (a.length !== b.length) {
+    return false;
+  }
   let diff = 0;
   for (let i = 0; i < a.length; i++) {
     diff |= a[i]! ^ b[i]!;

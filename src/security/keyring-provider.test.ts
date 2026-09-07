@@ -8,7 +8,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { withTempDir } from "../test-utils/temp-dir.js";
 import {
   CompositeKeyring,
@@ -18,7 +18,6 @@ import {
   EnvKeyring,
   FileKeyring,
   generateWrappingKey,
-  KeyringError,
   OsKeyring,
 } from "./keyring-provider.js";
 
@@ -44,7 +43,7 @@ function makeKeyBytes(seed: number): Buffer {
 function writeFileKeyring(
   filePath: string,
   shape: { activeKeyId: string; keys: Record<string, string> },
-  mode: number = 0o600,
+  mode = 0o600,
 ): void {
   fs.writeFileSync(filePath, JSON.stringify(shape, null, 2), { mode, encoding: "utf8" });
   fs.chmodSync(filePath, mode);
@@ -82,7 +81,9 @@ describe("keyring-provider (M6, whitepaper 2.2.5)", () => {
 
   it("generateWrappingKey produces 32-byte base64url keys and is non-deterministic", () => {
     const keys = new Set<string>();
-    for (let i = 0; i < 8; i++) keys.add(generateWrappingKey());
+    for (let i = 0; i < 8; i++) {
+      keys.add(generateWrappingKey());
+    }
     expect(keys.size).toBe(8);
     for (const k of keys) {
       expect(k).toMatch(/^[A-Za-z0-9_-]+$/);

@@ -33,7 +33,9 @@ export const MLDSA65_SECRET_KEY_PREFIX = PREFIX_SECRET;
 
 function toBase64Url(bytes: Uint8Array): string {
   let bin = "";
-  for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]!);
+  for (const byte of bytes) {
+    bin += String.fromCharCode(byte);
+  }
   const b64 = Buffer.from(bin, "binary").toString("base64");
   return b64.replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
@@ -46,7 +48,9 @@ function fromBase64Url(s: string): Uint8Array {
   const b64 = (s + pad).replace(/-/g, "+").replace(/_/g, "/");
   const bin = Buffer.from(b64, "base64").toString("binary");
   const out = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  for (let i = 0; i < bin.length; i++) {
+    out[i] = bin.charCodeAt(i);
+  }
   return out;
 }
 
@@ -128,7 +132,9 @@ export function decodeMlDsa65SecretKey(prefixed: string): Uint8Array {
 export function tryDecodeMlDsa65PublicKeyRaw(
   prefixed: string | null | undefined,
 ): Uint8Array | null {
-  if (!prefixed) return null;
+  if (!prefixed) {
+    return null;
+  }
   try {
     return decodeMlDsa65PublicKey(prefixed);
   } catch {
@@ -139,7 +145,9 @@ export function tryDecodeMlDsa65PublicKeyRaw(
 export function tryDecodeMlDsa65SecretKeyRaw(
   prefixed: string | null | undefined,
 ): Uint8Array | null {
-  if (!prefixed) return null;
+  if (!prefixed) {
+    return null;
+  }
   try {
     return decodeMlDsa65SecretKey(prefixed);
   } catch {
@@ -189,7 +197,9 @@ export function verifyMlDsa65Signature(params: {
   let rawSig: Uint8Array;
   try {
     rawSig = fromBase64Url(sigBase64Url);
-    if (rawSig.length !== ML_DSA_65_SIG_BYTES) return false;
+    if (rawSig.length !== ML_DSA_65_SIG_BYTES) {
+      return false;
+    }
   } catch {
     return false;
   }

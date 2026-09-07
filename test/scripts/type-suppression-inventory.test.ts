@@ -76,6 +76,12 @@ describe("type suppression inventory", () => {
       "src/infra/kysely-sync.types.test.ts:55:@ts-expect-error Kysely checks where-reference string literals.",
       "src/infra/kysely-sync.types.test.ts:58:@ts-expect-error Kysely checks grouped column string literals.",
       "src/infra/kysely-sync.types.test.ts:61:@ts-expect-error Kysely checks order references and selected aliases.",
+      "src/security/keyring-provider.test.ts:61:@ts-expect-error -- intentional type violation to verify runtime guard",
+      "src/security/keyring-provider.test.ts:70:@ts-expect-error -- intentional type violation",
+      "src/security/keyring-provider.test.ts:367:@ts-expect-error -- intentional type violation",
+      "src/security/secret-wrapping.test.ts:108:@ts-expect-error -- intentional type violation to verify runtime guard",
+      "src/security/wrap-key-rotation.test.ts:48:@ts-expect-error -- intentional type violation",
+      "src/security/wrap-key-rotation.test.ts:50:@ts-expect-error -- intentional type violation",
     ]);
   });
 });

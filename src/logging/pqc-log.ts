@@ -1,3 +1,4 @@
+import { getChildLogger } from "./logger.js";
 // M9 (PQC migration, whitepaper 2.2.9): structured PQC logging chokepoint.
 //
 // Every PQC event flows through `pqcLog.{info,warn,error,debug}`. The emit
@@ -69,18 +70,34 @@ const REDACTED_FIELD_PATTERNS: RegExp[] = [
 ];
 
 function isBufferLike(value: unknown): boolean {
-  if (value === null || value === undefined) return false;
-  if (value instanceof Buffer) return true;
-  if (value instanceof Uint8Array) return true;
-  if (value instanceof ArrayBuffer) return true;
-  if (ArrayBuffer.isView(value)) return true;
+  if (value === null || value === undefined) {
+    return false;
+  }
+  if (value instanceof Buffer) {
+    return true;
+  }
+  if (value instanceof Uint8Array) {
+    return true;
+  }
+  if (value instanceof ArrayBuffer) {
+    return true;
+  }
+  if (ArrayBuffer.isView(value)) {
+    return true;
+  }
   return false;
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
-  if (value === null || typeof value !== "object") return false;
-  if (Array.isArray(value)) return false;
-  if (isBufferLike(value)) return false;
+  if (value === null || typeof value !== "object") {
+    return false;
+  }
+  if (Array.isArray(value)) {
+    return false;
+  }
+  if (isBufferLike(value)) {
+    return false;
+  }
   const proto = Object.getPrototypeOf(value);
   return proto === Object.prototype || proto === null;
 }
@@ -94,7 +111,9 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 export function redactPqcLogPayload(payload: PqcLogPayload): PqcLogPayload {
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(payload)) {
-    if (v === undefined) continue;
+    if (v === undefined) {
+      continue;
+    }
     if (REDACTED_FIELD_PATTERNS.some((re) => re.test(k))) {
       // Match the whitepaper 2.2.9 contract: refuse to emit any field
       // whose name is even slightly secret. Replace with a marker so the
@@ -166,17 +185,18 @@ export function bindOpenClawLogger(logger: OpenClawLogger): void {
         logger.debug(enriched);
         return;
       case "info":
-      default:
         logger.info(enriched);
-        return;
     }
   };
 }
 
+const defaultLogger = getChildLogger({ subsystem: "pqc" });
+
 function defaultEmitter(record: PqcLogPayload): void {
   const redacted = redactPqcLogPayload(record);
-  // eslint-disable-next-line no-console -- this is the in-process fallback
-  console.log(`[PQC] ${JSON.stringify(redacted)}`);
+  const { level, event, status, ...meta } = redacted;
+  const message = `${event}: ${status}`;
+  defaultLogger[level]({ ...meta, event, status, tag: "PQC" }, message);
 }
 
 export const pqcLog = {

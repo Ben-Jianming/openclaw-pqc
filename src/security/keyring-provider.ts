@@ -197,10 +197,14 @@ export class FileKeyring implements SyncWrappingKeyProvider {
   }
 
   getKeyById(keyId: string): { keyId: string; key: Buffer } | null {
-    if (typeof keyId !== "string" || keyId.length === 0) return null;
+    if (typeof keyId !== "string" || keyId.length === 0) {
+      return null;
+    }
     const shape = this.loadShape();
     const entry = shape.keys[keyId];
-    if (!entry) return null;
+    if (!entry) {
+      return null;
+    }
     return { keyId, key: decodeBase64UrlKey(entry) };
   }
 
@@ -267,9 +271,13 @@ export class EnvKeyring implements SyncWrappingKeyProvider {
   }
 
   getKeyById(keyId: string): { keyId: string; key: Buffer } | null {
-    if (typeof keyId !== "string" || keyId.length === 0) return null;
+    if (typeof keyId !== "string" || keyId.length === 0) {
+      return null;
+    }
     const raw = process.env[this.resolveVar(keyId)];
-    if (typeof raw !== "string" || raw.length === 0) return null;
+    if (typeof raw !== "string" || raw.length === 0) {
+      return null;
+    }
     return { keyId, key: decodeBase64UrlKey(raw) };
   }
 }
@@ -312,7 +320,9 @@ export class CompositeKeyring implements SyncWrappingKeyProvider {
     for (const provider of this.providers) {
       try {
         const result = provider.getKeyById(keyId);
-        if (result) return result;
+        if (result) {
+          return result;
+        }
       } catch {
         // ignore — try the next provider
       }
@@ -324,6 +334,8 @@ export class CompositeKeyring implements SyncWrappingKeyProvider {
 // --- Future M6.B: OsKeyring stub (fail-closed until @napi-rs/keyring ships) ---
 
 export class OsKeyring {
+  static readonly available = false;
+
   constructor(_options: { service: string; account?: string } = { service: "openclaw" }) {
     throw new KeyringError(
       "OsKeyring is not implemented in this build (M6.B). Install @napi-rs/keyring or use FileKeyring / EnvKeyring / CompositeKeyring.",
@@ -357,8 +369,8 @@ export function createKeyring(config: KeyringConfig): SyncWrappingKeyProvider {
         providers: config.providers.map(createKeyring),
       });
     default: {
-      const _exhaustive: never = config;
-      throw new KeyringError(`Unknown keyring config: ${JSON.stringify(_exhaustive)}`);
+      const exhaustive: never = config;
+      throw new KeyringError(`Unknown keyring config: ${JSON.stringify(exhaustive)}`);
     }
   }
 }

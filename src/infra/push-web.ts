@@ -20,6 +20,7 @@ import {
   type VapidKeyPair,
   type WebPushSubscription,
 } from "./push-web-store.js";
+import { buildWebPushPayloadWithEnvelope } from "./push-web-m11.js";
 
 // --- Types ---
 
@@ -192,7 +193,11 @@ async function sendPreparedWebPushNotification(
   };
 
   try {
-    const result = await webPush.sendNotification(pushSubscription, JSON.stringify(payload));
+    const payloadWithEnvelope = buildWebPushPayloadWithEnvelope(payload);
+    const result = await webPush.sendNotification(
+      pushSubscription,
+      JSON.stringify(payloadWithEnvelope),
+    );
     return {
       ok: true,
       subscriptionId: subscription.subscriptionId,

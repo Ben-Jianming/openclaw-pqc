@@ -97,7 +97,9 @@ function fromBase64Url(s: string, label: string): Buffer {
     }
     return buf;
   } catch (error) {
-    if (error instanceof SecretWrappingError) throw error;
+    if (error instanceof SecretWrappingError) {
+      throw error;
+    }
     throw new SecretWrappingError(`${label} is not valid base64url`, { cause: error });
   }
 }
@@ -149,7 +151,7 @@ export function unwrapSecret(wrapped: WrappedSecret, keyId: string, key: Buffer)
   }
   if (wrapped.v !== WRAPPED_SECRET_VERSION) {
     throw new SecretWrappingError(
-      `WrappedSecret has unsupported version ${String(wrapped.v)} (expected ${WRAPPED_SECRET_VERSION})`,
+      `WrappedSecret has an unsupported version (expected ${String(WRAPPED_SECRET_VERSION)})`,
     );
   }
   if (wrapped.keyId !== keyId) {

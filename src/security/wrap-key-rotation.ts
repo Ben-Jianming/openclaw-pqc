@@ -75,8 +75,12 @@ function fromBase64Url(s: string, label: string): Buffer {
 }
 
 export function constantTimeEqual(a: Buffer, b: Buffer): boolean {
-  if (!(a instanceof Buffer) || !(b instanceof Buffer)) return false;
-  if (a.length !== b.length) return false;
+  if (!(a instanceof Buffer) || !(b instanceof Buffer)) {
+    return false;
+  }
+  if (a.length !== b.length) {
+    return false;
+  }
   return timingSafeEqual(a, b);
 }
 

@@ -47,10 +47,10 @@
         }
       },
       "label": "Feishu",
-      "selectionLabel": "Feishu/Lark (\u98de\u4e66)",
+      "selectionLabel": "Feishu/Lark (飞书)",
       "docsPath": "/channels/feishu",
       "docsLabel": "feishu",
-      "blurb": "\u98de\u4e66/Lark enterprise messaging with doc/wiki/drive tools.",
+      "blurb": "飞书/Lark enterprise messaging with doc/wiki/drive tools.",
       "aliases": [
         "lark"
       ],

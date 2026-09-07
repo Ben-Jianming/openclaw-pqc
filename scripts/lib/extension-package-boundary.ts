@@ -57,6 +57,15 @@ export const EXTENSION_PACKAGE_BOUNDARY_BASE_PATHS = {
   "openclaw/plugin-sdk/*": ["../dist/plugin-sdk/*.d.ts"],
   ...privateLocalOnlyPluginSdkPackageDtsPaths,
   "openclaw/plugin-sdk/account-id": ["../dist/plugin-sdk/account-id.d.ts"],
+  "openclaw/plugin-sdk/provider-auth-api-key": [
+    "../packages/plugin-sdk/dist/src/plugin-sdk/provider-auth-api-key.d.ts",
+  ],
+  "openclaw/plugin-sdk/provider-catalog-shared": [
+    "../packages/plugin-sdk/dist/src/plugin-sdk/provider-catalog-shared.d.ts",
+  ],
+  "openclaw/plugin-sdk/provider-model-shared": [
+    "../packages/plugin-sdk/dist/src/plugin-sdk/provider-model-shared.d.ts",
+  ],
   "openclaw/plugin-sdk/channel-entry-contract": ["../dist/plugin-sdk/channel-entry-contract.d.ts"],
   "openclaw/plugin-sdk/browser-maintenance": [
     "../packages/plugin-sdk/dist/extensions/browser/browser-maintenance.d.ts",

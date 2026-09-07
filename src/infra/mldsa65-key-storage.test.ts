@@ -126,7 +126,7 @@ describe("M1 / mldsa65-key-storage: encode / decode round-trip", () => {
   });
 
   it("rejects missing/wrong prefix on decode", () => {
-    expect(() => decodeMlDsa65PublicKey("not-prefixed:" + "AAAA")).toThrow(/missing prefix/);
+    expect(() => decodeMlDsa65PublicKey("not-prefixed:AAAA")).toThrow(/missing prefix/);
     expect(() => decodeMlDsa65SecretKey(MLDSA65_PUBLIC_KEY_PREFIX + "AAAA")).toThrow(
       /missing prefix/,
     );

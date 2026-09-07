@@ -15,7 +15,6 @@ import type {
   StoredDeviceIdentity,
 } from "../infra/device-identity-store.js";
 import { generateStoredDeviceIdentity } from "../infra/device-identity-store.js";
-import { serializeWrappedSecret, wrapSecret } from "./secret-wrapping.js";
 import {
   constantTimeEqual,
   exportWrapKey,
@@ -23,7 +22,6 @@ import {
   rotateWrappingKey,
   WRAP_KEY_BACKUP_CONSTANTS,
   WrapKeyBackupError,
-  WrapKeyRotationError,
 } from "./wrap-key-rotation.js";
 
 afterEach(() => {

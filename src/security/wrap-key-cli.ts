@@ -94,7 +94,7 @@ export function wrapKeyHealthCheck(options: WrapKeyHealthCheckOptions): WrapKeyS
     } else if (identity.mldsaPrivateKeyPem) {
       row.status = "plaintext";
       row.notes.push(
-        "plaintext row — rewrap with " + "`openclaw wrap-key import` or wait for Doctor refresh",
+        "plaintext row — rewrap with `openclaw wrap-key import` or wait for Doctor refresh",
       );
       plaintextCount += 1;
       notes.push(`Identity "${identityKey}" is stored as plaintext (M1/M2 legacy)`);
@@ -136,7 +136,9 @@ export function wrapKeyHealthCheck(options: WrapKeyHealthCheckOptions): WrapKeyS
  * health check and must surface the bad row rather than abort the run.
  */
 export function parseWrapEnvelope(serialized: string | null | undefined): WrappedSecret | null {
-  if (typeof serialized !== "string" || serialized.length === 0) return null;
+  if (typeof serialized !== "string" || serialized.length === 0) {
+    return null;
+  }
   try {
     return deserializeWrappedSecret(serialized);
   } catch {

@@ -6,14 +6,10 @@
 // algorithm. The ML-DSA-65 invariants below cover the new wire shape and
 // round-trip behavior of the public API in `device-identity.ts`.
 import { spawn, type ChildProcess } from "node:child_process";
-import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import {
-  closeOpenClawStateDatabaseForTest,
-  OPENCLAW_STATE_SCHEMA_VERSION,
-} from "../state/openclaw-state-db.js";
+import { closeOpenClawStateDatabaseForTest } from "../state/openclaw-state-db.js";
 import { withTempDir } from "../test-utils/temp-dir.js";
 import { acquireDeviceIdentityCoordinator } from "./device-identity-coordinator.js";
 import { acquireDeviceIdentityCoordinator as _acquireDeviceIdentityCoordinator } from "./device-identity-coordinator.js";
@@ -385,6 +381,8 @@ function encode(raw: Uint8Array, prefix: string): string {
 
 function rawToBase64Url(bytes: Uint8Array): string {
   let bin = "";
-  for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]!);
+  for (const byte of bytes) {
+    bin += String.fromCharCode(byte);
+  }
   return Buffer.from(bin, "binary").toString("base64url");
 }

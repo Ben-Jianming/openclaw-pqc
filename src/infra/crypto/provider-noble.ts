@@ -8,19 +8,39 @@ import type { CryptoProvider, Key, SignAlg, KemAlg, HashAlg } from "./provider.j
 export class NobleCryptoProvider implements CryptoProvider {
   readonly name = "noble";
   async sign(alg: SignAlg, key: Key, m: Uint8Array): Promise<Uint8Array> {
-    if (key.kind !== "private") throw new CryptoError("need private key");
-    if (alg === "ed25519") return ed25519.sign(m, key.material);
-    if (alg === "ml-dsa-44") return ml_dsa44.sign(m, key.material);
-    if (alg === "ml-dsa-65") return ml_dsa65.sign(m, key.material);
-    if (alg === "ml-dsa-87") return ml_dsa87.sign(m, key.material);
+    if (key.kind !== "private") {
+      throw new CryptoError("need private key");
+    }
+    if (alg === "ed25519") {
+      return ed25519.sign(m, key.material);
+    }
+    if (alg === "ml-dsa-44") {
+      return ml_dsa44.sign(m, key.material);
+    }
+    if (alg === "ml-dsa-65") {
+      return ml_dsa65.sign(m, key.material);
+    }
+    if (alg === "ml-dsa-87") {
+      return ml_dsa87.sign(m, key.material);
+    }
     throw new UnsupportedAlgorithmError(alg);
   }
   async verify(alg: SignAlg, key: Key, m: Uint8Array, s: Uint8Array): Promise<boolean> {
-    if (key.kind !== "public") throw new CryptoError("need public key");
-    if (alg === "ed25519") return ed25519.verify(s, m, key.material);
-    if (alg === "ml-dsa-44") return ml_dsa44.verify(s, m, key.material);
-    if (alg === "ml-dsa-65") return ml_dsa65.verify(s, m, key.material);
-    if (alg === "ml-dsa-87") return ml_dsa87.verify(s, m, key.material);
+    if (key.kind !== "public") {
+      throw new CryptoError("need public key");
+    }
+    if (alg === "ed25519") {
+      return ed25519.verify(s, m, key.material);
+    }
+    if (alg === "ml-dsa-44") {
+      return ml_dsa44.verify(s, m, key.material);
+    }
+    if (alg === "ml-dsa-65") {
+      return ml_dsa65.verify(s, m, key.material);
+    }
+    if (alg === "ml-dsa-87") {
+      return ml_dsa87.verify(s, m, key.material);
+    }
     throw new UnsupportedAlgorithmError(alg);
   }
   async kemGenerate(alg: KemAlg): Promise<{ publicKey: Key; privateKey: Key }> {
@@ -44,19 +64,33 @@ export class NobleCryptoProvider implements CryptoProvider {
     throw new UnsupportedAlgorithmError(alg);
   }
   async kemDecapsulate(alg: KemAlg, sk: Key, ct: Uint8Array): Promise<Uint8Array> {
-    if (alg === "ml-kem-768") return ml_kem768.decapsulate(ct, sk.material);
+    if (alg === "ml-kem-768") {
+      return ml_kem768.decapsulate(ct, sk.material);
+    }
     throw new UnsupportedAlgorithmError(alg);
   }
   async hash(alg: HashAlg, m: Uint8Array): Promise<Uint8Array> {
-    if (alg === "sha-256") return sha256(m);
-    if (alg === "sha-384") return sha384(m);
-    if (alg === "sha-512") return sha512(m);
+    if (alg === "sha-256") {
+      return sha256(m);
+    }
+    if (alg === "sha-384") {
+      return sha384(m);
+    }
+    if (alg === "sha-512") {
+      return sha512(m);
+    }
     throw new UnsupportedAlgorithmError(alg);
   }
   async hmac(alg: HashAlg, k: Uint8Array, m: Uint8Array): Promise<Uint8Array> {
-    if (alg === "sha-256") return hmacN(sha256, k, m);
-    if (alg === "sha-384") return hmacN(sha384, k, m);
-    if (alg === "sha-512") return hmacN(sha512, k, m);
+    if (alg === "sha-256") {
+      return hmacN(sha256, k, m);
+    }
+    if (alg === "sha-384") {
+      return hmacN(sha384, k, m);
+    }
+    if (alg === "sha-512") {
+      return hmacN(sha512, k, m);
+    }
     throw new UnsupportedAlgorithmError(alg);
   }
   randomBytes(n: number): Uint8Array {

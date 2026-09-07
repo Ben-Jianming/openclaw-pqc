@@ -6,7 +6,6 @@
 // shape (UTF-8 base64url JSON), plaintext legacy fallback, public-only
 // device_id lookup, and mutual exclusion of plaintext/wrapped.
 import { randomBytes } from "node:crypto";
-import fs from "node:fs";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { closeOpenClawStateDatabaseForTest } from "../state/openclaw-state-db.js";
@@ -19,7 +18,6 @@ import {
   readStoredDeviceIdentityReadOnly,
   repairInvalidStoredDeviceIdentity,
   type DeviceIdentityStoreOptions,
-  type StoredDeviceIdentity,
   type SyncWrappingKeyProvider,
 } from "./device-identity-store.js";
 
@@ -58,7 +56,7 @@ describe("device-identity-store wrap integration (M5, whitepaper 2.2.2)", () => 
       expect(stored.mldsaPrivateKeyPem).toBeNull(); // plaintext + wrapped are mutually exclusive
       expect(stored.privateKeyPem).toBe("");
 
-      const inserted = insertStoredDeviceIdentityIfAbsent(stored, {
+      insertStoredDeviceIdentityIfAbsent(stored, {
         ...options,
         wrappingKeyProvider: provider,
       });

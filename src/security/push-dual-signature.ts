@@ -93,7 +93,9 @@ function fromBase64Url(s: string, expectedLength: number, label: string): Buffer
     }
     return buf;
   } catch (error) {
-    if (error instanceof PushDualSignatureError) throw error;
+    if (error instanceof PushDualSignatureError) {
+      throw error;
+    }
     throw new PushDualSignatureError(`${label} is not valid base64url`, { cause: error });
   }
 }
@@ -175,7 +177,7 @@ export interface VerifyPushPayloadDualOptions {
   envelope: PushDualEnvelope | string;
 }
 
-function parseEnvelope(envelope: PushPayloadDualEnvelopeLike | string): PushDualEnvelope {
+function parseEnvelope(envelope: unknown): PushDualEnvelope {
   if (typeof envelope === "string") {
     if (envelope.length === 0) {
       throw new PushDualSignatureError("envelope must be a non-empty string");

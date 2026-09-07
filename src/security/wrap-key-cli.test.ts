@@ -252,7 +252,7 @@ describe("wrap-key-cli (M8, whitepaper 2.2.7 + 2.2.8)", () => {
       activeKeyId: "wrap-key-2026-09",
     });
     const invalidIdx = status.notes.findIndex((n) => /invalid row/i.test(n));
-    const staleIdx = status.notes.findIndex((n) => /non-active keyId/.test(n));
+    const staleIdx = status.notes.findIndex((n) => n.includes("non-active keyId"));
     const plaintextIdx = status.notes.findIndex((n) => /plaintext row/i.test(n));
     expect(invalidIdx).toBeGreaterThanOrEqual(0);
     expect(staleIdx).toBeGreaterThan(invalidIdx);

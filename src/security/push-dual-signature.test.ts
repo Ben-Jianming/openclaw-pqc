@@ -10,12 +10,11 @@
 // Ed25519 always via node:crypto (NOT @noble/curves), wrong-shape raw
 // key length, missing/empty keyId rejection, and exact signature byte
 // count.
-import { generateKeyPairSync, randomBytes } from "node:crypto";
+import { generateKeyPairSync } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { generateMlDsa65Keypair } from "../infra/mldsa65-key-storage.js";
 import {
   PUSH_DUAL_SIG_CONSTANTS,
-  PushDualSignatureError,
   signPushPayloadDual,
   verifyPushPayloadDual,
   type PushDualEnvelope,
@@ -28,8 +27,8 @@ function ed25519KeygenRaw(): { secret: Uint8Array; public: Uint8Array } {
   // Ed25519 raw private key is the trailing 32 bytes of the PKCS8 DER
   // (the 0x40 || 32-byte seed at the end). The raw public key is the
   // trailing 32 bytes of the SPKI DER.
-  const privRaw = privDer.subarray(privDer.length - 32);
-  const pubRaw = pubDer.subarray(pubDer.length - 32);
+  const privRaw = privDer.subarray(-32);
+  const pubRaw = pubDer.subarray(-32);
   return { secret: new Uint8Array(privRaw), public: new Uint8Array(pubRaw) };
 }
 

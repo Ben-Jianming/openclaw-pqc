@@ -6,7 +6,6 @@
 // encapsulation/decapsulation, the pqc2: wire format, MAC failure when
 // any single byte of the wire is tampered with, ML-KEM-768 ciphertext
 // length validation, and auto-detection of the envelope.
-import { randomBytes } from "node:crypto";
 import { ml_kem768 } from "@noble/post-quantum/ml-kem.js";
 import { afterEach, describe, expect, it } from "vitest";
 import {
@@ -14,7 +13,6 @@ import {
   deriveConversationKey,
   encryptNip44V2,
   isPqcNip44Envelope,
-  Nip44V2Error,
   NIP44_V2_PQC,
   pad,
   unpad,

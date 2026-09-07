@@ -19,6 +19,7 @@ import type { MentionTarget } from "./mention-target.types.js";
 import { buildMentionedCardContent } from "./mention.js";
 import { resolveFeishuCardTemplate } from "./native-card.js";
 import { parsePostContent } from "./post.js";
+import { auditFeishuSendWithM11 } from "./feishu-m11-audit.js";
 import {
   assertFeishuMessageApiSuccess,
   resolveFeishuReceiptKind,
@@ -564,6 +565,13 @@ export async function sendMessageFeishu(
   const msgType = "post";
   assertFeishuPostWithinEnvelope(content, "Feishu post");
 
+  // M11 (PQC migration): audit-only — compute M11 dual-signature envelope
+  // (Ed25519 + ML-DSA-65) for our local audit trail. The envelope is
+  // NOT added to the Feishu message body (Lark server does not verify
+  // M11 envelopes; adding would either surface as visible text or
+  // be silently ignored). See extensions/feishu/src/feishu-m11-audit.ts.
+  await auditFeishuSendWithM11(content);
+
   const directParams = { receiveId, receiveIdType, content, msgType };
   return sendReplyOrFallbackDirect(client, {
     replyToMessageId,
@@ -593,6 +601,9 @@ export async function sendCardFeishu(params: SendFeishuCardParams): Promise<Feis
     params;
   const { client, receiveId, receiveIdType } = resolveFeishuSendTarget({ cfg, to, accountId });
   const content = JSON.stringify(card);
+
+  // M11 (PQC migration): audit-only — see feishu-m11-audit.ts.
+  await auditFeishuSendWithM11(content);
 
   const directParams = { receiveId, receiveIdType, content, msgType: "interactive" };
   return sendReplyOrFallbackDirect(client, {
