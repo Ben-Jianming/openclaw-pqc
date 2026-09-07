@@ -21,7 +21,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { chmodSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
-import { ed25519 } from "@noble/curves/ed25519";
+import { ed25519 } from "@noble/curves/ed25519.js";
 
 const ED25519_RAW_SECRET_KEY = 32;
 const ED25519_RAW_PUBLIC_KEY = 32;

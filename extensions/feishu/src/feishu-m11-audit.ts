@@ -27,7 +27,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { ed25519 } from "@noble/curves/ed25519";
+import { ed25519 } from "@noble/curves/ed25519.js";
 import { ml_dsa65 } from "@noble/post-quantum/ml-dsa.js";
 
 const PUSH_SIGNING_KEY_FILE_ENV = "OPENCLAW_FEISHU_PUSH_SIGNING_KEY_FILE";
