@@ -61,7 +61,7 @@ export async function runExec(
       stripFinalNewline: false,
       timeout,
     });
-    const releaseOutput = releaseChildProcessOutputAfterExit(subprocess.nodeChildProcess);
+    const releaseOutput = releaseChildProcessOutputAfterExit(subprocess);
     const { stdout, stderr } = await subprocess.finally(releaseOutput);
     const windowsEncoding = resolveWindowsConsoleEncoding();
     const decodedStdout = decodeWindowsOutputBuffer({

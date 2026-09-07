@@ -8,7 +8,7 @@
 // production callers that wire their own logger via
 // `bindOpenClawLogger`.
 
-export const PQC_EVENT = [
+const PQC_EVENT_VALUES = [
   "wrap-secret",
   "unwrap-secret",
   "device-identity",
@@ -17,9 +17,22 @@ export const PQC_EVENT = [
   "backup",
   "restore",
   "doctor",
+  "push-signature",
 ] as const;
 
-export type PqcEvent = (typeof PQC_EVENT)[number];
+export const PQC_EVENT = Object.assign(PQC_EVENT_VALUES, {
+  WRAP_SECRET: "wrap-secret",
+  UNWRAP_SECRET: "unwrap-secret",
+  DEVICE_IDENTITY: "device-identity",
+  KEYRING: "keyring",
+  ROTATION: "rotation",
+  BACKUP: "backup",
+  RESTORE: "restore",
+  DOCTOR: "doctor",
+  PUSH_SIGNATURE: "push-signature",
+} as const);
+
+export type PqcEvent = (typeof PQC_EVENT_VALUES)[number];
 
 export type PqcLogLevel = "info" | "warn" | "error" | "debug";
 export type PqcLogStatus = "ok" | "fail";
@@ -38,6 +51,15 @@ export interface PqcLogPayload {
 }
 
 export type PqcEmit = (record: PqcLogPayload) => void;
+
+export type PqcLogInput = {
+  event: PqcEvent;
+  status: PqcLogStatus;
+  identityKey?: string;
+  keyId?: string;
+  detail?: string;
+  [extra: string]: unknown;
+};
 
 const REDACTED_FIELD_PATTERNS: RegExp[] = [
   /passphrase/i,
@@ -158,16 +180,16 @@ function defaultEmitter(record: PqcLogPayload): void {
 }
 
 export const pqcLog = {
-  info(payload: Omit<PqcLogPayload, "level">): void {
+  info(payload: PqcLogInput): void {
     installedEmitter({ ...payload, level: "info" });
   },
-  warn(payload: Omit<PqcLogPayload, "level">): void {
+  warn(payload: PqcLogInput): void {
     installedEmitter({ ...payload, level: "warn" });
   },
-  error(payload: Omit<PqcLogPayload, "level">): void {
+  error(payload: PqcLogInput): void {
     installedEmitter({ ...payload, level: "error" });
   },
-  debug(payload: Omit<PqcLogPayload, "level">): void {
+  debug(payload: PqcLogInput): void {
     installedEmitter({ ...payload, level: "debug" });
   },
 };

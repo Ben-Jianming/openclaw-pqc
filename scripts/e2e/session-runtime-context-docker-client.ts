@@ -51,9 +51,21 @@ function messageText(content: unknown): string {
 }
 
 async function verifyRuntimeContextTranscriptShape(root: string) {
-  const sessionFile = path.join(root, ".openclaw", "agents", "main", "sessions", "runtime.jsonl");
-  await fs.mkdir(path.dirname(sessionFile), { recursive: true });
-  const sessionManager = SessionManager.open(sessionFile);
+  const storePath = path.join(
+    root,
+    ".openclaw",
+    "agents",
+    "main",
+    "agent",
+    "openclaw-agent.sqlite",
+  );
+  await fs.mkdir(path.dirname(storePath), { recursive: true });
+  const sessionManager = SessionManager.open({
+    agentId: "main",
+    sessionId: "runtime-context",
+    sessionKey: "agent:main:qa:runtime-context-shape",
+    storePath,
+  });
   const effectivePrompt = [
     "visible ask",
     "",

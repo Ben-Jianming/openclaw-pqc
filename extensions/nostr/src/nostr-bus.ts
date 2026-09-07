@@ -810,8 +810,12 @@ async function sendEncryptedDm(
 // === PQC extension (OpenClaw-PQC v0.1) ===
 export const DEFAULT_ENCRYPTION = process.env.OPENCLAW_NOSTR_ENCRYPTION ?? "nip44";
 export async function encryptNip44(sk: Uint8Array, toPub: string, text: string): Promise<string> {
-  const n44 = await import("nostr-tools/nip44"); return n44.v2.encrypt(sk, toPub, text);
+  const n44 = await import("nostr-tools/nip44");
+  const conversationKey = n44.v2.utils.getConversationKey(sk, toPub);
+  return n44.v2.encrypt(text, conversationKey);
 }
 export async function decryptNip44(sk: Uint8Array, fromPub: string, ct: string): Promise<string> {
-  const n44 = await import("nostr-tools/nip44"); return n44.v2.decrypt(sk, fromPub, ct);
+  const n44 = await import("nostr-tools/nip44");
+  const conversationKey = n44.v2.utils.getConversationKey(sk, fromPub);
+  return n44.v2.decrypt(ct, conversationKey);
 }

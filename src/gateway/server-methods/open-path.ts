@@ -46,7 +46,7 @@ async function observeXdgOpenStartup(command: OpenPathCommand): Promise<void> {
     reject: true,
     stdio: ["ignore", "ignore", "pipe"],
   });
-  child.nodeChildProcess.unref();
+  child.unref();
   let stderrText = "";
   const stderr = child.stderr;
   stderr?.setEncoding("utf8");

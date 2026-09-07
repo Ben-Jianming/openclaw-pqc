@@ -9,6 +9,10 @@ on:
       - "package.json"
       - "pnpm-lock.yaml"
       - "scripts/validate-plugin-init-provider-scaffold.ts"
+      - "scripts/package-openclaw-for-docker.mjs"
+      - "scripts/write-plugin-sdk-entry-dts.ts"
+      - "scripts/lib/plugin-sdk-entries.mjs"
+      - "scripts/lib/plugin-sdk-*.json"
       - "src/cli/plugins-authoring-command.ts"
       - "src/cli/plugins-authoring-command.test.ts"
       - "src/cli/plugins-cli.ts"
@@ -20,6 +24,10 @@ on:
       - "package.json"
       - "pnpm-lock.yaml"
       - "scripts/validate-plugin-init-provider-scaffold.ts"
+      - "scripts/package-openclaw-for-docker.mjs"
+      - "scripts/write-plugin-sdk-entry-dts.ts"
+      - "scripts/lib/plugin-sdk-entries.mjs"
+      - "scripts/lib/plugin-sdk-*.json"
       - "src/cli/plugins-authoring-command.ts"
       - "src/cli/plugins-authoring-command.test.ts"
       - "src/cli/plugins-cli.ts"
@@ -37,7 +45,7 @@ jobs:
     name: Validate provider scaffold
     if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     runs-on: ${{ github.repository == 'openclaw/openclaw' && 'blacksmith-4vcpu-ubuntu-2404' || 'ubuntu-24.04' }}
-    timeout-minutes: 30
+    timeout-minutes: 90
     steps:
       - name: Checkout
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3

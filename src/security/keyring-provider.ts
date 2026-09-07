@@ -173,24 +173,26 @@ export class FileKeyring implements SyncWrappingKeyProvider {
   getActiveKey(): { keyId: string; key: Buffer } {
     const shape = this.loadShape();
     if (this.explicitPrimaryKeyId) {
-      if (!shape.keys[this.explicitPrimaryKeyId]) {
+      const entry = shape.keys[this.explicitPrimaryKeyId];
+      if (!entry) {
         throw new KeyringError(
           `File keyring at ${this.filePath} is missing the explicit primary keyId "${this.explicitPrimaryKeyId}"`,
         );
       }
       return {
         keyId: this.explicitPrimaryKeyId,
-        key: decodeBase64UrlKey(shape.keys[this.explicitPrimaryKeyId]),
+        key: decodeBase64UrlKey(entry),
       };
     }
-    if (!shape.keys[shape.activeKeyId]) {
+    const entry = shape.keys[shape.activeKeyId];
+    if (!entry) {
       throw new KeyringError(
         `File keyring at ${this.filePath} has no entry for the active keyId "${shape.activeKeyId}"`,
       );
     }
     return {
       keyId: shape.activeKeyId,
-      key: decodeBase64UrlKey(shape.keys[shape.activeKeyId]),
+      key: decodeBase64UrlKey(entry),
     };
   }
 

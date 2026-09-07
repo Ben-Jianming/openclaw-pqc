@@ -283,13 +283,13 @@ export function createFindToolDefinition(
               reject: false,
               stdio: ["ignore", "pipe", "pipe"],
             });
-            releaseChildProcessOutputAfterExit(child.nodeChildProcess);
+            releaseChildProcessOutputAfterExit(child);
             const rl = createInterface({ input: child.stdout });
             let stderr = "";
             const lines: string[] = [];
 
             stopChild = () => {
-              if (!child.nodeChildProcess.killed) {
+              if (!child.killed) {
                 child.kill();
               }
             };
@@ -322,12 +322,12 @@ export function createFindToolDefinition(
               lines.push(line);
             });
 
-            child.nodeChildProcess.on("error", (error) => {
+            child.on("error", (error) => {
               cleanup();
               settle(() => reject(new Error(`Failed to run fd: ${error.message}`)));
             });
 
-            child.nodeChildProcess.on("close", (code) => {
+            child.on("close", (code) => {
               cleanup();
               if (signal?.aborted) {
                 settle(() => reject(new Error("Operation aborted")));

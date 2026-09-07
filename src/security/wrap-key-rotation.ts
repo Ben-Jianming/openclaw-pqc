@@ -16,18 +16,11 @@ import {
   randomBytes,
   timingSafeEqual,
 } from "node:crypto";
-import {
-  readStoredDeviceIdentity,
-  writeStoredDeviceIdentity,
-  type StoredDeviceIdentity,
-  type SyncWrappingKeyProvider,
+import type {
+  StoredDeviceIdentity,
+  SyncWrappingKeyProvider,
 } from "../infra/device-identity-store.js";
-import {
-  serializeWrappedSecret,
-  unwrapSecret,
-  wrapSecret,
-  type WrappedSecret,
-} from "./secret-wrapping.js";
+import { serializeWrappedSecret, unwrapSecret, wrapSecret } from "./secret-wrapping.js";
 
 const BACKUP_VERSION = 1;
 const PBKDF2_ITERATIONS = 210_000; // OWASP 2023 minimum for PBKDF2-SHA256

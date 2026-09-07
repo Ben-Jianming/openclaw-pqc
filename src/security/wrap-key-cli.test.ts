@@ -63,8 +63,8 @@ describe("wrap-key-cli (M8, whitepaper 2.2.7 + 2.2.8)", () => {
     expect(status.wrappedActiveCount).toBe(0);
     expect(status.wrappedStaleCount).toBe(0);
     expect(status.invalidCount).toBe(0);
-    expect(status.rows[0].status).toBe("plaintext");
-    expect(status.rows[0].notes.join(" ")).toMatch(/plaintext/);
+    expect(status.rows[0]!.status).toBe("plaintext");
+    expect(status.rows[0]!.notes.join(" ")).toMatch(/plaintext/);
   });
 
   it("classifies a wrapped row whose keyId matches the active keyId as wrapped-active", () => {
@@ -77,7 +77,7 @@ describe("wrap-key-cli (M8, whitepaper 2.2.7 + 2.2.8)", () => {
     });
     expect(status.wrappedActiveCount).toBe(1);
     expect(status.wrappedStaleCount).toBe(0);
-    expect(status.rows[0].status).toBe("wrapped-active");
+    expect(status.rows[0]!.status).toBe("wrapped-active");
   });
 
   it("classifies a wrapped row whose keyId does not match the active keyId as wrapped-stale", () => {
@@ -90,8 +90,8 @@ describe("wrap-key-cli (M8, whitepaper 2.2.7 + 2.2.8)", () => {
     });
     expect(status.wrappedStaleCount).toBe(1);
     expect(status.wrappedActiveCount).toBe(0);
-    expect(status.rows[0].status).toBe("wrapped-stale");
-    expect(status.rows[0].notes.join(" ")).toMatch(/non-active keyId/);
+    expect(status.rows[0]!.status).toBe("wrapped-stale");
+    expect(status.rows[0]!.notes.join(" ")).toMatch(/non-active keyId/);
   });
 
   it("surfaces a malformed wrap envelope as invalid without throwing", () => {
@@ -105,8 +105,8 @@ describe("wrap-key-cli (M8, whitepaper 2.2.7 + 2.2.8)", () => {
       activeKeyId: "wrap-key-2026-08",
     });
     expect(status.invalidCount).toBe(1);
-    expect(status.rows[0].status).toBe("invalid");
-    expect(status.rows[0].notes.join(" ")).toMatch(/malformed/);
+    expect(status.rows[0]!.status).toBe("invalid");
+    expect(status.rows[0]!.notes.join(" ")).toMatch(/malformed/);
   });
 
   it("treats every wrapped row as wrapped-stale when the keyring is unavailable", () => {

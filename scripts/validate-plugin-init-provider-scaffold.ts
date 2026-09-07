@@ -1,7 +1,9 @@
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { runPluginsInitCommand } from "../src/cli/plugins-authoring-command.js";
+import { resolveNpmRunner } from "./npm-runner.mjs";
 
 type InspectorReport = {
   status?: unknown;
@@ -12,6 +14,7 @@ type InspectorReport = {
   };
 };
 
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const artifactRoot = path.resolve(
   process.env.OPENCLAW_PLUGIN_INIT_VALIDATE_ROOT ?? ".artifacts/plugin-init-provider-scaffold",
 );
@@ -20,9 +23,12 @@ const reportPath = path.join(projectDir, ".clawhub-validation", "plugin-inspecto
 
 function run(command: string, args: string[], cwd: string): void {
   console.log(`$ ${[command, ...args].join(" ")}`);
-  const result = spawnSync(command, args, {
+  const invocation =
+    command === "npm" ? resolveNpmRunner({ npmArgs: args }) : { command, args, shell: false };
+  const result = spawnSync(invocation.command, invocation.args, {
+    ...invocation,
     cwd,
-    env: process.env,
+    env: "env" in invocation ? invocation.env : process.env,
     stdio: "inherit",
   });
   if (result.error) {
@@ -62,6 +68,24 @@ await runPluginsInitCommand("plugin-init-test", {
   type: "provider",
 });
 
+// Build the checkout package so registry latest cannot hide a fork SDK regression.
+const tarballPath = path.join(artifactRoot, "openclaw-under-test.tgz");
+run(
+  process.execPath,
+  [
+    path.join(repoRoot, "scripts/package-openclaw-for-docker.mjs"),
+    "--allow-unreleased-changelog",
+    "--output-dir",
+    artifactRoot,
+    "--output-name",
+    path.basename(tarballPath),
+  ],
+  repoRoot,
+);
+const manifestPath = path.join(projectDir, "package.json");
+const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+manifest.devDependencies.openclaw = "file:" + tarballPath.replaceAll("\\", "/");
+fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + "\n");
 run("npm", ["install", "--no-audit", "--fund=false"], projectDir);
 run("npm", ["run", "build"], projectDir);
 run("npm", ["test"], projectDir);

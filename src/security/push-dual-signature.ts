@@ -83,12 +83,6 @@ function assertRawKey(raw: Uint8Array, expectedLength: number, label: string): v
   }
 }
 
-function toBase64Url(bytes: Uint8Array): string {
-  let bin = "";
-  for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]!);
-  return Buffer.from(bin, "binary").toString("base64url");
-}
-
 function fromBase64Url(s: string, expectedLength: number, label: string): Buffer {
   try {
     const buf = Buffer.from(s, "base64url");

@@ -148,6 +148,10 @@ function classifyCanonicalRow(
         publicKeyPem: row.public_key_pem,
         privateKeyPem: row.private_key_pem,
         createdAtMs: row.created_at_ms,
+        mldsaPublicKeyPem: null,
+        mldsaPrivateKeyPem: null,
+        mldsaPrivateKeyWrapped: null,
+        mldsaPrivateKeyWrapKeyId: null,
       },
       row.identity_key,
     );

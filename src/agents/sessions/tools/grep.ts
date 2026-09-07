@@ -159,12 +159,7 @@ export function createGrepToolDefinition(
         // Keep cancellation live from the first await through async result formatting.
         // Settlement owns listener cleanup; spawned children stop without waiting for close.
         let settled = false;
-        let child:
-          | {
-              nodeChildProcess: { killed: boolean };
-              kill: () => void;
-            }
-          | undefined;
+        let child: { killed: boolean; kill: () => void } | undefined;
         let childClosed = false;
         let rl: ReturnType<typeof createInterface> | undefined;
         let killedDueToLimit = false;
@@ -182,7 +177,7 @@ export function createGrepToolDefinition(
           return true;
         };
         const stopChild = (dueToLimit = false) => {
-          if (child && !childClosed && !child.nodeChildProcess.killed) {
+          if (child && !childClosed && !child.killed) {
             killedDueToLimit = dueToLimit;
             child.kill();
           }
@@ -271,7 +266,7 @@ export function createGrepToolDefinition(
               reject: false,
               stdio: ["ignore", "pipe", "pipe"],
             });
-            releaseChildProcessOutputAfterExit(spawnedChild.nodeChildProcess);
+            releaseChildProcessOutputAfterExit(spawnedChild);
             child = spawnedChild;
             rl = createInterface({ input: spawnedChild.stdout });
             let stderr = "";
@@ -362,11 +357,11 @@ export function createGrepToolDefinition(
               }
             });
 
-            spawnedChild.nodeChildProcess.on("error", (error) => {
+            spawnedChild.on("error", (error) => {
               childClosed = true;
               settle(() => reject(new Error(`Failed to run ripgrep: ${error.message}`)));
             });
-            spawnedChild.nodeChildProcess.on("close", (code) => {
+            spawnedChild.on("close", (code) => {
               childClosed = true;
               void (async () => {
                 if (settled) {

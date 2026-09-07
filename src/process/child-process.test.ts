@@ -26,7 +26,7 @@ describe.skipIf(process.platform === "win32")("releaseChildProcessOutputAfterExi
       reject: false,
       stdio: ["ignore", "pipe", "pipe"],
     });
-    const releaseOutput = releaseChildProcessOutputAfterExit(child.nodeChildProcess);
+    const releaseOutput = releaseChildProcessOutputAfterExit(child);
     let output = "";
     child.stdout?.on("data", (chunk: Buffer) => {
       output += chunk.toString();
@@ -36,7 +36,7 @@ describe.skipIf(process.platform === "win32")("releaseChildProcessOutputAfterExi
     // writes while JS is parked, so its pipe data and the idle timer are both
     // ready when the event loop resumes.
     await new Promise<void>((resolve) => {
-      child?.nodeChildProcess.once("exit", () => {
+      child?.once("exit", () => {
         Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 250);
         resolve();
       });
@@ -53,7 +53,7 @@ describe.skipIf(process.platform === "win32")("releaseChildProcessOutputAfterExi
       reject: false,
       stdio: ["ignore", "pipe", "pipe"],
     });
-    const releaseOutput = releaseChildProcessOutputAfterExit(child.nodeChildProcess);
+    const releaseOutput = releaseChildProcessOutputAfterExit(child);
     let output = "";
     child.stdout?.on("data", (chunk: Buffer) => {
       output += chunk.toString();

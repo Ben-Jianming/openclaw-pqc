@@ -28,7 +28,6 @@ type MockResult = {
 };
 
 type MockSubprocess = EventEmitter & {
-  nodeChildProcess: MockSubprocess;
   exitCode: number | null;
   finish: (result?: Partial<MockResult>) => void;
   kill: ReturnType<typeof vi.fn>;
@@ -54,7 +53,6 @@ function createMockSubprocess(params?: {
   stdoutChunks?: Buffer[];
 }): MockSubprocess {
   const child = new EventEmitter() as MockSubprocess;
-  child.nodeChildProcess = child;
   child.pid = 1234;
   child.exitCode = null;
   child.signalCode = null;
@@ -556,6 +554,29 @@ describe("Windows command execution", () => {
         stderrTruncatedBytes: 5,
       });
       expect(spawnSyncMock).not.toHaveBeenCalled();
+    });
+  });
+
+  it.each(["head", "tail"] as const)("detects split UTF-8 before %s truncation", async (mode) => {
+    const bytes = Buffer.from("a😀z", "utf8");
+    execaMock.mockImplementationOnce(() =>
+      createMockSubprocess({
+        stdoutChunks: [bytes.subarray(0, 2), bytes.subarray(2, 4), bytes.subarray(4)],
+        stderrChunks: [Buffer.from([0xb2]), Buffer.from([0xe2])],
+      }),
+    );
+    await withMockedWindowsPlatform(async () => {
+      await expect(
+        runCommandWithTimeout(["node", "mixed-output.js"], {
+          maxOutputBytes: 3,
+          outputCapture: mode,
+          timeoutMs: 1_000,
+        }),
+      ).resolves.toMatchObject({
+        stdout: mode === "head" ? "a" : "z",
+        stderr: "测",
+        stdoutTruncatedBytes: 5,
+      });
     });
   });
 

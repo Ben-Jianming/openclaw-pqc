@@ -139,18 +139,15 @@
     "!dist/plugin-sdk/plugin-test-runtime.d.ts",
     "!dist/plugin-sdk/poll-runtime.d.ts",
     "!dist/plugin-sdk/process-runtime.d.ts",
-    "!dist/plugin-sdk/provider-auth-api-key.d.ts",
     "!dist/plugin-sdk/provider-auth-login-flow-runtime.d.ts",
     "!dist/plugin-sdk/provider-auth-result.d.ts",
     "!dist/plugin-sdk/provider-auth-runtime.d.ts",
     "!dist/plugin-sdk/provider-catalog-live-runtime.d.ts",
-    "!dist/plugin-sdk/provider-catalog-shared.d.ts",
     "!dist/plugin-sdk/provider-entry.d.ts",
     "!dist/plugin-sdk/provider-env-vars.d.ts",
     "!dist/plugin-sdk/provider-http.d.ts",
     "!dist/plugin-sdk/provider-http-test-mocks.js",
     "!dist/plugin-sdk/provider-http-test-mocks.d.ts",
-    "!dist/plugin-sdk/provider-model-shared.d.ts",
     "!dist/plugin-sdk/provider-model-types.d.ts",
     "!dist/plugin-sdk/provider-oauth-runtime.d.ts",
     "!dist/plugin-sdk/provider-onboard.d.ts",
@@ -342,10 +339,10 @@
     "scripts/npm-runner.mjs",
     "scripts/prepare-git-hooks.mjs",
     "scripts/preinstall-package-manager-warning.mjs",
-    "scripts/lib/guard-inventory-utils.mjs",
     "scripts/lib/official-external-channel-catalog.json",
     "scripts/lib/official-external-plugin-catalog.json",
     "scripts/lib/official-external-provider-catalog.json",
+    "scripts/lib/guard-inventory-utils.mjs",
     "scripts/lib/package-dist-imports.mjs",
     "scripts/lib/recommended-tool-installs.json",
     "scripts/postinstall-bundled-plugins.mjs",
@@ -355,10 +352,6 @@
   "main": "dist/index.js",
   "exports": {
     ".": "./dist/index.js",
-    "./plugin-sdk/cli-argv": {
-      "types": "./dist/plugin-sdk/cli-argv.d.ts",
-      "default": "./dist/plugin-sdk/cli-argv.js"
-    },
     "./plugin-sdk/core": {
       "types": "./dist/plugin-sdk/core.d.ts",
       "default": "./dist/plugin-sdk/core.js"
@@ -1200,6 +1193,7 @@
       "default": "./dist/plugin-sdk/provider-auth-login-flow-runtime.js"
     },
     "./plugin-sdk/provider-auth-api-key": {
+      "types": "./dist/plugin-sdk/provider-auth-api-key.d.ts",
       "default": "./dist/plugin-sdk/provider-auth-api-key.js"
     },
     "./plugin-sdk/provider-auth-result": {
@@ -1220,6 +1214,7 @@
       "default": "./dist/plugin-sdk/provider-catalog-runtime.js"
     },
     "./plugin-sdk/provider-catalog-shared": {
+      "types": "./dist/plugin-sdk/provider-catalog-shared.d.ts",
       "default": "./dist/plugin-sdk/provider-catalog-shared.js"
     },
     "./plugin-sdk/provider-entry": {
@@ -1235,6 +1230,7 @@
       "default": "./dist/plugin-sdk/provider-model-types.js"
     },
     "./plugin-sdk/provider-model-shared": {
+      "types": "./dist/plugin-sdk/provider-model-shared.d.ts",
       "default": "./dist/plugin-sdk/provider-model-shared.js"
     },
     "./plugin-sdk/provider-onboard": {
@@ -1375,7 +1371,10 @@
     "./plugin-sdk/llm": {
       "default": "./dist/plugin-sdk/llm.js"
     },
-    "./cli-entry": "./openclaw.mjs"
+    "./cli-entry": "./openclaw.mjs",
+    "./plugin-sdk/*": "./packages/plugin-sdk/src/index.ts",
+    "./plugin-sdk/cli-argv": "./packages/plugin-sdk/src/index.ts",
+    "./plugin-sdk/channel-dm-policy": "./packages/plugin-sdk/src/index.ts"
   },
   "scripts": {
     "android:assemble": "node scripts/run-android-gradle.mjs :app:assemblePlayDebug :wear-shared:assembleDebug",
@@ -1472,6 +1471,7 @@
     "deadcode:unused-files": "node scripts/check-deadcode-unused-files.mjs",
     "deps:root-ownership": "node scripts/root-dependency-ownership-audit.mjs",
     "deps:root-ownership:check": "node scripts/root-dependency-ownership-audit.mjs --check",
+    "deps:npm-lock:check": "node scripts/generate-npm-package-lock.mjs --all",
     "deps:changes:report": "node scripts/dependency-changes-report.mjs",
     "deps:patches:check": "node scripts/check-package-patches.mjs",
     "deps:pins:check": "node scripts/check-dependency-pins.mjs",
@@ -1893,7 +1893,6 @@
     "@anthropic-ai/sdk": "0.112.3",
     "@clack/core": "1.4.3",
     "@clack/prompts": "1.7.0",
-    "@discord/embedded-app-sdk": "2.5.0",
     "@earendil-works/pi-tui": "0.80.10",
     "@google/genai": "2.12.0",
     "@grammyjs/runner": "2.0.3",
@@ -1903,17 +1902,12 @@
     "@mistralai/mistralai": "2.5.0",
     "@modelcontextprotocol/sdk": "1.29.0",
     "@mozilla/readability": "0.6.0",
-    "@noble/curves": "^1.9.7",
-    "@noble/ed25519": "3.1.0",
-    "@noble/hashes": "^1.8.0",
-    "@noble/post-quantum": "^0.5.4",
+    "@noble/curves": "1.9.7",
+    "@noble/hashes": "1.8.0",
+    "@noble/post-quantum": "0.5.4",
     "@openclaw/ai": "workspace:*",
     "@openclaw/fs-safe": "0.4.7",
     "@openclaw/proxyline": "0.3.4",
-    "@pierre/diffs": "1.2.12",
-    "@shikijs/langs": "4.3.1",
-    "@shikijs/themes": "^4.4.3",
-    "@shikijs/transformers": "^4.4.3",
     "@silvia-odwyer/photon-node": "0.3.4",
     "chalk": "5.6.2",
     "chokidar": "5.0.0",
@@ -1950,12 +1944,12 @@
     "quickjs-wasi": "3.0.2",
     "rastermill": "0.3.1",
     "semver": "7.8.5",
-    "tar": "7.5.20",
+    "tar": "7.5.22",
     "tree-sitter-bash": "0.25.1",
     "tslog": "4.10.2",
     "typebox": "1.3.6",
     "typescript": "6.0.3",
-    "undici": "8.6.0",
+    "undici": "8.10.2",
     "web-push": "3.6.7",
     "web-tree-sitter": "0.26.11",
     "ws": "8.21.1",
@@ -2008,8 +2002,5 @@
   "engines": {
     "node": ">=22.22.3 <23 || >=24.15.0 <25 || >=25.9.0"
   },
-  "packageManager": "pnpm@11.15.1+sha512.81350b07e53c9538a02f1f2303b4290fa2d7be04e56e2a970c4cc4b417dc761de196edabd49d55c7dc9580db81007c44143e4e3d7e462b3000d23c255122d065",
-  "overrides": {
-    "fetch-blob": "^4.0.0"
-  }
+  "packageManager": "pnpm@11.15.1+sha512.81350b07e53c9538a02f1f2303b4290fa2d7be04e56e2a970c4cc4b417dc761de196edabd49d55c7dc9580db81007c44143e4e3d7e462b3000d23c255122d065"
 }

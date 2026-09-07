@@ -96,7 +96,7 @@ describe("keyring-provider (M6, whitepaper 2.2.5)", () => {
 
   it("FileKeyring refuses a non-0600/0400 mode at construction time", () => {
     const absolute = path.join(os.tmpdir(), "openclaw-keyring-m6-mode.json");
-    expect(() => new FileKeyring({ path: absolute, mode: 0o644 })).toThrow(/0600 or 0400/);
+    expect(() => new FileKeyring({ path: absolute, mode: 0o644 as 0o600 })).toThrow(/0600 or 0400/);
   });
 
   it("FileKeyring refuses a missing file on getActiveKey", async () => {

@@ -96,7 +96,7 @@ export async function execCommand(
       reject: false,
       stdio: ["ignore", "pipe", "pipe"],
     });
-    const releaseOutput = releaseChildProcessOutputAfterExit(proc.nodeChildProcess);
+    const releaseOutput = releaseChildProcessOutputAfterExit(proc);
 
     let stdout: OutputCapture = { text: "", truncatedChars: 0 };
     let stderr: OutputCapture = { text: "", truncatedChars: 0 };

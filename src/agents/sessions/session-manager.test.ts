@@ -16,6 +16,7 @@ import {
   replaceTranscriptEventsSync,
   upsertSessionEntry,
 } from "../../config/sessions/session-accessor.js";
+import { closeOpenClawAgentDatabasesForTest } from "../../state/openclaw-agent-db.js";
 import {
   buildSessionContext,
   CURRENT_SESSION_VERSION,
@@ -41,6 +42,7 @@ async function makeTempDir(): Promise<string> {
 
 describe("SessionManager.open", () => {
   afterEach(async () => {
+    closeOpenClawAgentDatabasesForTest();
     await Promise.all(
       tempPaths.splice(0).map((dir) => fs.rm(dir, { recursive: true, force: true })),
     );

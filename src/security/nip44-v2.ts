@@ -169,7 +169,7 @@ function chacha20Encrypt(key: Buffer, nonce: Buffer, plaintext: Uint8Array): Buf
   const iv = Buffer.alloc(16);
   iv.set(nonce, 4);
   try {
-    const cipher = createCipheriv("chacha20", key, iv, { authTagLength: 0 });
+    const cipher = createCipheriv("chacha20", key, iv);
     return Buffer.concat([cipher.update(plaintext), cipher.final()]);
   } catch (error) {
     throw new Nip44V2Error(
@@ -188,7 +188,7 @@ function chacha20Decrypt(key: Buffer, nonce: Buffer, ciphertext: Uint8Array): Bu
   const iv = Buffer.alloc(16);
   iv.set(nonce, 4);
   try {
-    const decipher = createDecipheriv("chacha20", key, iv, { authTagLength: 0 });
+    const decipher = createDecipheriv("chacha20", key, iv);
     return Buffer.concat([decipher.update(ciphertext), decipher.final()]);
   } catch (error) {
     throw new Nip44V2Error(

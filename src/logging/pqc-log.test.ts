@@ -36,7 +36,8 @@ describe("pqc-log (M9, whitepaper 2.2.9)", () => {
     expect(PQC_EVENT).toContain("backup");
     expect(PQC_EVENT).toContain("restore");
     expect(PQC_EVENT).toContain("doctor");
-    expect(PQC_EVENT.length).toBe(8);
+    expect(PQC_EVENT).toContain("push-signature");
+    expect(PQC_EVENT.length).toBe(9);
   });
 
   it("redacts fields whose name matches passphrase / rawkey / privatekey (case-insensitive)", () => {
@@ -97,8 +98,8 @@ describe("pqc-log (M9, whitepaper 2.2.9)", () => {
       summary: { totalRotated: 2, secretBackup: "should-be-redacted" },
     });
     const rotated = out.rotated as Array<Record<string, unknown>>;
-    expect(rotated[0].passphrase).toBe("[REDACTED]");
-    expect(rotated[1].rawKey).toBe("[REDACTED]");
+    expect(rotated[0]!.passphrase).toBe("[REDACTED]");
+    expect(rotated[1]!.rawKey).toBe("[REDACTED]");
     const summary = out.summary as Record<string, unknown>;
     expect(summary.totalRotated).toBe(2);
     expect(summary.secretBackup).toBe("[REDACTED]");
@@ -117,7 +118,7 @@ describe("pqc-log (M9, whitepaper 2.2.9)", () => {
     pqcLog.debug({ event: "wrap-secret", status: "ok", detail: "test debug" });
     expect(seen).toHaveLength(4);
     expect(seen.map((r) => r.level)).toEqual(["info", "warn", "error", "debug"]);
-    expect(seen[0].event).toBe("device-identity");
+    expect(seen[0]!.event).toBe("device-identity");
   });
 
   it("bindOpenClawLogger routes records by level to the correct sink", () => {
@@ -140,8 +141,8 @@ describe("pqc-log (M9, whitepaper 2.2.9)", () => {
     expect(warn).toHaveLength(1);
     expect(error).toHaveLength(1);
     expect(debug).toHaveLength(1);
-    expect(info[0].tag).toBe("PQC");
-    expect(info[0].event).toBe("device-identity");
+    expect(info[0]!.tag).toBe("PQC");
+    expect(info[0]!.event).toBe("device-identity");
   });
 
   it("captures the default emitter via console fallback when no other sink is bound", () => {
@@ -155,8 +156,8 @@ describe("pqc-log (M9, whitepaper 2.2.9)", () => {
       console.log = originalLog;
     }
     expect(lines).toHaveLength(1);
-    expect(lines[0]).toMatch(/^\[PQC\] /);
-    const parsed = JSON.parse(lines[0].slice("[PQC] ".length));
+    expect(lines[0]!).toMatch(/^\[PQC\] /);
+    const parsed = JSON.parse(lines[0]!.slice("[PQC] ".length));
     expect(parsed.event).toBe("device-identity");
   });
 
@@ -168,8 +169,8 @@ describe("pqc-log (M9, whitepaper 2.2.9)", () => {
       backups: [{ envelope: Buffer.from("opaque-payload") }, { envelope: "valid-string-envelope" }],
     });
     const backups = out.backups as Array<Record<string, unknown>>;
-    expect(backups[0].envelope).toBeUndefined();
-    expect(backups[1].envelope).toBe("valid-string-envelope");
+    expect(backups[0]!.envelope).toBeUndefined();
+    expect(backups[1]!.envelope).toBe("valid-string-envelope");
   });
 
   it("captures the captureOne helper and confirms emitter swap identity", () => {

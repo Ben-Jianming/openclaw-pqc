@@ -92,7 +92,16 @@ describe("legacy device identity Doctor migration", () => {
     if (!deviceId) {
       throw new Error("expected generated device id");
     }
-    return { deviceId, publicKeyPem, privateKeyPem, createdAtMs: CREATED_AT_MS + 1 };
+    return {
+      deviceId,
+      publicKeyPem,
+      privateKeyPem,
+      createdAtMs: CREATED_AT_MS + 1,
+      mldsaPublicKeyPem: null,
+      mldsaPrivateKeyPem: null,
+      mldsaPrivateKeyWrapped: null,
+      mldsaPrivateKeyWrapKeyId: null,
+    };
   }
 
   function rewrapPem(pem: string): string {

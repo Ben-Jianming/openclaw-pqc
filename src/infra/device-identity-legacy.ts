@@ -46,6 +46,10 @@ function normalizeLegacyKeyPair(params: {
       publicKeyPem,
       privateKeyPem,
       createdAtMs: params.createdAtMs,
+      mldsaPublicKeyPem: null,
+      mldsaPrivateKeyPem: null,
+      mldsaPrivateKeyWrapped: null,
+      mldsaPrivateKeyWrapKeyId: null,
     };
     validateStoredDeviceIdentity(normalized);
     return normalized;

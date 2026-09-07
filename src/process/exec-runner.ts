@@ -117,6 +117,13 @@ async function runCommandWithOutputEncoding(
 
   const stdoutCapture = createCapturedOutputBuffers();
   const stderrCapture = createCapturedOutputBuffers();
+  // Detect encoding before capture limits discard bytes. A partial UTF-8 character
+  // must not be mistaken for a legacy Windows code page after truncation.
+  const utf8Decoders = {
+    stdout: new TextDecoder("utf-8", { fatal: true }),
+    stderr: new TextDecoder("utf-8", { fatal: true }),
+  };
+  const validUtf8 = { stdout: true, stderr: true };
   const maxStdoutBytes = resolveMaxOutputBytes(options.maxOutputBytes, "stdout");
   const maxStderrBytes = resolveMaxOutputBytes(options.maxOutputBytes, "stderr");
   const maxCombinedOutputBytes =
@@ -170,7 +177,7 @@ async function runCommandWithOutputEncoding(
     stripFinalNewline: false,
     windowsVerbatimArguments: options.windowsVerbatimArguments,
   });
-  const nodeChild = child.nodeChildProcess;
+  const nodeChild = child;
   const releaseOutput = releaseChildProcessOutputAfterExit(nodeChild);
   nodeChild.once("exit", (code, signalValue) => {
     childExited = true;
@@ -246,6 +253,13 @@ async function runCommandWithOutputEncoding(
     captureMode: CommandOutputCaptureMode,
   ) => {
     const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    if (process.platform === "win32" && !forceUtf8 && validUtf8[stream]) {
+      try {
+        utf8Decoders[stream].decode(buffer, { stream: true });
+      } catch {
+        validUtf8[stream] = false;
+      }
+    }
     outputBytesByStream[stream] += buffer.byteLength;
     const streamLimitExceeded = outputBytesByStream[stream] > maxBytes;
     if (maxCombinedOutputBytes === undefined) {
@@ -467,17 +481,26 @@ async function runCommandWithOutputEncoding(
   const decodeCapturedOutput = (
     capture: CapturedOutputBuffers,
     captureMode: CommandOutputCaptureMode,
+    stream: CommandOutputStream,
   ): string => {
-    const buffer = finalizeCapturedOutput(capture, captureMode, forceUtf8);
-    return forceUtf8
+    if (process.platform === "win32" && !forceUtf8 && validUtf8[stream]) {
+      try {
+        utf8Decoders[stream].decode();
+      } catch {
+        validUtf8[stream] = false;
+      }
+    }
+    const decodeAsUtf8 = forceUtf8 || (process.platform === "win32" && validUtf8[stream]);
+    const buffer = finalizeCapturedOutput(capture, captureMode, decodeAsUtf8);
+    return decodeAsUtf8
       ? buffer.toString("utf8")
       : decodeWindowsOutputBuffer({ buffer, windowsEncoding });
   };
 
   return {
     pid: nodeChild.pid,
-    stdout: decodeCapturedOutput(stdoutCapture, stdoutCaptureMode),
-    stderr: decodeCapturedOutput(stderrCapture, stderrCaptureMode),
+    stdout: decodeCapturedOutput(stdoutCapture, stdoutCaptureMode, "stdout"),
+    stderr: decodeCapturedOutput(stderrCapture, stderrCaptureMode, "stderr"),
     stdoutTruncatedBytes: stdoutCapture.truncatedBytes || undefined,
     stderrTruncatedBytes: stderrCapture.truncatedBytes || undefined,
     preservedStdoutLines:
