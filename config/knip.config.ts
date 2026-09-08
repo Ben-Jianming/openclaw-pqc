@@ -393,7 +393,7 @@ const config = {
     "src/infra/mldsa65-key-storage.ts": ["exports"],
     "src/infra/push-apns-http2-m11.ts": ["exports", "types"],
     "src/infra/push-apns-relay-m11.ts": ["types"],
-    "src/infra/push-envelope.ts": ["types"],
+    "src/infra/push-envelope.ts": ["exports", "types"],
     "src/infra/push-signing-key.ts": ["exports", "types"],
     "src/logging/pqc-log.ts": ["exports", "types"],
     "src/security/keyring-provider.ts": ["exports", "types"],
