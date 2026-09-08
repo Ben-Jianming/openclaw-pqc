@@ -28,7 +28,7 @@ let tempDir: string;
 let wrapKeyFile: string;
 let savedEnv: Record<string, string | undefined>;
 
-function writeWrapKeyFile(filePath: string, value: string, mode: number = 0o600): void {
+function writeWrapKeyFile(filePath: string, value: string, mode = 0o600): void {
   fs.writeFileSync(filePath, value);
   fs.chmodSync(filePath, mode);
 }
@@ -61,8 +61,11 @@ beforeEach(() => {
 
 afterEach(() => {
   for (const [k, v] of Object.entries(savedEnv)) {
-    if (v === undefined) delete process.env[k];
-    else process.env[k] = v;
+    if (v === undefined) {
+      delete process.env[k];
+    } else {
+      process.env[k] = v;
+    }
   }
   closeOpenClawStateDatabaseForTest();
   fs.rmSync(tempDir, { recursive: true, force: true });

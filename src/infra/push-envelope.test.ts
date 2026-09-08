@@ -15,7 +15,6 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { generateMlDsa65Keypair } from "./mldsa65-key-storage.js";
 import { encodeMlDsa65PublicKey, encodeMlDsa65SecretKey } from "./mldsa65-key-storage.js";
 
 let tmpDir: string;

@@ -104,8 +104,8 @@ describe("push-apns-relay-m11 step 5 — buildApnsRelayM11Audit", () => {
     const { buildApnsRelayM11Audit } = await import("./push-apns-relay-m11.js");
     const result = buildApnsRelayM11Audit("test", "my-custom-key");
     expect(result.keyIdMldsa65).toBe("my-custom-key");
-    const infoCalls = pqcLogCalls.filter((c) => c.level === "info");
-    expect(infoCalls[0]!.payload.identityKey).toBe("my-custom-key");
+    const infoCall = pqcLogCalls.find((c) => c.level === "info");
+    expect(infoCall!.payload.identityKey).toBe("my-custom-key");
   });
 
   it("returns signed=false on signing failure (no info event from this fn)", async () => {

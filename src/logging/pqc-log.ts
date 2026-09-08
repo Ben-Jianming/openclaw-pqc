@@ -1,4 +1,3 @@
-import { getChildLogger } from "./logger.js";
 // M9 (PQC migration, whitepaper 2.2.9): structured PQC logging chokepoint.
 //
 // Every PQC event flows through `pqcLog.{info,warn,error,debug}`. The emit
@@ -190,13 +189,17 @@ export function bindOpenClawLogger(logger: OpenClawLogger): void {
   };
 }
 
-const defaultLogger = getChildLogger({ subsystem: "pqc" });
-
 function defaultEmitter(record: PqcLogPayload): void {
   const redacted = redactPqcLogPayload(record);
   const { level, event, status, ...meta } = redacted;
   const message = `${event}: ${status}`;
-  defaultLogger[level]({ ...meta, event, status, tag: "PQC" }, message);
+  // Load the full logger only when an event is emitted. This keeps lightweight
+  // commands such as `openclaw --help` from importing the TLS dependency graph,
+  // while preserving the configured log sink for every PQC event.
+  void import("./logger.js").then(({ getChildLogger }) => {
+    const logger = getChildLogger({ subsystem: "pqc" });
+    logger[level]({ ...meta, event, status, tag: "PQC" }, message);
+  });
 }
 
 export const pqcLog = {

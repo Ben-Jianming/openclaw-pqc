@@ -10,9 +10,8 @@
 //   - EnvKeyring edge cases (2 tests) — empty string, multiline, getKeyById
 //     with no active var.
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { withTempDir } from "../test-utils/temp-dir.js";
 import {
   CompositeKeyring,
@@ -38,7 +37,8 @@ describe("OsKeyring fail-closed stub (M6.B not yet shipped)", () => {
   it("constructor error message includes the 'M6.B' marker for grep / log matching", () => {
     let caught: unknown;
     try {
-      new OsKeyring({ service: "openclaw" });
+      const keyring = new OsKeyring({ service: "openclaw" });
+      void keyring;
     } catch (e) {
       caught = e;
     }
@@ -90,7 +90,6 @@ describe("CompositeKeyring walk behavior edge cases", () => {
     const anotherFile = new FileKeyring({ path: "/nonexistent-2" });
     const composite = new CompositeKeyring({ providers: [badFile, goodEnv, anotherFile] });
     // 32-byte base64url value (decoded must be exactly 32 bytes)
-    const validBase64Url = "AAAA-AAAA-AAAA-AAAA-AAAA-AAAA"; // 6*5=30 base64 chars → ~22 bytes (too short)
     // Use a real 32-byte key encoded as base64url:
     const raw32 = Buffer.alloc(32, 0xab);
     const expected = raw32.toString("base64url");

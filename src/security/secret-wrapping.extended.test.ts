@@ -12,13 +12,10 @@
 //   - unwrapSecret rejects authTag tampered (GCM auth failure)
 //   - unwrapSecret rejects IV tampered
 //   - Two distinct keyIds with same plaintext+key produce different ciphertext (keyId is part of the AAD domain)
-import { randomBytes } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import {
-  deserializeWrappedSecret,
   MAX_PLAINTEXT_BYTES,
   SecretWrappingError,
-  serializeWrappedSecret,
   unwrapSecret,
   wrapSecret,
   type WrappedSecret,

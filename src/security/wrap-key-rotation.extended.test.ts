@@ -18,9 +18,7 @@ import {
   constantTimeEqual,
   exportWrapKey,
   importWrapKey,
-  WRAP_KEY_BACKUP_CONSTANTS,
   WrapKeyBackupError,
-  WrapKeyRotationError,
 } from "./wrap-key-rotation.js";
 
 function key32(seed: number): Buffer {

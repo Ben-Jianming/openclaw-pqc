@@ -18,7 +18,6 @@ import {
   decryptNip44V2,
   encryptNip44V2,
   isPqcNip44Envelope,
-  NIP44_V2_PQC,
   Nip44V2Error,
   pad,
   unpad,

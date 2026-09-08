@@ -10,6 +10,7 @@ import type { ClawdbotConfig } from "../runtime-api.js";
 import { resolveFeishuRuntimeAccount } from "./accounts.js";
 import { createFeishuClient } from "./client.js";
 import { requestFeishuApi } from "./comment-shared.js";
+import { auditFeishuSendWithM11 } from "./feishu-m11-audit.js";
 import {
   assertFeishuPostWithinEnvelope,
   buildFeishuPostMessageContent,
@@ -19,7 +20,6 @@ import type { MentionTarget } from "./mention-target.types.js";
 import { buildMentionedCardContent } from "./mention.js";
 import { resolveFeishuCardTemplate } from "./native-card.js";
 import { parsePostContent } from "./post.js";
-import { auditFeishuSendWithM11 } from "./feishu-m11-audit.js";
 import {
   assertFeishuMessageApiSuccess,
   resolveFeishuReceiptKind,

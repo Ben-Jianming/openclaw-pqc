@@ -127,6 +127,16 @@ const rootEntries = [
   "src/cli/plugins-list-format.ts!",
   "src/infra/warning-filter.ts!",
   "src/infra/command-explainer/index.ts!",
+  // PQC public/runtime entrypoints are consumed by downstream integrations and operators.
+  "src/infra/crypto/index.ts!",
+  "src/infra/crypto/provider.ts!",
+  "src/infra/crypto/provider-noble.ts!",
+  "src/infra/crypto/provider-node-builtin.ts!",
+  "src/infra/push-web-m11.ts!",
+  "src/security/nip44-v2.ts!",
+  "src/security/push-dual-signature.ts!",
+  "src/security/wrap-key-cli.ts!",
+  "src/security/wrap-key-rotation.ts!",
   // Runtime modules loaded by path or namespace; static export tracing cannot see their contract.
   // Jiti virtualizes openclaw/plugin-sdk/agent-sessions through this cycle-safe barrel.
   "src/agents/sessions/extension-sdk.ts!",

@@ -45,7 +45,7 @@ export interface BuildApnsRelayM11AuditResult {
  */
 export function buildApnsRelayM11Audit(
   bodyJson: string,
-  deviceKeyId: string = "primary",
+  deviceKeyId = "primary",
 ): BuildApnsRelayM11AuditResult {
   const signed = trySignPushEnvelope({ payload: bodyJson, keyIdMldsa65: deviceKeyId });
   if (!signed) {
