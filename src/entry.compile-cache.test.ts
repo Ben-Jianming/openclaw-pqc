@@ -171,6 +171,27 @@ describe("entry compile cache", () => {
     ).toBeDefined();
   });
 
+  it.each(["--help", "--version"])(
+    "keeps root %s output in the current process when compile cache is inherited",
+    async (flag) => {
+      const root = tempDirs.make("openclaw-compile-cache-one-shot-");
+      const entryFile = path.join(root, "src", "entry.ts");
+      await fs.mkdir(path.dirname(entryFile), { recursive: true });
+      await fs.writeFile(entryFile, "export {};\n", "utf8");
+
+      expect(
+        buildOpenClawCompileCacheRespawnPlan({
+          currentFile: entryFile,
+          env: { NODE_COMPILE_CACHE: "/tmp/openclaw-cache" },
+          execPath: "/usr/bin/node",
+          installRoot: root,
+          argv: ["/usr/bin/node", entryFile, flag],
+          platform: "linux",
+        }),
+      ).toBeUndefined();
+    },
+  );
+
   it("keeps interactive no-cache respawn plans attached to the terminal", async () => {
     const root = tempDirs.make("openclaw-compile-cache-interactive-");
     const entryFile = path.join(root, "dist", "entry.js");

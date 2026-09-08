@@ -8,7 +8,7 @@ import process from "node:process";
 import { expectDefined } from "@openclaw/normalization-core";
 import {
   isTerminalInteractiveRespawnArgv,
-  shouldKeepNativeHookRelayInProcess,
+  shouldSkipStartupEnvironmentRespawnForArgv,
 } from "./cli/respawn-policy.js";
 import { attachChildProcessBridge } from "./process/child-process-bridge.js";
 import {
@@ -150,7 +150,7 @@ function buildOpenClawCompileCacheRespawnPlan(params: {
   const env = params.env ?? process.env;
   const argv = params.argv ?? process.argv;
   const platform = params.platform ?? process.platform;
-  if (shouldKeepNativeHookRelayInProcess(argv, platform)) {
+  if (shouldSkipStartupEnvironmentRespawnForArgv(argv, platform)) {
     return undefined;
   }
   const needsDisabledCompileCacheRespawn =
