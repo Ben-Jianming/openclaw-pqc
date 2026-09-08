@@ -570,7 +570,7 @@ export async function sendMessageFeishu(
   // NOT added to the Feishu message body (Lark server does not verify
   // M11 envelopes; adding would either surface as visible text or
   // be silently ignored). See extensions/feishu/src/feishu-m11-audit.ts.
-  await auditFeishuSendWithM11(content);
+  auditFeishuSendWithM11(content);
 
   const directParams = { receiveId, receiveIdType, content, msgType };
   return sendReplyOrFallbackDirect(client, {
@@ -603,7 +603,7 @@ export async function sendCardFeishu(params: SendFeishuCardParams): Promise<Feis
   const content = JSON.stringify(card);
 
   // M11 (PQC migration): audit-only — see feishu-m11-audit.ts.
-  await auditFeishuSendWithM11(content);
+  auditFeishuSendWithM11(content);
 
   const directParams = { receiveId, receiveIdType, content, msgType: "interactive" };
   return sendReplyOrFallbackDirect(client, {
