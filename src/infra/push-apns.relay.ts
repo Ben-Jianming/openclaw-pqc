@@ -14,10 +14,10 @@ import {
   signDevicePayload,
   type DeviceIdentity,
 } from "./device-identity.js";
-import { buildApnsRelayM11Audit } from "./push-apns-relay-m11.js";
 import { formatErrorMessage } from "./errors.js";
 import { readResponseWithLimit } from "./http-body.js";
 import { normalizeHostname } from "./net/hostname.js";
+import { buildApnsRelayM11Audit } from "./push-apns-relay-m11.js";
 
 type ApnsRelayPushType = "alert" | "background";
 type ApnsRelayEnvironment = "production" | "sandbox";

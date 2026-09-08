@@ -1,9 +1,9 @@
 ---
 name: Feature Request
 about: 提功能需求
-title: '[FEATURE] '
-labels: 'enhancement'
-assignees: ''
+title: "[FEATURE] "
+labels: "enhancement"
+assignees: ""
 ---
 
 ## 需求描述

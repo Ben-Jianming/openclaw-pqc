@@ -1,9 +1,9 @@
 ---
 name: Bug Report
 about: 报告 bug（功能异常、性能问题、文档错误等）
-title: '[BUG] '
-labels: 'bug'
-assignees: ''
+title: "[BUG] "
+labels: "bug"
+assignees: ""
 ---
 
 ## Bug 描述

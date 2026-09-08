@@ -5,6 +5,7 @@ import path from "node:path";
 import { expectDefined, normalizeOptionalString } from "@openclaw/normalization-core";
 import { resolveStateDir } from "../config/paths.js";
 import { createLazyRuntimeModule } from "../shared/lazy-runtime.js";
+import { buildWebPushPayloadWithEnvelope } from "./push-web-m11.js";
 import {
   createWebPushVapidKeyPair,
   deleteWebPushSubscriptionByEndpoint,
@@ -20,7 +21,6 @@ import {
   type VapidKeyPair,
   type WebPushSubscription,
 } from "./push-web-store.js";
-import { buildWebPushPayloadWithEnvelope } from "./push-web-m11.js";
 
 // --- Types ---
 

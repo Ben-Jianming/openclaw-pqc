@@ -4,8 +4,8 @@ import { normalizeOptionalString } from "@openclaw/normalization-core/string-coe
 import { truncateUtf16Safe } from "@openclaw/normalization-core/utf16-slice";
 import type { DeviceIdentity } from "./device-identity.js";
 import { toErrorObject } from "./errors.js";
-import { APNS_PQC_ENVELOPE_HEADER, buildApnsEnvelopeHeader } from "./push-apns-http2-m11.js";
 import { getApnsBearerToken, type ApnsAuthConfig } from "./push-apns-auth.js";
+import { APNS_PQC_ENVELOPE_HEADER, buildApnsEnvelopeHeader } from "./push-apns-http2-m11.js";
 import {
   APNS_HTTP2_CANCEL_CODE,
   appendApnsResponseBodyCapture,
@@ -249,9 +249,7 @@ async function sendApnsRequest(params: {
           "apns-expiration": "0",
           "content-type": "application/json",
           "content-length": Buffer.byteLength(body).toString(),
-          ...(envelopeResult.header
-            ? { [APNS_PQC_ENVELOPE_HEADER]: envelopeResult.header }
-            : {}),
+          ...(envelopeResult.header ? { [APNS_PQC_ENVELOPE_HEADER]: envelopeResult.header } : {}),
         });
         activeRequest = req;
 

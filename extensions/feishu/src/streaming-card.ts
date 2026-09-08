@@ -13,9 +13,9 @@ import { sliceUtf16Safe } from "openclaw/plugin-sdk/text-utility-runtime";
 import { FEISHU_HTTP_TIMEOUT_MS } from "./client-timeout.js";
 import { getFeishuUserAgent } from "./client.js";
 import { requestFeishuApi } from "./comment-shared.js";
+import { auditFeishuSendWithM11 } from "./feishu-m11-audit.js";
 import { readFeishuJsonResponse } from "./json-response.js";
 import { resolveFeishuCardTemplate, type CardHeaderConfig } from "./send.js";
-import { auditFeishuSendWithM11 } from "./feishu-m11-audit.js";
 import { resolveStreamingCardSendMode } from "./streaming-card-send-mode.js";
 import type { FeishuDomain } from "./types.js";
 

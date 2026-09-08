@@ -13,13 +13,10 @@
 // Steps 3-6 wire this into push-apns-http2.ts / push-apns.relay.ts /
 // push-web.ts / Feishu WebSocket respectively.
 
+import { pqcLog } from "../logging/pqc-log.js";
+import { type PushDualEnvelope, signPushPayloadDual } from "../security/push-dual-signature.js";
 import { loadOrCreateProcessDeviceIdentity } from "./device-identity.js";
 import { decodeMlDsa65SecretKey } from "./mldsa65-key-storage.js";
-import { pqcLog } from "../logging/pqc-log.js";
-import {
-  type PushDualEnvelope,
-  signPushPayloadDual,
-} from "../security/push-dual-signature.js";
 import { getOrCreatePushSigningKey } from "./push-signing-key.js";
 
 const ENVELOPE_KEY_ID_MLDSA65 = "primary";
@@ -92,7 +89,9 @@ export function signPushEnvelope(options: SignPushEnvelopeOptions): SignPushEnve
  * approval alerts). Callers should log the failure so the
  * degraded mode is visible.
  */
-export function trySignPushEnvelope(options: SignPushEnvelopeOptions): SignPushEnvelopeResult | null {
+export function trySignPushEnvelope(
+  options: SignPushEnvelopeOptions,
+): SignPushEnvelopeResult | null {
   try {
     return signPushEnvelope(options);
   } catch (err) {
