@@ -115,6 +115,7 @@ const config = {
   // This fixture deliberately mixes used, aliased, and unused exports so the
   // topology analyzer can prove each classification.
   ignoreIssues: {
+    ...productionConfig.ignoreIssues,
     // Cache-busting dynamic imports are real consumers, but Knip cannot map
     // their query-suffixed module ids back to these named test-support exports.
     "test/helpers/config/bundled-channel-config-runtime.ts": ["exports"],

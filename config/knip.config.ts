@@ -385,6 +385,19 @@ const config = {
     // asserted by the focused Beam mirror tests; production wires only the service.
     "extensions/beam/src/mirror.ts": ["exports", "types"],
     "src/infra/heartbeat-wake.ts": ["exports"],
+    // These PQC modules form the fork's supported integration surface. Several
+    // consumers live outside this repository, so Knip cannot trace them.
+    "src/infra/device-identity-store.ts": ["types"],
+    "src/infra/device-identity.ts": ["exports"],
+    "src/infra/ed25519-signature.ts": ["exports"],
+    "src/infra/mldsa65-key-storage.ts": ["exports"],
+    "src/infra/push-apns-http2-m11.ts": ["exports", "types"],
+    "src/infra/push-apns-relay-m11.ts": ["types"],
+    "src/infra/push-envelope.ts": ["types"],
+    "src/infra/push-signing-key.ts": ["exports", "types"],
+    "src/logging/pqc-log.ts": ["exports", "types"],
+    "src/security/keyring-provider.ts": ["exports", "types"],
+    "src/security/secret-wrapping.ts": ["exports", "types"],
   },
   workspaces: {
     ".": {
