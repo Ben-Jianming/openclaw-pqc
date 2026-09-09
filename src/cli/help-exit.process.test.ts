@@ -454,7 +454,7 @@ describe("JSON console style process output", () => {
       try {
         await runCliProcess({
           args: ["openclaw-json-console-missing-command", modifier],
-          config: loggingConfig,
+          config: { ...loggingConfig, plugins: { enabled: false } },
         });
       } catch (error) {
         failure = error as CliProcessFailure;
