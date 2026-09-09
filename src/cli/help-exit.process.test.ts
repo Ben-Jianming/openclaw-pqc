@@ -175,6 +175,8 @@ async function runCliProcess(params: {
       env: {
         ...process.env,
         HOME: fixture.root,
+        NODE_COMPILE_CACHE: params.allowRespawn ? process.env.NODE_COMPILE_CACHE : undefined,
+        NODE_DISABLE_COMPILE_CACHE: params.allowRespawn ? undefined : "1",
         NODE_ENV: undefined,
         NODE_OPTIONS: undefined,
         NODE_USE_SYSTEM_CA: "1",
