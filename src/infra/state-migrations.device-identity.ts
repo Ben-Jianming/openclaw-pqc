@@ -144,10 +144,24 @@ function classifyCanonicalRow(
   ) {
     return "invalid";
   }
+  const normalizedRow = normalizeLegacyDeviceIdentity({
+    version: 1,
+    deviceId: row.device_id,
+    publicKeyPem: row.public_key_pem,
+    privateKeyPem: row.private_key_pem,
+    createdAtMs: row.created_at_ms,
+  });
+  if (
+    !normalizedRow ||
+    normalizedRow.deviceId !== row.device_id ||
+    normalizedRow.publicKeyPem !== row.public_key_pem ||
+    normalizedRow.privateKeyPem !== row.private_key_pem
+  ) {
+    return "invalid";
+  }
   // Valid identities are equal by key fingerprint. PEM text and timestamps are
   // serialization metadata, not a reason to rotate an already-canonical key.
-  return row.identity_key === IDENTITY_KEY &&
-    row.device_id === identity.deviceId &&
+  return row.device_id === identity.deviceId &&
     deviceIdentityKeyMaterialMatches(
       {
         deviceId: row.device_id,

@@ -192,7 +192,14 @@ export function bindOpenClawLogger(logger: OpenClawLogger): void {
 function defaultEmitter(record: PqcLogPayload): void {
   const redacted = redactPqcLogPayload(record);
   const { level, event, status, ...meta } = redacted;
-  process.stderr.write(`[PQC] ${level} ${event}: ${status} ${JSON.stringify(meta)}\n`);
+  const message = `${event}: ${status}`;
+  // Load the full logger only when an event is emitted. This keeps lightweight
+  // commands such as `openclaw --help` from importing the TLS dependency graph,
+  // while preserving the configured log sink for every PQC event.
+  void import("./logger.js").then(({ getChildLogger }) => {
+    const logger = getChildLogger({ subsystem: "pqc" });
+    logger[level]({ ...meta, event, status, tag: "PQC" }, message);
+  });
 }
 
 export const pqcLog = {

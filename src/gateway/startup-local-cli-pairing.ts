@@ -3,10 +3,7 @@ import {
   GATEWAY_CLIENT_NAMES,
 } from "../../packages/gateway-protocol/src/client-info.js";
 import { storeDeviceAuthToken } from "../infra/device-auth-store.js";
-import {
-  loadOrCreateDeviceIdentity,
-  publicKeyRawBase64UrlFromPem,
-} from "../infra/device-identity.js";
+import { loadOrCreateDeviceIdentity } from "../infra/device-identity.js";
 import {
   approveDevicePairing,
   getPairedDevice,
@@ -48,7 +45,7 @@ function cacheOperatorToken(params: {
  */
 export async function ensureStartupLocalCliPairing(): Promise<StartupLocalCliPairingResult> {
   const identity = loadOrCreateDeviceIdentity();
-  const publicKey = publicKeyRawBase64UrlFromPem(identity.publicKeyPem);
+  const publicKey = identity.publicKeyPem;
   const existing = await getPairedDevice(identity.deviceId);
   if (existing) {
     if (existing.publicKey !== publicKey) {

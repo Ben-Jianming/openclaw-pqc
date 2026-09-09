@@ -14,7 +14,6 @@ import {
   normalizeLegacyDeviceIdentity,
   type NormalizedLegacyDeviceIdentity,
 } from "./device-identity-legacy.js";
-import { deriveDeviceIdFromPublicKey } from "./device-identity.js";
 import { acquireGatewayLock } from "./gateway-lock.js";
 import {
   executeSqliteQuerySync,
@@ -88,20 +87,17 @@ describe("legacy device identity Doctor migration", () => {
     const { publicKey, privateKey } = generateKeyPairSync("ed25519");
     const publicKeyPem = publicKey.export({ type: "spki", format: "pem" });
     const privateKeyPem = privateKey.export({ type: "pkcs8", format: "pem" });
-    const deviceId = deriveDeviceIdFromPublicKey(publicKeyPem);
-    if (!deviceId) {
-      throw new Error("expected generated device id");
-    }
-    return {
-      deviceId,
+    const normalized = normalizeLegacyDeviceIdentity({
+      version: 1,
+      deviceId: "legacy-derived-metadata",
       publicKeyPem,
       privateKeyPem,
       createdAtMs: CREATED_AT_MS + 1,
-      mldsaPublicKeyPem: null,
-      mldsaPrivateKeyPem: null,
-      mldsaPrivateKeyWrapped: null,
-      mldsaPrivateKeyWrapKeyId: null,
-    };
+    });
+    if (!normalized) {
+      throw new Error("expected generated legacy identity");
+    }
+    return normalized;
   }
 
   function rewrapPem(pem: string): string {
@@ -438,14 +434,14 @@ describe("legacy device identity Doctor migration", () => {
     });
 
     expect(result.warnings).toEqual([]);
-    expect(result.changes).toEqual([
-      "Repaired invalid primary device identity metadata in SQLite.",
+    expect(result.changes).toEqual(["Replaced invalid primary device identity in SQLite."]);
+    expect(result.notices).toEqual([
+      "The repaired device has a new identity and must be approved again.",
     ]);
-    expect(result.notices ?? []).toEqual([]);
     expect(identityRow(env)).toMatchObject({
-      device_id: expected.deviceId,
-      public_key_pem: expected.publicKeyPem,
-      private_key_pem: expected.privateKeyPem,
+      device_id: expect.stringMatching(/^[a-f0-9]{64}$/),
+      public_key_pem: expect.stringMatching(/^MLDSA65-PUBLIC-KEY:/),
+      private_key_pem: expect.stringMatching(/^MLDSA65-SECRET-KEY:/),
       created_at_ms: expect.any(Number),
     });
   });
@@ -513,7 +509,7 @@ describe("legacy device identity Doctor migration", () => {
       env,
       doctorOnlyStateMigrations: true,
     });
-    expect(detected).toMatchObject({ hasLegacy: true, hasInvalidCanonical: false });
+    expect(detected).toMatchObject({ hasLegacy: true, hasInvalidCanonical: true });
     const db = database(env);
     executeSqliteQuerySync(
       db,

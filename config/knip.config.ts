@@ -389,6 +389,8 @@ const config = {
     // consumers live outside this repository, so Knip cannot trace them.
     "src/infra/device-identity-store.ts": ["types"],
     "src/infra/device-identity.ts": ["exports"],
+    // The validator is intentionally exported for direct security regression tests.
+    "src/infra/device-identity-store.ts": ["exports"],
     "src/infra/ed25519-signature.ts": ["exports"],
     "src/infra/mldsa65-key-storage.ts": ["exports"],
     "src/infra/push-apns-http2-m11.ts": ["exports", "types"],

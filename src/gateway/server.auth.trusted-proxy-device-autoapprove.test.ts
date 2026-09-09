@@ -523,7 +523,7 @@ describe("trusted-proxy browser device auto-approval", () => {
     expect(pairing.pending.filter((entry) => entry.deviceId === identity.deviceId)).toEqual([]);
     const paired = await getPairedDevice(identity.deviceId);
     expect(paired?.approvedScopes).toEqual(["operator.read"]);
-    expect(paired?.publicKey).toBe(publicKeyRawBase64UrlFromPem(identity.publicKeyPem));
+    expect(paired?.publicKey).toBe(identity.publicKeyPem);
   });
 
   test("leaves trusted-proxy pairing unchanged when auto-approval is disabled", async () => {

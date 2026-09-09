@@ -1,5 +1,5 @@
 // Canonicalizes retired Node and Swift identity payloads for Doctor import.
-import { createHash, createPrivateKey, createPublicKey, timingSafeEqual } from "node:crypto";
+import { createHash, createPublicKey, timingSafeEqual } from "node:crypto";
 import { isRecord } from "@openclaw/normalization-core/record-coerce";
 import type { StoredDeviceIdentity } from "./device-identity-store.js";
 import {
@@ -36,7 +36,7 @@ function normalizeLegacyKeyPair(params: {
     const privateKeyRaw = deriveEd25519PrivateKeyRaw(params.privateKeyPem);
     const publicKeyPem = ed25519PublicKeyPemFromRaw(publicKeyRaw);
     const privateKeyPem = ed25519PrivateKeyPemFromRaw(privateKeyRaw);
-    const derivedPublicKeyPem = createPublicKey(createPrivateKey(privateKeyPem)).export({
+    const derivedPublicKeyPem = createPublicKey(privateKeyPem).export({
       type: "spki",
       format: "pem",
     });

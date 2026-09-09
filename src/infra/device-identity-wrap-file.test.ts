@@ -10,6 +10,7 @@ import path from "node:path";
  * OPENCLAW_PQC_WRAP_KEY (v2-style, M5 v2) for production deployments.
  */
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { resetPqcEmit, setPqcEmit, type PqcLogPayload } from "../logging/pqc-log.js";
 import { decodeBase64UrlKey } from "../security/keyring-provider.js";
 import { closeOpenClawStateDatabaseForTest } from "../state/openclaw-state-db.js";
 import {
@@ -60,6 +61,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  resetPqcEmit();
   for (const [k, v] of Object.entries(savedEnv)) {
     if (v === undefined) {
       delete process.env[k];
@@ -156,23 +158,15 @@ describe("M15.B device-identity file-based wrap (v3-style)", () => {
     delete process.env.OPENCLAW_WRAP_KEY_FILE;
     delete process.env.OPENCLAW_PQC_WRAP_KEY;
     delete process.env.OPENCLAW_PQC_WRAP_KEY_ID;
-    const stderrBuf: string[] = [];
-    const origWrite = process.stderr.write.bind(process.stderr);
-    process.stderr.write = ((s: string | Uint8Array) => {
-      stderrBuf.push(String(s));
-      return true;
-    }) as typeof process.stderr.write;
-    try {
-      loadOrCreateDeviceIdentity(options());
-    } finally {
-      process.stderr.write = origWrite;
-    }
+    const records: PqcLogPayload[] = [];
+    setPqcEmit((record) => records.push(record));
+    loadOrCreateDeviceIdentity(options());
     const stored = readStoredDeviceIdentityReadOnly(options());
     expect(stored).not.toBeNull();
     expect(stored!.mldsaPrivateKeyWrapped).toBeNull();
     expect(stored!.mldsaPrivateKeyWrapKeyId).toBeNull();
     expect(stored!.mldsaPrivateKeyPem).not.toBeNull();
     expect(stored!.mldsaPrivateKeyPem!.startsWith("MLDSA65-SECRET-KEY:")).toBe(true);
-    expect(stderrBuf.join("")).toMatch(/PQC.*plaintext/);
+    expect(records.some((record) => String(record.detail).includes("plaintext"))).toBe(true);
   });
 });

@@ -83,7 +83,7 @@ describe("gateway ssh-verified node pairing auto-approve", () => {
           return record?.approvedVia === "ssh-verified" ? record : null;
         }, "ssh-verified device approval");
         expect(paired.approvedVia).toBe("ssh-verified");
-        expect(paired.publicKey).toBe(loaded.publicKey);
+        expect(paired.publicKey).toBe(loaded.identity.publicKeyPem);
         expect(probeMock).toHaveBeenCalledWith(expect.objectContaining({ host: lanIp }));
 
         const second = await connectNode();
