@@ -171,32 +171,23 @@ describe("entry compile cache", () => {
     ).toBeDefined();
   });
 
-  it.each(["--help", "--version"])(
-    "keeps root %s compile-cache respawn attached to the current process tree",
-    async (flag) => {
-      const root = tempDirs.make("openclaw-compile-cache-one-shot-");
-      const entryFile = path.join(root, "src", "entry.ts");
-      await fs.mkdir(path.dirname(entryFile), { recursive: true });
-      await fs.writeFile(entryFile, "export {};\n", "utf8");
+  it.each(["--help", "--version"])("skips the compile-cache respawn for root %s", async (flag) => {
+    const root = tempDirs.make("openclaw-compile-cache-one-shot-");
+    const entryFile = path.join(root, "src", "entry.ts");
+    await fs.mkdir(path.dirname(entryFile), { recursive: true });
+    await fs.writeFile(entryFile, "export {};\n", "utf8");
 
-      expect(
-        buildOpenClawCompileCacheRespawnPlan({
-          currentFile: entryFile,
-          env: { NODE_COMPILE_CACHE: "/tmp/openclaw-cache" },
-          execPath: "/usr/bin/node",
-          installRoot: root,
-          argv: ["/usr/bin/node", entryFile, flag],
-          platform: "linux",
-        }),
-      ).toMatchObject({
-        detachForProcessTree: false,
-        env: {
-          NODE_DISABLE_COMPILE_CACHE: "1",
-          OPENCLAW_COMPILE_CACHE_DISABLED_RESPAWNED: "1",
-        },
-      });
-    },
-  );
+    expect(
+      buildOpenClawCompileCacheRespawnPlan({
+        currentFile: entryFile,
+        env: { NODE_COMPILE_CACHE: "/tmp/openclaw-cache" },
+        execPath: "/usr/bin/node",
+        installRoot: root,
+        argv: ["/usr/bin/node", entryFile, flag],
+        platform: "linux",
+      }),
+    ).toBeUndefined();
+  });
 
   it("keeps interactive no-cache respawn plans attached to the terminal", async () => {
     const root = tempDirs.make("openclaw-compile-cache-interactive-");

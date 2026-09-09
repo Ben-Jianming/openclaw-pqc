@@ -152,7 +152,7 @@ function buildOpenClawCompileCacheRespawnPlan(params: {
   const argv = params.argv ?? process.argv;
   const platform = params.platform ?? process.platform;
   const isHelpOrVersion = isHelpOrVersionInvocation(argv);
-  if (shouldSkipStartupEnvironmentRespawnForArgv(argv, platform) && !isHelpOrVersion) {
+  if (shouldSkipStartupEnvironmentRespawnForArgv(argv, platform)) {
     return undefined;
   }
   const needsDisabledCompileCacheRespawn =
