@@ -56,10 +56,7 @@ async function createHelpProcessFixture(
     : loggingViaInclude
       ? configWithLoggingInclude
       : config;
-  await fs.writeFile(
-    configPath,
-    JSON.stringify(writtenConfig ?? { plugins: { entries: { "oc-path": { enabled: true } } } }),
-  );
+  await fs.writeFile(configPath, JSON.stringify(writtenConfig ?? {}));
   await fs.writeFile(profileConfigPath, JSON.stringify(writtenConfig ?? {}));
   if (loggingViaInclude) {
     const logging = config?.logging ?? {};
