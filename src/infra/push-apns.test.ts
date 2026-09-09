@@ -7,6 +7,7 @@ import net from "node:net";
 import { MAX_TIMER_TIMEOUT_MS } from "@openclaw/normalization-core/number-coercion";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createDeferred } from "../test-utils/deferred.js";
+import { encodeMlDsa65SecretKey, generateMlDsa65Keypair } from "./mldsa65-key-storage.js";
 import { startProxy, stopProxy, type ProxyHandle } from "./net/proxy/proxy-lifecycle.js";
 import {
   appendApnsResponseBodyCapture,
@@ -25,6 +26,7 @@ import {
 const testAuthPrivateKey = generateKeyPairSync("ec", {
   namedCurve: "prime256v1",
 }).privateKey.export({ format: "pem", type: "pkcs8" });
+const testRelayPrivateKey = encodeMlDsa65SecretKey(generateMlDsa65Keypair().secretKey);
 
 const testApnsServerKey = `-----BEGIN PRIVATE KEY-----`; // pragma: allowlist secret
 const testApnsServerKeyPem = `${testApnsServerKey}
@@ -145,7 +147,7 @@ function createRelayApnsSendFixture(params: {
     },
     gatewayIdentity: {
       deviceId: "gateway-device-1",
-      privateKeyPem: testAuthPrivateKey,
+      privateKeyPem: testRelayPrivateKey,
     },
   };
 }

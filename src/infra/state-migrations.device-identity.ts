@@ -12,11 +12,7 @@ import {
   normalizeLegacyDeviceIdentity,
   type NormalizedLegacyDeviceIdentity,
 } from "./device-identity-legacy.js";
-import {
-  resolveDeviceIdentityStore,
-  validateStoredDeviceIdentity,
-  type DeviceIdentity,
-} from "./device-identity-store.js";
+import { resolveDeviceIdentityStore, type DeviceIdentity } from "./device-identity-store.js";
 import { deriveEd25519PrivateKeyRaw, deriveEd25519PublicKeyRaw } from "./ed25519-signature.js";
 import { formatErrorMessage } from "./errors.js";
 import { acquireGatewayLock, GatewayLockError } from "./gateway-lock.js";
@@ -138,24 +134,14 @@ function classifyCanonicalRow(
   row: CanonicalIdentityRow,
   identity: NormalizedLegacyDeviceIdentity,
 ): "same" | "different" | "invalid" {
-  if (!isValidCreatedAtMs(row.updated_at_ms)) {
-    return "invalid";
-  }
-  try {
-    validateStoredDeviceIdentity(
-      {
-        deviceId: row.device_id,
-        publicKeyPem: row.public_key_pem,
-        privateKeyPem: row.private_key_pem,
-        createdAtMs: row.created_at_ms,
-        mldsaPublicKeyPem: null,
-        mldsaPrivateKeyPem: null,
-        mldsaPrivateKeyWrapped: null,
-        mldsaPrivateKeyWrapKeyId: null,
-      },
-      row.identity_key,
-    );
-  } catch {
+  if (
+    row.identity_key !== IDENTITY_KEY ||
+    !/^[a-f0-9]{64}$/u.test(row.device_id) ||
+    !isValidCreatedAtMs(row.created_at_ms) ||
+    !isValidCreatedAtMs(row.updated_at_ms) ||
+    !row.public_key_pem ||
+    !row.private_key_pem
+  ) {
     return "invalid";
   }
   // Valid identities are equal by key fingerprint. PEM text and timestamps are

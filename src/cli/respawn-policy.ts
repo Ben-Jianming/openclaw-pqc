@@ -34,10 +34,7 @@ function isNativeHookRelayArgv(argv: string[]): boolean {
   return commandPath[0] === "hooks" && commandPath[1] === "relay";
 }
 
-export function shouldKeepNativeHookRelayInProcess(
-  argv: string[],
-  platform: NodeJS.Platform,
-): boolean {
+function shouldKeepNativeHookRelayInProcess(argv: string[], platform: NodeJS.Platform): boolean {
   return platform !== "win32" && isNativeHookRelayArgv(argv);
 }
 

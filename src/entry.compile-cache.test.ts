@@ -172,7 +172,7 @@ describe("entry compile cache", () => {
   });
 
   it.each(["--help", "--version"])(
-    "keeps root %s output in the current process when compile cache is inherited",
+    "keeps root %s compile-cache respawn attached to the current process tree",
     async (flag) => {
       const root = tempDirs.make("openclaw-compile-cache-one-shot-");
       const entryFile = path.join(root, "src", "entry.ts");
@@ -188,7 +188,13 @@ describe("entry compile cache", () => {
           argv: ["/usr/bin/node", entryFile, flag],
           platform: "linux",
         }),
-      ).toBeUndefined();
+      ).toMatchObject({
+        detachForProcessTree: false,
+        env: {
+          NODE_DISABLE_COMPILE_CACHE: "1",
+          OPENCLAW_COMPILE_CACHE_DISABLED_RESPAWNED: "1",
+        },
+      });
     },
   );
 

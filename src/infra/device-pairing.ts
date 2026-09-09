@@ -14,6 +14,7 @@ import {
   roleScopesAllow,
 } from "../shared/operator-scope-compat.js";
 import { revokeDeviceBootstrapTokensForDevice } from "./device-bootstrap.js";
+import { normalizeDevicePublicKeyBase64Url } from "./device-identity.js";
 import {
   loadDevicePairingStoreState,
   loadPairedDevicePairingStoreRecord,
@@ -886,6 +887,8 @@ export async function requestDevicePairing(
     if (!deviceId) {
       throw new Error("deviceId required");
     }
+    const normalizedPublicKey = normalizeDevicePublicKeyBase64Url(req.publicKey) ?? req.publicKey;
+    const normalizedRequest = { ...req, publicKey: normalizedPublicKey };
     const isRepair = Boolean(state.pairedByDeviceId[deviceId]);
     const pendingForDevice = Object.values(state.pendingById)
       .filter((pending) => pending.deviceId === deviceId)
@@ -893,7 +896,7 @@ export async function requestDevicePairing(
     const result = reconcilePendingPairingRequests({
       pendingById: state.pendingById,
       existing: pendingForDevice,
-      incoming: req,
+      incoming: normalizedRequest,
       canRefreshSingle: (existing, incoming) =>
         samePendingApprovalSnapshot(existing, incoming) ||
         incomingApprovalCoveredByExisting(existing, incoming),

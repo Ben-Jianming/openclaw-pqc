@@ -6,6 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import process from "node:process";
 import { expectDefined } from "@openclaw/normalization-core";
+import { isHelpOrVersionInvocation } from "./cli/argv.js";
 import {
   isTerminalInteractiveRespawnArgv,
   shouldSkipStartupEnvironmentRespawnForArgv,
@@ -150,7 +151,8 @@ function buildOpenClawCompileCacheRespawnPlan(params: {
   const env = params.env ?? process.env;
   const argv = params.argv ?? process.argv;
   const platform = params.platform ?? process.platform;
-  if (shouldSkipStartupEnvironmentRespawnForArgv(argv, platform)) {
+  const isHelpOrVersion = isHelpOrVersionInvocation(argv);
+  if (shouldSkipStartupEnvironmentRespawnForArgv(argv, platform) && !isHelpOrVersion) {
     return undefined;
   }
   const needsDisabledCompileCacheRespawn =
@@ -176,7 +178,8 @@ function buildOpenClawCompileCacheRespawnPlan(params: {
     command: params.execPath ?? process.execPath,
     args: [...(params.execArgv ?? process.execArgv), params.currentFile, ...argv.slice(2)],
     env: nextEnv,
-    detachForProcessTree: platform !== "win32" && !isTerminalInteractiveRespawnArgv(argv),
+    detachForProcessTree:
+      platform !== "win32" && !isTerminalInteractiveRespawnArgv(argv) && !isHelpOrVersion,
   };
 }
 

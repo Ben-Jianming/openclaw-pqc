@@ -1,10 +1,7 @@
 // Canonicalizes retired Node and Swift identity payloads for Doctor import.
-import { createHash } from "node:crypto";
+import { createHash, createPrivateKey, createPublicKey, timingSafeEqual } from "node:crypto";
 import { isRecord } from "@openclaw/normalization-core/record-coerce";
-import {
-  validateStoredDeviceIdentity,
-  type StoredDeviceIdentity,
-} from "./device-identity-store.js";
+import type { StoredDeviceIdentity } from "./device-identity-store.js";
 import {
   decodeCanonicalBase64OrBase64Url,
   deriveEd25519PrivateKeyRaw,
@@ -39,6 +36,14 @@ function normalizeLegacyKeyPair(params: {
     const privateKeyRaw = deriveEd25519PrivateKeyRaw(params.privateKeyPem);
     const publicKeyPem = ed25519PublicKeyPemFromRaw(publicKeyRaw);
     const privateKeyPem = ed25519PrivateKeyPemFromRaw(privateKeyRaw);
+    const derivedPublicKeyPem = createPublicKey(createPrivateKey(privateKeyPem)).export({
+      type: "spki",
+      format: "pem",
+    });
+    const derivedPublicKeyRaw = deriveEd25519PublicKeyRaw(derivedPublicKeyPem);
+    if (!timingSafeEqual(publicKeyRaw, derivedPublicKeyRaw)) {
+      return null;
+    }
     // Legacy deviceId was derived metadata. Preserve the authoritative key bytes and
     // recompute the fingerprint so stale metadata never rotates a shipped identity.
     const normalized = {
@@ -51,7 +56,6 @@ function normalizeLegacyKeyPair(params: {
       mldsaPrivateKeyWrapped: null,
       mldsaPrivateKeyWrapKeyId: null,
     };
-    validateStoredDeviceIdentity(normalized);
     return normalized;
   } catch {
     return null;
