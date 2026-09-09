@@ -58,6 +58,8 @@ const repositoryScriptEntries = [
   "scripts/ios-release-cut.ts!",
   "scripts/ios-release-plan.ts!",
   "scripts/ios-release-signing.mjs!",
+  // Root source-package launchers invoke these install/verification entrypoints directly.
+  "scripts/install-from-source.mjs!",
   "scripts/lib/docker-plugin-selection.mjs!",
   "scripts/lib/openclaw-test-state.mjs!",
   "scripts/list-prod-store-packages.mjs!",
@@ -83,6 +85,7 @@ const repositoryScriptEntries = [
   "scripts/sync-labels.ts!",
   "scripts/test-built-bundled-channel-entry-smoke.mjs!",
   "scripts/update-clawtributors.ts!",
+  "scripts/verify-source-install.mjs!",
   "scripts/verify-stable-main-closeout.mjs!",
   "scripts/write-package-dist-inventory.ts!",
   "scripts/write-plugin-sdk-entry-dts.ts!",
