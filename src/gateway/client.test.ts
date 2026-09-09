@@ -1,12 +1,12 @@
 // Gateway client tests cover WebSocket protocol negotiation, auth persistence,
 // proxy bypass setup, command dispatch, reconnect, and error handling.
 import { Buffer } from "node:buffer";
-import { generateKeyPairSync } from "node:crypto";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   MIN_CLIENT_PROTOCOL_VERSION,
   PROTOCOL_VERSION,
 } from "../../packages/gateway-protocol/src/index.js";
+import { generateStoredDeviceIdentity } from "../infra/device-identity-store.js";
 import type { DeviceIdentity } from "../infra/device-identity.js";
 import { captureEnv } from "../test-utils/env.js";
 
@@ -253,11 +253,11 @@ function createClientWithIdentity(
   onClose: (code: number, reason: string) => void,
   overrides: Partial<ConstructorParameters<typeof GatewayClient>[0]> = {},
 ) {
-  const { privateKey, publicKey } = generateKeyPairSync("ed25519");
+  const generated = generateStoredDeviceIdentity();
   const identity: DeviceIdentity = {
     deviceId,
-    privateKeyPem: privateKey.export({ type: "pkcs8", format: "pem" }),
-    publicKeyPem: publicKey.export({ type: "spki", format: "pem" }),
+    privateKeyPem: generated.privateKeyPem,
+    publicKeyPem: generated.publicKeyPem,
   };
   return new GatewayClient({
     url: "ws://127.0.0.1:18789",
@@ -581,7 +581,8 @@ describe("GatewayClient security checks", () => {
 describe("GatewayClient request errors", () => {
   it("preserves retry metadata from gateway error responses", async () => {
     const onClose = vi.fn();
-    const client = createClientWithIdentity("device-main", onClose);
+    const onHelloOk = vi.fn();
+    const client = createClientWithIdentity("device-main", onClose, { onHelloOk });
     client.start();
     const ws = getLatestWs();
     ws.emitOpen();
@@ -592,6 +593,9 @@ describe("GatewayClient request errors", () => {
         payload: { nonce: "nonce-1" },
       }),
     );
+    await waitForFast(() => {
+      expect(ws.sent.some((frame) => frame.includes('"method":"connect"'))).toBe(true);
+    });
     const connectFrame = JSON.parse(
       ws.sent.find((frame) => frame.includes('"method":"connect"')) ?? "{}",
     ) as { id?: string };
@@ -607,6 +611,9 @@ describe("GatewayClient request errors", () => {
       }),
     );
 
+    await waitForFast(() => {
+      expect(onHelloOk).toHaveBeenCalledOnce();
+    });
     const requestPromise = client.request("chat.history", { sessionKey: "main" });
     const requestFrame = JSON.parse(ws.sent.at(-1) ?? "{}") as { id?: string };
 
