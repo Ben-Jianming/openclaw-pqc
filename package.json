@@ -7,17 +7,17 @@
       "agent": 16
     }
   },
-  "description": "Multi-channel AI gateway with extensible messaging integrations",
+  "description": "OpenClaw fork with post-quantum cryptography support",
   "keywords": [],
-  "homepage": "https://github.com/openclaw/openclaw#readme",
+  "homepage": "https://github.com/Ben-Jianming/openclaw-pqc#readme",
   "bugs": {
-    "url": "https://github.com/openclaw/openclaw/issues"
+    "url": "https://github.com/Ben-Jianming/openclaw-pqc/issues"
   },
   "license": "MIT",
   "author": "OpenClaw Foundation (https://openclaw.org)",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/openclaw/openclaw.git"
+    "url": "git+https://github.com/Ben-Jianming/openclaw-pqc.git"
   },
   "bin": {
     "openclaw": "openclaw.mjs"

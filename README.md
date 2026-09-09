@@ -1,4 +1,4 @@
-# 🦞 OpenClaw — Personal AI Assistant
+# 🦞 OpenClaw PQC — 抗量子龙虾
 
 <p align="center">
     <picture>
@@ -8,13 +8,17 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/openclaw/openclaw/actions/workflows/ci.yml?branch=main"><img src="https://img.shields.io/github/actions/workflow/status/openclaw/openclaw/ci.yml?branch=main&style=for-the-badge" alt="CI status"></a>
-  <a href="https://github.com/openclaw/openclaw/releases"><img src="https://img.shields.io/github/v/release/openclaw/openclaw?include_prereleases&style=for-the-badge" alt="GitHub release"></a>
+  <a href="https://github.com/Ben-Jianming/openclaw-pqc/actions/workflows/ci.yml?branch=main"><img src="https://img.shields.io/github/actions/workflow/status/Ben-Jianming/openclaw-pqc/ci.yml?branch=main&style=for-the-badge" alt="CI status"></a>
+  <a href="https://github.com/Ben-Jianming/openclaw-pqc/releases"><img src="https://img.shields.io/github/v/release/Ben-Jianming/openclaw-pqc?include_prereleases&style=for-the-badge" alt="GitHub release"></a>
   <a href="https://discord.gg/clawd"><img src="https://img.shields.io/discord/1456350064065904867?label=Discord&logo=discord&logoColor=white&color=5865F2&style=for-the-badge" alt="Discord"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg?style=for-the-badge" alt="MIT License"></a>
 </p>
 
-**OpenClaw** is a _personal AI assistant_ that learns and grows with you, running on your own devices — developed in the open by the [OpenClaw Foundation](https://openclaw.org), a non-profit.
+**OpenClaw PQC（抗量子龙虾）** 是 OpenClaw 的抗量子密码分支，加入 ML-DSA-65 设备身份、密钥封装和结构化 PQC 审计能力，同时保留 OpenClaw 的本地网关、模型和多渠道功能。完整实现范围见 [PQC 白皮书](docs/security/pqc-whitepaper.md)。
+
+面向普通用户的下载、ZIP 解压、安装、首次配置和验证步骤见 **[中文安装说明](INSTALL.zh-CN.md)**；English instructions: **[INSTALL.md](INSTALL.md)**.
+
+本项目基于由 [OpenClaw Foundation](https://openclaw.org) 开放开发的 OpenClaw。
 It answers you on the channels you already use, can speak and listen on macOS/iOS/Android, and can render a live Canvas you control. The Gateway is just the control plane — the product is the assistant.
 
 If you want a personal, single-user assistant that feels local, fast, and always-on, this is it.
@@ -78,64 +82,71 @@ Supported channels: WhatsApp, Telegram, Slack, Discord, Google Chat, Signal, iMe
   </tr>
 </table>
 
-## Install
+## 安装 OpenClaw PQC
 
-Runtime: **Node 24.15+ (recommended), Node 22.22.3+, or Node 25.9+**.
+推荐环境：**Node 24.16.0 或更新版本**。
+
+1. 从本仓库点击 **Code → Download ZIP** 并完整解压，或运行：
+
+```bash
+git clone https://github.com/Ben-Jianming/openclaw-pqc.git
+cd openclaw-pqc
+```
+
+2. 运行安装脚本：
 
 ```bash
 # macOS / Linux
-curl -fsSL https://openclaw.ai/install.sh | bash
+chmod +x install.sh start.sh stop.sh verify.sh
+./install.sh
 ```
 
 ```powershell
-# Windows (PowerShell)
-iwr -useb https://openclaw.ai/install.ps1 | iex
+# Windows PowerShell
+.\install.ps1
 ```
 
-Or install via a package manager (npm, pnpm, or bun all work):
+Windows 也可以直接双击 `install.bat`。
+
+3. 首次配置：
 
 ```bash
-npm install -g openclaw@latest
+node openclaw.mjs onboard --install-daemon
 ```
 
-Then run onboarding:
+4. 使用 `start.bat` / `./start.sh` 启动，使用 `verify.bat` / `./verify.sh` 验证安装。
 
-```bash
-openclaw onboard --install-daemon
-```
+> `npm install -g openclaw@latest` 安装的是上游版本，不包含本仓库的 PQC 修改。请使用本仓库自带的安装脚本。
 
-OpenClaw Onboard guides you step by step through setting up the gateway, workspace, channels, and skills on **macOS, Linux, and Windows**, and installs the Gateway daemon (launchd/systemd user service/Scheduled Task) so it stays running.
-Windows desktop users can also start with the native [Windows Hub](https://docs.openclaw.ai/platforms/windows) companion app for setup, tray status, chat, node mode, and local MCP mode.
-
-Full beginner guide (auth, pairing, channels): [Getting started](https://docs.openclaw.ai/start/getting-started).
+完整步骤和故障排查：[INSTALL.zh-CN.md](INSTALL.zh-CN.md)。
 
 ## Quick start (TL;DR)
 
 After onboarding, the Gateway runs as a daemon:
 
 ```bash
-openclaw gateway status   # expect: running on port 18789
-openclaw dashboard        # open the Control UI
+node openclaw.mjs gateway status   # expect: running on port 18789
+node openclaw.mjs dashboard        # open the Control UI
 ```
 
 Send a test message or talk to the assistant:
 
 ```bash
 # Send a message
-openclaw message send --target +1234567890 --message "Hello from OpenClaw"
+node openclaw.mjs message send --target +1234567890 --message "Hello from OpenClaw PQC"
 
 # Talk to the assistant (optionally deliver the reply to any connected channel)
-openclaw agent --message "Ship checklist" --thinking high
+node openclaw.mjs agent --message "Ship checklist" --thinking high
 ```
 
 Foreground/debug mode:
 
 ```bash
-openclaw gateway stop
-openclaw gateway --port 18789 --verbose
+node openclaw.mjs gateway stop
+node openclaw.mjs gateway --port 18789 --verbose
 ```
 
-Upgrading? Run `openclaw update` — see the [Updating guide](https://docs.openclaw.ai/install/updating) — then `openclaw doctor`.
+更新本 fork 时，重新下载最新 ZIP（或执行 `git pull`），再运行安装脚本和 `node openclaw.mjs doctor`。
 
 ## Models
 
@@ -234,8 +245,8 @@ root is not a supported source setup.
 For the dev loop:
 
 ```bash
-git clone https://github.com/openclaw/openclaw.git
-cd openclaw
+git clone https://github.com/Ben-Jianming/openclaw-pqc.git
+cd openclaw-pqc
 
 pnpm install
 
