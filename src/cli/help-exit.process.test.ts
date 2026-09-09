@@ -204,6 +204,10 @@ type CliProcessFailure = Error & {
   stdout?: string;
 };
 describe("CLI help process exit", () => {
+  it("disables esbuild worker IPC for source CLI children", () => {
+    expect(process.env.ESBUILD_WORKER_THREADS).toBe("0");
+  });
+
   it("exits promptly after root --help", async () => {
     const result = await runCliProcess({ args: ["--help"], forbidTlsImport: true });
 
@@ -454,7 +458,7 @@ describe("JSON console style process output", () => {
       try {
         await runCliProcess({
           args: ["openclaw-json-console-missing-command", modifier],
-          config: { ...loggingConfig, plugins: { enabled: false } },
+          config: loggingConfig,
         });
       } catch (error) {
         failure = error as CliProcessFailure;

@@ -1149,6 +1149,9 @@ describe("scoped vitest configs", () => {
     const testConfig = requireTestConfig(defaultCliConfig);
     expect(testConfig.dir).toBe(path.join(process.cwd(), "src", "cli"));
     expect(testConfig.include).toEqual(["**/*.test.ts"]);
+    expect(testConfig.env).toMatchObject({
+      ESBUILD_WORKER_THREADS: "0",
+    });
   });
 
   it("normalizes commands include patterns relative to the scoped dir", () => {
