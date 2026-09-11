@@ -59,7 +59,7 @@ describe("install smoke no-push root image transport", () => {
     expect(workflow.on?.schedule).toBeDefined();
     expect(workflow.on?.workflow_dispatch?.inputs).toMatchObject({
       run_bun_global_install_smoke: { default: false, type: "boolean" },
-      update_baseline_version: { default: "latest", type: "string" },
+      update_baseline_version: { default: "2026.7.1-2", type: "string" },
     });
     expect(workflow.on?.workflow_call).toBeUndefined();
     expect(workflow.permissions).toEqual({
@@ -80,7 +80,7 @@ describe("install smoke no-push root image transport", () => {
       ref: "${{ github.sha }}",
       run_bun_global_install_smoke:
         "${{ github.event_name == 'schedule' || inputs.run_bun_global_install_smoke }}",
-      update_baseline_version: "${{ inputs.update_baseline_version || 'latest' }}",
+      update_baseline_version: "${{ inputs.update_baseline_version || '2026.7.1-2' }}",
     });
     expect(readFileSync(INSTALL_SMOKE, "utf8")).not.toContain("packages: write");
   });

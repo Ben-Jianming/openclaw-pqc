@@ -188,6 +188,22 @@ function expectReadOnlyPackagePermission(workflowJob: WorkflowJob): void {
 }
 
 describe("release validation no-push transport", () => {
+  it("skips scheduled maintainer live checks until both required provider secrets exist", () => {
+    const workflow = readWorkflow(SCHEDULED_LIVE);
+    const preflight = job(workflow, "check_live_credentials");
+    const credentials = step(preflight, "Check required provider secrets");
+    const scheduled = job(workflow, "live_and_openwebui_checks");
+
+    expect(preflight.outputs?.ready).toBe("${{ steps.credentials.outputs.ready }}");
+    expect(credentials.env).toMatchObject({
+      OPENAI_API_KEY: "${{ secrets.OPENAI_API_KEY }}",
+      ANTHROPIC_API_KEY: "${{ secrets.ANTHROPIC_API_KEY }}",
+    });
+    expect(credentials.run).toContain('echo "ready=false" >> "$GITHUB_OUTPUT"');
+    expect(scheduled.needs).toBe("check_live_credentials");
+    expect(scheduled.if).toBe("needs.check_live_credentials.outputs.ready == 'true'");
+  });
+
   it("builds planned live images locally without entering pull fallback", () => {
     const workflow = readWorkflow(LIVE_E2E);
     for (const jobName of [
