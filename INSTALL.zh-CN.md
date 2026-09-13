@@ -56,7 +56,7 @@ chmod +x install.sh start.sh stop.sh verify.sh
 ./install.sh
 ```
 
-安装脚本可以重复运行。它使用仓库锁定的 pnpm 版本和 `pnpm-lock.yaml`，不会调用上游 npm 包替换当前源码。
+安装脚本可以重复运行。它只使用仓库锁定的 pnpm 版本和 `pnpm-lock.yaml`；如果电脑上没有匹配版本，安装器会通过 npm 临时下载并运行正确版本。它不会调用上游 OpenClaw npm 包替换当前源码。
 
 ## 4. 首次配置
 
@@ -91,7 +91,7 @@ macOS / Linux：
 ## 6. 常见问题
 
 - **提示找不到 Node**：安装 Node 24 LTS，关闭并重新打开终端。
-- **提示找不到 pnpm/Corepack**：按照 [pnpm 官方安装说明](https://pnpm.io/installation) 安装后重试。
+- **提示无法启动锁定的 pnpm**：先确认 `npm --version` 可以正常运行，并确认网络能访问 npm registry；安装器会自动获取正确版本，不需要手动猜测 pnpm 版本。
 - **依赖下载失败**：确认可以访问 npm registry，然后再次运行安装脚本。
 - **提示缺少 `pnpm-lock.yaml` 或 `openclaw.mjs`**：收到的压缩包不完整，请重新下载或要求发送完整项目目录。
 - **端口被占用**：先运行停止脚本，或用 `node openclaw.mjs gateway status` 查看现有实例。

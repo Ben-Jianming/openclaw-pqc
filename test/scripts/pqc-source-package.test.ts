@@ -12,6 +12,10 @@ describe("OpenClaw PQC source package", () => {
     });
     expect(result.status, result.stderr).toBe(0);
     expect(result.stdout).toContain("OpenClaw PQC source package is complete");
+    const packageManager = JSON.parse(readFileSync("package.json", "utf8")).packageManager;
+    const pinnedPnpmVersion = /^pnpm@([^+]+)/u.exec(packageManager)?.[1];
+    expect(pinnedPnpmVersion).toBeTruthy();
+    expect(result.stdout).toContain(`pnpm ${pinnedPnpmVersion} are ready`);
   });
 
   it("documents the fork download and does not embed API keys in launchers", () => {
@@ -19,7 +23,17 @@ describe("OpenClaw PQC source package", () => {
     expect(read("README.md")).toContain("Ben-Jianming/openclaw-pqc");
     expect(read("INSTALL.md")).toContain("Code → Download ZIP");
     expect(read("INSTALL.zh-CN.md")).toContain("Code → Download ZIP");
-    for (const launcher of ["install.bat", "install.ps1", "install.sh", "start.bat", "start.sh"]) {
+    for (const launcher of [
+      "install.bat",
+      "install.ps1",
+      "install.sh",
+      "start.bat",
+      "start.sh",
+      "stop.bat",
+      "stop.sh",
+      "verify.bat",
+      "verify.sh",
+    ]) {
       expect(read(launcher)).not.toMatch(/sk-api-[A-Za-z0-9_-]+/u);
     }
   });

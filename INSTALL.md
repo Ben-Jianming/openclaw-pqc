@@ -46,7 +46,7 @@ chmod +x install.sh start.sh stop.sh verify.sh
 ./install.sh
 ```
 
-The installation can be run again safely after an update.
+The installation can be run again safely after an update. It accepts only the pnpm version pinned by this repository. When that version is not already available, the installer uses npm to download and run it temporarily.
 
 ## First-time setup
 
@@ -81,6 +81,7 @@ After installing the daemon, use `node openclaw.mjs gateway status` first. The s
 ## Troubleshooting
 
 - **Node is missing:** install Node 24 LTS, then reopen the terminal.
+- **The pinned pnpm cannot start:** verify that `npm --version` works and that npm can reach its registry. The installer obtains the correct pnpm version automatically.
 - **Dependency download fails:** check access to the npm registry and rerun the installer.
 - **A required file is missing:** download the repository ZIP again or request the complete project directory.
 - **The port is busy:** run the stop script or inspect the current service with `node openclaw.mjs gateway status`.

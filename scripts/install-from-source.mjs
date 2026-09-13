@@ -9,6 +9,7 @@ const checkOnly = process.argv.includes("--check");
 const toolEnv = {
   ...process.env,
   COREPACK_HOME: process.env.COREPACK_HOME || path.join(repoRoot, ".corepack"),
+  npm_config_cache: process.env.npm_config_cache || path.join(repoRoot, ".npm-cache"),
 };
 
 function parseVersion(value) {
@@ -59,24 +60,33 @@ function spawnPortable(command, args, options) {
 function resolvePnpm(packageManager) {
   const suffix = process.platform === "win32" ? ".cmd" : "";
   const pinnedVersion = /^pnpm@([^+]+)/u.exec(packageManager ?? "")?.[1];
+  if (!pinnedVersion) {
+    throw new Error("package.json does not declare a pinned pnpm version");
+  }
   const candidates = [
-    { command: `corepack${suffix}`, prefix: ["pnpm"] },
-    { command: `pnpm${suffix}`, prefix: [] },
-  ];
-  if (pinnedVersion) {
-    candidates.push({
+    { command: `corepack${suffix}`, prefix: ["pnpm"], label: "Corepack" },
+    { command: `pnpm${suffix}`, prefix: [], label: "pnpm" },
+    {
       command: `npm${suffix}`,
       prefix: ["exec", "--yes", "--package", `pnpm@${pinnedVersion}`, "--", "pnpm"],
-    });
-  }
+      label: "npm",
+    },
+  ];
   for (const candidate of candidates) {
     const probe = commandResult(candidate.command, [...candidate.prefix, "--version"]);
-    if (!probe.error && probe.status === 0) {
-      return candidate;
+    if (probe.error || probe.status !== 0) {
+      continue;
     }
+    const actualVersion = probe.stdout.trim();
+    if (actualVersion === pinnedVersion) {
+      return { ...candidate, version: actualVersion };
+    }
+    process.stdout.write(
+      `Skipping ${candidate.label} pnpm ${actualVersion || "(unknown)"}; this source package requires pnpm ${pinnedVersion}.\n`,
+    );
   }
   throw new Error(
-    "Unable to start the repository's pinned pnpm version. Check npm access, then rerun this installer.",
+    `Unable to start pnpm ${pinnedVersion}. Check that npm is available and can reach the npm registry, then rerun the installer.`,
   );
 }
 
@@ -96,42 +106,53 @@ function run(command, args, label) {
   }
 }
 
-for (const required of ["package.json", "pnpm-lock.yaml", "openclaw.mjs"]) {
-  if (!existsSync(path.join(repoRoot, required))) {
-    throw new Error(`Incomplete source package: missing ${required}`);
+function main() {
+  for (const required of ["package.json", "pnpm-lock.yaml", "openclaw.mjs"]) {
+    if (!existsSync(path.join(repoRoot, required))) {
+      throw new Error(`Incomplete source package: missing ${required}`);
+    }
   }
-}
 
-const packageJson = JSON.parse(readFileSync(path.join(repoRoot, "package.json"), "utf8"));
-if (packageJson.repository?.url !== "git+https://github.com/Ben-Jianming/openclaw-pqc.git") {
-  throw new Error("This package does not identify itself as the OpenClaw PQC repository");
-}
+  const packageJson = JSON.parse(readFileSync(path.join(repoRoot, "package.json"), "utf8"));
+  if (packageJson.repository?.url !== "git+https://github.com/Ben-Jianming/openclaw-pqc.git") {
+    throw new Error("This package does not identify itself as the OpenClaw PQC repository");
+  }
 
-const nodeVersion = parseVersion(process.versions.node);
-if (!nodeVersion || !nodeVersionIsSupported(nodeVersion)) {
-  throw new Error(
-    `Unsupported Node ${process.versions.node}. Use Node 24.16.0 or newer (Node 22 requires 22.22.3+).`,
+  const nodeVersion = parseVersion(process.versions.node);
+  if (!nodeVersion || !nodeVersionIsSupported(nodeVersion)) {
+    throw new Error(
+      `Unsupported Node ${process.versions.node}. Use Node 24.16.0 or newer (Node 22 requires 22.22.3+).`,
+    );
+  }
+
+  const pnpm = resolvePnpm(packageJson.packageManager);
+  process.stdout.write(
+    `OpenClaw PQC source package is complete. Node ${process.versions.node} and pnpm ${pnpm.version} are ready.\n`,
+  );
+  if (checkOnly) {
+    return;
+  }
+
+  run(pnpm.command, [...pnpm.prefix, "install", "--frozen-lockfile"], "Install dependencies");
+  run(pnpm.command, [...pnpm.prefix, "build"], "Build OpenClaw PQC");
+  run(
+    process.execPath,
+    [path.join(repoRoot, "scripts", "verify-source-install.mjs")],
+    "Verify installation",
+  );
+
+  process.stdout.write(
+    "\nInstallation complete. Run onboarding next:\n" +
+      "  node openclaw.mjs onboard --install-daemon\n\n" +
+      "Then start with start.bat (Windows) or ./start.sh (macOS/Linux).\n",
   );
 }
 
-const pnpm = resolvePnpm(packageJson.packageManager);
-process.stdout.write(
-  `OpenClaw PQC source package is complete. Node ${process.versions.node} is supported.\n`,
-);
-if (checkOnly) {
-  process.exit(0);
+try {
+  main();
+} catch (error) {
+  const message = error instanceof Error ? error.message : String(error);
+  process.stderr.write(`\nOpenClaw PQC installation failed: ${message}\n`);
+  process.stderr.write("See INSTALL.zh-CN.md or INSTALL.md for troubleshooting steps.\n");
+  process.exitCode = 1;
 }
-
-run(pnpm.command, [...pnpm.prefix, "install", "--frozen-lockfile"], "Install dependencies");
-run(pnpm.command, [...pnpm.prefix, "build"], "Build OpenClaw PQC");
-run(
-  process.execPath,
-  [path.join(repoRoot, "scripts", "verify-source-install.mjs")],
-  "Verify installation",
-);
-
-process.stdout.write(
-  "\nInstallation complete. Run onboarding next:\n" +
-    "  node openclaw.mjs onboard --install-daemon\n\n" +
-    "Then start with start.bat (Windows) or ./start.sh (macOS/Linux).\n",
-);
