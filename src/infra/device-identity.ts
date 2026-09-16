@@ -50,7 +50,7 @@ import {
 } from "./mldsa65-key-storage.js";
 
 export type { DeviceIdentity } from "./device-identity-store.js";
-export type DeviceIdentityAlgorithm = "ed25519" | "ml-dsa-65";
+type DeviceIdentityAlgorithm = "ed25519" | "ml-dsa-65";
 
 const ED25519_PUBLIC_KEY_BYTES = 32;
 const ED25519_SIGNATURE_BYTES = 64;

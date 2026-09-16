@@ -1,8 +1,8 @@
 import { createHash } from "node:crypto";
 import { ed25519 } from "@noble/curves/ed25519.js";
 import { describe, expect, it } from "vitest";
+import type { ConnectParams } from "../../../../packages/gateway-protocol/src/index.js";
 import { buildDeviceAuthPayloadV3 } from "../../device-auth.js";
-import type { ConnectParams } from "../../protocol/index.js";
 import { resolveDeviceSignaturePayloadVersion } from "./handshake-auth-helpers.js";
 
 describe("gateway device proof algorithm interoperability", () => {

@@ -154,7 +154,8 @@ export function readPluginSdkSurfaceBudgets(env = process.env) {
       // +1: focused media-local-roots replacement for the legacy agent-media facade.
       // +1: account-aware channel DM policy setup descriptors.
       // +1: dependency-light CLI argv parsing for machine-output metadata.
-      146,
+      // +1: focused PQC audit logging contract.
+      147,
       env,
     ),
     publicExports: readPluginSdkSurfaceBudgetEnv(
@@ -189,7 +190,8 @@ export function readPluginSdkSurfaceBudgets(env = process.env) {
       // +6: model-picker action/capability and authoritative session-apply contracts.
       // +1: logger file-transport flush for graceful shutdown drains.
       // +1: process-local sessions.changed plugin notification payload.
-      4842,
+      // +2: structured PQC log event and level contracts.
+      4844,
       env,
     ),
     publicFunctionExports: readPluginSdkSurfaceBudgetEnv(
