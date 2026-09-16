@@ -25,7 +25,7 @@ OpenClaw PQC is a staged migration. This page states what the product enforces t
 
 Set `OPENCLAW_WRAP_KEY_FILE` to an absolute path containing one base64url-encoded 32-byte key. On POSIX the file must have mode `0600`. `OPENCLAW_PQC_WRAP_KEY` remains available for managed environments, but a key file avoids shell-history exposure. Keep an offline backup; losing the wrapping key makes wrapped identities unrecoverable.
 
-The status, backup, restore, and rotation primitives are implemented in the security layer. Release builds must not direct operators to CLI commands until those commands are registered and covered by an end-to-end recovery test.
+Use `openclaw security wrap-key status` to inspect the store. `export` and `import` use a passphrase file so the passphrase does not appear in shell history. `rotate --output <new-file> --key-id <new-id>` atomically re-wraps every identity row and writes the new raw key to a file that must not already exist. Test a backup/restore before deleting an old key.
 
 ## Release verification
 

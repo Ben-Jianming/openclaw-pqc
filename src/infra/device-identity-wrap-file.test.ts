@@ -20,6 +20,10 @@ import {
   type DeviceIdentityStoreOptions,
   type SyncWrappingKeyProvider,
 } from "./device-identity-store.js";
+import {
+  listStoredDeviceIdentityWrapHealth,
+  rotateStoredDeviceIdentityWrappingKey,
+} from "./device-identity-wrap-operations.js";
 import { loadOrCreateDeviceIdentity } from "./device-identity.js";
 
 const WRAP_KEY = "XYU5RKqbBTfbrFvLrcSlgmMSyM5LnlLZk7vUUhKbEVg";
@@ -188,5 +192,26 @@ describe("M15.B device-identity file-based wrap (v3-style)", () => {
     expect(stored!.mldsaPrivateKeyPem).toBeNull();
     expect(stored!.mldsaPrivateKeyWrapped).not.toBeNull();
     expect(stored!.mldsaPrivateKeyWrapKeyId).toBe(WRAP_KEY_ID);
+  });
+
+  it("atomically rotates wrapped identities and preserves the device identity", () => {
+    const before = loadOrCreateDeviceIdentity(options());
+    const nextRaw = Buffer.alloc(32, 11).toString("base64url");
+    const nextKeyring = makeKeyring(nextRaw, "rotated-2026-09");
+    const result = rotateStoredDeviceIdentityWrappingKey({
+      env: options().env,
+      oldWrappingKeyProvider: makeKeyring(WRAP_KEY, WRAP_KEY_ID),
+      newKey: nextKeyring.getActiveKey(),
+    });
+
+    expect(result).toEqual({ rotated: 1 });
+    const health = listStoredDeviceIdentityWrapHealth(options());
+    expect(health[0]?.identity.mldsaPrivateKeyWrapKeyId).toBe("rotated-2026-09");
+    const after = readStoredDeviceIdentity({
+      ...options(),
+      wrappingKeyProvider: nextKeyring,
+    });
+    expect(after?.deviceId).toBe(before.deviceId);
+    expect(after?.privateKeyPem).toBe(before.privateKeyPem);
   });
 });

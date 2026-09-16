@@ -16,6 +16,7 @@ import { formatCliCommand } from "./command-format.js";
 import { resolveCommandSecretRefsViaGateway } from "./command-secret-gateway.js";
 import { getSecurityAuditCommandSecretTargetIds } from "./command-secret-targets.js";
 import { formatHelpExamples } from "./help-format.js";
+import { registerWrapKeyCli } from "./wrap-key-cli.js";
 
 type SecurityAuditOptions = {
   json?: boolean;
@@ -99,6 +100,8 @@ export function registerSecurityCli(program: Command) {
           ["openclaw security audit --json", "Output machine-readable JSON."],
         ])}\n\n${theme.muted("Docs:")} ${formatDocsLink("/cli/security", "docs.openclaw.ai/cli/security")}\n`,
     );
+
+  registerWrapKeyCli(security);
 
   security
     .command("audit")

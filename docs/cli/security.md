@@ -18,7 +18,21 @@ openclaw security audit --deep --token <token>
 openclaw security audit --auth password --password <password>
 openclaw security audit --fix
 openclaw security audit --json
+openclaw security wrap-key status
 ```
+
+## Device wrapping keys
+
+Device-key wrapping commands live under `security wrap-key`:
+
+```bash
+openclaw security wrap-key status --json
+openclaw security wrap-key export --output wrap-key.backup --passphrase-file passphrase.txt
+openclaw security wrap-key import --input wrap-key.backup --output wrap-key.restored --passphrase-file passphrase.txt
+openclaw security wrap-key rotate --output wrap-key.next --key-id primary-2026-09
+```
+
+Backup and restore files are created with private permissions and never overwrite an existing file. `rotate` updates all identity rows in one SQLite transaction, then prints the `OPENCLAW_WRAP_KEY_FILE` and `OPENCLAW_PQC_WRAP_KEY_ID` values to configure. Keep the old key until the new file has been backed up and a gateway restart succeeds.
 
 ## Audit modes
 

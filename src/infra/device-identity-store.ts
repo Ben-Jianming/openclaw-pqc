@@ -97,8 +97,8 @@ export interface SyncWrappingKeyProvider {
   getKeyById(keyId: string): { keyId: string; key: Buffer } | null;
 }
 
-type DeviceIdentityDatabase = Pick<OpenClawStateKyselyDatabase, "device_identities">;
-type DeviceIdentityRow = Selectable<DeviceIdentityDatabase["device_identities"]>;
+export type DeviceIdentityDatabase = Pick<OpenClawStateKyselyDatabase, "device_identities">;
+export type DeviceIdentityRow = Selectable<DeviceIdentityDatabase["device_identities"]>;
 type DeviceIdentityInsert = Insertable<DeviceIdentityDatabase["device_identities"]>;
 
 export class DeviceIdentityStorageError extends Error {
@@ -459,7 +459,7 @@ function readStoredIdentityRowFromDatabase(
   );
 }
 
-function readStoredIdentityFromDatabase(
+export function readStoredIdentityFromDatabase(
   database: { db: Parameters<typeof getNodeSqliteKysely>[0] },
   identityKey: string,
   wrappingKeyProvider: SyncWrappingKeyProvider | null | undefined,

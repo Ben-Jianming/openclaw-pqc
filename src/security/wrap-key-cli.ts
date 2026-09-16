@@ -16,8 +16,7 @@ import type {
 // Doctor when a row's BLOB looks suspicious.
 //
 // `wrapKeyStatusCommand`, `wrapKeyExportCommand`, and `wrapKeyImportCommand`
-// are reusable command-layer primitives. They are not advertised as root CLI
-// commands until registration and end-to-end recovery tests ship together.
+// are reusable primitives behind `openclaw security wrap-key`.
 import { deserializeWrappedSecret, type WrappedSecret } from "./secret-wrapping.js";
 
 export interface WrapKeyRowHealth {
@@ -108,7 +107,7 @@ export function wrapKeyHealthCheck(options: WrapKeyHealthCheckOptions): WrapKeyS
   }
   if (wrappedStaleCount > 0) {
     notes.unshift(
-      `${wrappedStaleCount} row(s) sealed under a non-active keyId — restore the matching key backup before rotation`,
+      `${wrappedStaleCount} row(s) sealed under a non-active keyId — restore it with openclaw security wrap-key import before rotation`,
     );
   }
   if (invalidCount > 0) {
@@ -142,7 +141,7 @@ export function parseWrapEnvelope(serialized: string | null | undefined): Wrappe
   }
 }
 
-// --- Command-layer primitives (registration requires a recovery UX) ---
+// --- Command-layer primitives used by the registered recovery UX ---
 
 export interface WrapKeyStatusCommandOptions {
   list: WrapKeyHealthCheckOptions["list"];
@@ -160,7 +159,7 @@ export interface WrapKeyExportCommandOptions {
   now?: number;
 }
 
-/** Re-export from M7 for a future registered backup command. */
+/** Re-export from M7 for the registered backup command. */
 export async function wrapKeyExportCommand(options: WrapKeyExportCommandOptions): Promise<string> {
   const { exportWrapKey } = await import("./wrap-key-rotation.js");
   return exportWrapKey(options.rawKey, options.passphrase, options.keyId, options.now);
@@ -178,7 +177,5 @@ export async function wrapKeyImportCommand(
   return importWrapKey(options.envelope, options.passphrase);
 }
 
-// Suppress unused-symbol lint for the SyncWrappingKeyProvider type — it
-// is intentionally re-exported so future CLI consumers can take the
-// provider as a parameter without re-importing from device-identity-store.
+// Re-export the provider type for recovery and Doctor consumers.
 export type { SyncWrappingKeyProvider };

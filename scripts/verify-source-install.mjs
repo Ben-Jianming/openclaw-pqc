@@ -9,6 +9,8 @@ const requiredSources = [
   "src/infra/mldsa65-key-storage.ts",
   "src/logging/pqc-log.ts",
   "src/security/secret-wrapping.ts",
+  "src/cli/wrap-key-cli.ts",
+  "src/infra/device-identity-wrap-operations.ts",
   "docs/security/pqc-whitepaper.md",
 ];
 

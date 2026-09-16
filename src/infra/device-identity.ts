@@ -185,7 +185,7 @@ function withDeviceIdentityCoordinator<T>(
  * (keys + activeKeyId); for the single-key v3 use case we only need a
  * raw base64url string.
  */
-function resolveDeviceIdentityKeyring(
+export function resolveDeviceIdentityKeyring(
   env: NodeJS.ProcessEnv = process.env,
 ): SyncWrappingKeyProvider | undefined {
   // M15.B: v3-style file-based wrap takes precedence.

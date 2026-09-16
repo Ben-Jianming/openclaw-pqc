@@ -2,10 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { ed25519 } from "@noble/curves/ed25519.js";
 import { describe, expect, it } from "vitest";
-import {
-  deriveDeviceIdFromPublicKey,
-  verifyDeviceSignature,
-} from "./device-identity.js";
+import { deriveDeviceIdFromPublicKey, verifyDeviceSignature } from "./device-identity.js";
 
 const repoRoot = path.resolve(import.meta.dirname, "../..");
 
@@ -54,5 +51,14 @@ describe("installed PQC production contract", () => {
     expect(verifier).toContain("deriveDeviceIdFromPublicKey(device.publicKey, device.algorithm)");
     expect(verifier).toContain("resolveDeviceSignaturePayloadVersion");
     expect(auth).toContain("verifyGatewayConnectDeviceProof");
+  });
+
+  it("registers the wrapping-key recovery workflow in the shipping security CLI", () => {
+    const securityCli = fs.readFileSync(path.join(repoRoot, "src/cli/security-cli.ts"), "utf8");
+    const wrapKeyCli = fs.readFileSync(path.join(repoRoot, "src/cli/wrap-key-cli.ts"), "utf8");
+    expect(securityCli).toContain("registerWrapKeyCli(security)");
+    for (const command of ["status", "export", "import", "rotate"]) {
+      expect(wrapKeyCli).toContain(`.command("${command}")`);
+    }
   });
 });
