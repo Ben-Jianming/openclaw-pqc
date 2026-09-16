@@ -761,6 +761,10 @@
       "types": "./dist/plugin-sdk/logging-core.d.ts",
       "default": "./dist/plugin-sdk/logging-core.js"
     },
+    "./plugin-sdk/pqc-log": {
+      "types": "./dist/plugin-sdk/pqc-log.d.ts",
+      "default": "./dist/plugin-sdk/pqc-log.js"
+    },
     "./plugin-sdk/migration": {
       "default": "./dist/plugin-sdk/migration.js"
     },

@@ -298,6 +298,7 @@ async function buildGatewayConnectDevice(params: {
   const signature = await signDevicePayload(deviceIdentity.privateKey, payload);
   return {
     id: deviceIdentity.deviceId,
+    algorithm: "ed25519",
     publicKey: deviceIdentity.publicKey,
     signature,
     signedAt: signedAtMs,

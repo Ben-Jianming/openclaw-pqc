@@ -1,13 +1,12 @@
 // Covers SQLite device identity creation, migration boundaries, and ML-DSA-65
 // (FIPS 204) crypto helpers.
 //
-// M2 (PQC migration, whitepaper 2.1): the Ed25519 KAT previously checked in
-// this file is now skipped — Ed25519 is no longer a valid device identity
-// algorithm. The ML-DSA-65 invariants below cover the new wire shape and
-// round-trip behavior of the public API in `device-identity.ts`.
+// Node identities are ML-DSA-65. A fixed Ed25519 vector below protects the
+// explicitly versioned native-client compatibility path.
 import { spawn, type ChildProcess } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+import { ed25519 } from "@noble/curves/ed25519.js";
 import { afterEach, describe, expect, it } from "vitest";
 import { closeOpenClawStateDatabaseForTest } from "../state/openclaw-state-db.js";
 import { withTempDir } from "../test-utils/temp-dir.js";
@@ -57,6 +56,20 @@ void MISMATCHED_SWIFT_RAW_PRIVATE_KEY;
 afterEach(() => {
   closeOpenClawStateDatabaseForTest();
 });
+
+async function withIdentityTempDir<T>(
+  prefix: string,
+  run: (dir: string) => Promise<T>,
+): Promise<T> {
+  return withTempDir(prefix, async (dir) => {
+    try {
+      return await run(dir);
+    } finally {
+      // Release SQLite/WAL handles before Windows removes the temporary tree.
+      closeOpenClawStateDatabaseForTest();
+    }
+  });
+}
 
 function storeOptions(rootDir: string, identityKey?: string): DeviceIdentityStoreOptions {
   return {
@@ -157,7 +170,7 @@ async function runConcurrentIdentityLoads(rootDir: string): Promise<DeviceIdenti
 
 describe("device identity SQLite store", () => {
   it("serializes identity ownership with the shared SQLite coordinator", async () => {
-    await withTempDir("openclaw-device-identity-coordinator-", async (rootDir) => {
+    await withIdentityTempDir("openclaw-device-identity-coordinator-", async (rootDir) => {
       const databasePath = path.join(rootDir, "state", "openclaw.sqlite");
       const lockDir = path.join(rootDir, "locks");
       const first = acquireDeviceIdentityCoordinator({ databasePath, lockDir, busyTimeoutMs: 0 });
@@ -175,25 +188,29 @@ describe("device identity SQLite store", () => {
       fs.chmodSync(lockDir, 0o755);
       const secured = acquireDeviceIdentityCoordinator({ databasePath, lockDir, busyTimeoutMs: 0 });
       try {
-        expect(fs.statSync(lockDir).mode & 0o077).toBe(0);
+        if (process.platform !== "win32") {
+          expect(fs.statSync(lockDir).mode & 0o077).toBe(0);
+        }
       } finally {
         secured.release();
       }
 
-      const symlinkLockDir = path.join(rootDir, "symlink-locks");
-      fs.symlinkSync(lockDir, symlinkLockDir);
-      expect(() =>
-        acquireDeviceIdentityCoordinator({
-          databasePath,
-          lockDir: symlinkLockDir,
-          busyTimeoutMs: 0,
-        }),
-      ).toThrow(/real directory/);
+      if (process.platform !== "win32") {
+        const symlinkLockDir = path.join(rootDir, "symlink-locks");
+        fs.symlinkSync(lockDir, symlinkLockDir);
+        expect(() =>
+          acquireDeviceIdentityCoordinator({
+            databasePath,
+            lockDir: symlinkLockDir,
+            busyTimeoutMs: 0,
+          }),
+        ).toThrow(/real directory/);
+      }
     });
   });
 
   it("reads a missing database without creating files", async () => {
-    await withTempDir("openclaw-device-identity-readonly-", async (rootDir) => {
+    await withIdentityTempDir("openclaw-device-identity-readonly-", async (rootDir) => {
       const options = storeOptions(rootDir);
       expect(loadDeviceIdentityIfPresent(options)).toBeNull();
       expect(fs.existsSync(options.path!)).toBe(false);
@@ -202,7 +219,7 @@ describe("device identity SQLite store", () => {
   });
 
   it("creates and reuses the primary identity in SQLite", async () => {
-    await withTempDir("openclaw-device-identity-create-", async (rootDir) => {
+    await withIdentityTempDir("openclaw-device-identity-create-", async (rootDir) => {
       const options = storeOptions(rootDir);
       const created = loadOrCreateDeviceIdentity(options);
       const loaded = loadOrCreateDeviceIdentity(options);
@@ -215,7 +232,7 @@ describe("device identity SQLite store", () => {
   });
 
   it("stores an ML-DSA-65 prefixed public and secret key on first creation", async () => {
-    await withTempDir("openclaw-device-identity-mldsa65-", async (rootDir) => {
+    await withIdentityTempDir("openclaw-device-identity-mldsa65-", async (rootDir) => {
       const options = storeOptions(rootDir);
       const created = loadOrCreateDeviceIdentity(options);
       expect(created.publicKeyPem.startsWith(MLDSA65_PUBLIC_KEY_PREFIX)).toBe(true);
@@ -232,7 +249,7 @@ describe("device identity SQLite store", () => {
   });
 
   it("keeps process identities cached by database path and identity key", async () => {
-    await withTempDir("openclaw-device-identity-cache-", async (rootDir) => {
+    await withIdentityTempDir("openclaw-device-identity-cache-", async (rootDir) => {
       const primaryOptions = storeOptions(rootDir);
       const secondaryOptions = storeOptions(rootDir, "secondary");
       const primary = loadOrCreateProcessDeviceIdentity(primaryOptions);
@@ -249,17 +266,21 @@ describe("device identity SQLite store", () => {
     });
   });
 
-  it("returns one authoritative winner to concurrent creators", async () => {
-    await withTempDir("openclaw-device-identity-concurrent-", async (rootDir) => {
-      const [first, second] = await runConcurrentIdentityLoads(rootDir);
+  it.skipIf(process.platform === "win32")(
+    "returns one authoritative winner to concurrent creators",
+    async () => {
+      await withIdentityTempDir("openclaw-device-identity-concurrent-", async (rootDir) => {
+        const [first, second] = await runConcurrentIdentityLoads(rootDir);
 
-      expect(second).toEqual(first);
-      expect(loadDeviceIdentityIfPresent(storeOptions(rootDir))).toEqual(first);
-    });
-  }, 30_000);
+        expect(second).toEqual(first);
+        expect(loadDeviceIdentityIfPresent(storeOptions(rootDir))).toEqual(first);
+      });
+    },
+    30_000,
+  );
 
   it("fails closed for a corrupt persisted row", async () => {
-    await withTempDir("openclaw-device-identity-corrupt-", async (rootDir) => {
+    await withIdentityTempDir("openclaw-device-identity-corrupt-", async (rootDir) => {
       const options = storeOptions(rootDir);
       loadOrCreateDeviceIdentity(options);
       closeOpenClawStateDatabaseForTest();
@@ -283,7 +304,7 @@ describe("device identity SQLite store", () => {
   it.each(["device.json", "device.json.doctor-importing", "device.json.native-importing"])(
     "blocks SQLite access while legacy %s may exist",
     async (legacyName) => {
-      await withTempDir("openclaw-device-identity-legacy-", async (rootDir) => {
+      await withIdentityTempDir("openclaw-device-identity-legacy-", async (rootDir) => {
         const options = storeOptions(rootDir);
         const legacyPath = path.join(rootDir, "identity", legacyName);
         fs.mkdirSync(path.dirname(legacyPath), { recursive: true });
@@ -300,7 +321,7 @@ describe("device identity SQLite store", () => {
     ["canonical", (rootDir: string) => path.join(rootDir, "state", "openclaw.sqlite")],
     ["arbitrary", (rootDir: string) => path.join(rootDir, "identity-state.sqlite")],
   ])("derives the legacy root from an explicit %s database path", async (_label, dbPath) => {
-    await withTempDir("openclaw-device-identity-explicit-path-", async (rootDir) => {
+    await withIdentityTempDir("openclaw-device-identity-explicit-path-", async (rootDir) => {
       const legacyPath = path.join(rootDir, "identity", "device.json");
       fs.mkdirSync(path.dirname(legacyPath), { recursive: true });
       fs.writeFileSync(legacyPath, "{}\n");
@@ -320,7 +341,26 @@ describe.skip("legacy device identity normalization", () => {
   it.skip("rejects mismatched or malformed legacy key material");
 });
 
-describe("device identity crypto helpers (ML-DSA-65, FIPS 204)", () => {
+describe("device identity crypto helpers", () => {
+  it("verifies an explicitly versioned Ed25519 client proof without weakening device binding", () => {
+    const secretKey = new Uint8Array(32).fill(7);
+    const publicKey = ed25519.getPublicKey(secretKey);
+    const publicKeyWire = Buffer.from(publicKey).toString("base64url");
+    const payload = "v3|fixture-device|openclaw-ios|ui|operator|operator.read|1||nonce|ios|iphone";
+    const signature = Buffer.from(
+      ed25519.sign(new TextEncoder().encode(payload), secretKey),
+    ).toString("base64url");
+
+    expect(normalizeDevicePublicKeyBase64Url(publicKeyWire, "ed25519")).toBe(publicKeyWire);
+    expect(publicKeyWire).toBe("6kpsY-KcUgq-9VB7Ey7F-ZVHdq6-vnuSQh7qaRRG0iw");
+    expect(deriveDeviceIdFromPublicKey(publicKeyWire, "ed25519")).toBe(
+      "fe812c12f3ab4ce6ac5db69ac352f906cb1b11ef43fb33e252ef7ff552263889",
+    );
+    expect(verifyDeviceSignature(publicKeyWire, payload, signature, "ed25519")).toBe(true);
+    expect(verifyDeviceSignature(publicKeyWire, `${payload}!`, signature, "ed25519")).toBe(false);
+    expect(verifyDeviceSignature(publicKeyWire, payload, signature, "ml-dsa-65")).toBe(false);
+  });
+
   it("preserves the ML-DSA-65 public-key wire shape (prefix + 1952 raw bytes)", () => {
     const { publicKey } = generateMlDsa65Keypair();
     const publicKeyPem = encode(publicKey, MLDSA65_PUBLIC_KEY_PREFIX);

@@ -7,7 +7,7 @@
 ## 1. 准备环境
 
 - 64 位 Windows 10/11、macOS 或常见 Linux 发行版。
-- Node.js 24.16.0 或更新版本。推荐使用 Node 24 LTS。
+- Node.js 22.22.3+、24.15.0+ 或 25.9.0+（不支持 Node 23，推荐 Node 26）。
 - 可访问 npm 软件包仓库的网络连接。
 - 使用 Git 克隆时需要 Git；下载或接收 ZIP 时不需要 Git。
 
@@ -68,6 +68,8 @@ node openclaw.mjs onboard --install-daemon
 
 向导会配置模型服务、网关和工作目录。API 密钥只应通过向导、安全存储或环境变量提供，不要写入 `.bat`、`.sh` 或提交到 GitHub。
 
+如需加密保存设备私钥，请在仓库外创建一个文件，内容为一个 base64url 编码的 32 字节随机密钥，并把 `OPENCLAW_WRAP_KEY_FILE` 设置为该文件的绝对路径。macOS/Linux 还需执行 `chmod 600 <文件>`。守护进程可将 `.env.example` 复制到 `~/.openclaw/.env` 后填写该路径。请离线备份此密钥；丢失后无法恢复已包裹的设备身份。已有明文身份会在配置变量后的下一次启动时自动迁移。
+
 ## 5. 启动、验证和停止
 
 Windows：
@@ -86,7 +88,7 @@ macOS / Linux：
 ./stop.sh
 ```
 
-完成 `--install-daemon` 配置后，先用 `node openclaw.mjs gateway status` 检查服务。`start` 可在服务未运行时以前台模式启动网关，按 `Ctrl+C` 可停止；`verify` 会检查 PQC 源码、构建产物、`--version` 和 `--help`。
+完成 `--install-daemon` 配置后，先用 `node openclaw.mjs gateway status` 检查服务。`start` 可在服务未运行时以前台模式启动网关，按 `Ctrl+C` 可停止；`verify` 会检查构建产物、CLI、设备证明算法和生产接线契约。
 
 ## 6. 常见问题
 

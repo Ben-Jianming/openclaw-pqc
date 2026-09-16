@@ -805,6 +805,7 @@ export class GatewayClient {
     const signature = this.deps.signDevicePayload(this.opts.deviceIdentity.privateKeyPem, payload);
     return {
       id: this.opts.deviceIdentity.deviceId,
+      algorithm: "ml-dsa-65",
       publicKey: this.deps.publicKeyRawBase64UrlFromPem(this.opts.deviceIdentity.publicKeyPem),
       signature,
       signedAt: signedAtMs,

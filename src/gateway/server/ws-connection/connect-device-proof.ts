@@ -61,7 +61,7 @@ export function verifyGatewayConnectDeviceProof(
     });
     close(1008, message);
   };
-  const derivedId = deriveDeviceIdFromPublicKey(device.publicKey);
+  const derivedId = deriveDeviceIdFromPublicKey(device.publicKey, device.algorithm);
   if (!derivedId || derivedId !== device.id) {
     rejectDeviceAuthInvalid("device-id-mismatch", "device identity mismatch");
     return { ok: false };
@@ -92,7 +92,7 @@ export function verifyGatewayConnectDeviceProof(
     rejectDeviceAuthInvalid("device-signature", "device signature invalid");
     return { ok: false };
   }
-  const devicePublicKey = normalizeDevicePublicKeyBase64Url(device.publicKey);
+  const devicePublicKey = normalizeDevicePublicKeyBase64Url(device.publicKey, device.algorithm);
   if (!devicePublicKey) {
     rejectDeviceAuthInvalid("device-public-key", "device public key invalid");
     return { ok: false };

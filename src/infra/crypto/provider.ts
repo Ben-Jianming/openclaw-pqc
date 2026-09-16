@@ -1,5 +1,5 @@
-export type SignAlg = "ed25519" | "ml-dsa-44" | "ml-dsa-65" | "ml-dsa-87" | "slh-dsa-sha2-128s";
-export type KemAlg = "x25519" | "ml-kem-512" | "ml-kem-768" | "ml-kem-1024";
+export type SignAlg = "ed25519" | "ml-dsa-44" | "ml-dsa-65" | "ml-dsa-87";
+export type KemAlg = "ml-kem-768";
 export type HashAlg = "sha-256" | "sha-384" | "sha-512";
 export interface Key {
   readonly alg: SignAlg | KemAlg;
@@ -84,15 +84,12 @@ export async function dualVerifyDevice(
   sig: DualSignature,
 ): Promise<boolean> {
   const p = await getCryptoProvider();
-  if (sig.ed25519 && edKey) {
-    if (await p.verify("ed25519", edKey, message, sig.ed25519)) {
-      return true;
-    }
+  if (!sig.ed25519 || !sig.mlDsa44 || !edKey || !mlKey) {
+    return false;
   }
-  if (sig.mlDsa44 && mlKey) {
-    if (await p.verify("ml-dsa-44", mlKey, message, sig.mlDsa44)) {
-      return true;
-    }
-  }
-  return false;
+  const [edValid, mlValid] = await Promise.all([
+    p.verify("ed25519", edKey, message, sig.ed25519),
+    p.verify("ml-dsa-44", mlKey, message, sig.mlDsa44),
+  ]);
+  return edValid && mlValid;
 }

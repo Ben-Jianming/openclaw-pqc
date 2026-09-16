@@ -322,13 +322,13 @@ function rowToStoredIdentity(
   if (mldsaPrivateKeyWrapped && mldsaPrivateKeyWrapKeyId) {
     if (!wrappingKeyProvider) {
       throw new DeviceIdentityStorageError(
-        `SQLite device identity "${expectedIdentityKey}" is wrapped under keyId "${mldsaPrivateKeyWrapKeyId}" but no WrappingKeyProvider was supplied. Run "openclaw wrap-key import" or "openclaw doctor --fix" before starting the gateway.`,
+        `SQLite device identity "${expectedIdentityKey}" is wrapped under keyId "${mldsaPrivateKeyWrapKeyId}" but no wrapping key was configured. Restore the matching key backup and set OPENCLAW_WRAP_KEY_FILE before starting the gateway.`,
       );
     }
     const resolved = wrappingKeyProvider.getKeyById(mldsaPrivateKeyWrapKeyId);
     if (!resolved) {
       throw new DeviceIdentityStorageError(
-        `Wrapping key "${mldsaPrivateKeyWrapKeyId}" is not present in the keyring. Import it with "openclaw wrap-key import" before starting the gateway.`,
+        `Wrapping key "${mldsaPrivateKeyWrapKeyId}" is not available. Restore the matching key backup, set OPENCLAW_WRAP_KEY_FILE and OPENCLAW_PQC_WRAP_KEY_ID, then restart the gateway.`,
       );
     }
     let envelope: WrappedSecret;
@@ -571,6 +571,60 @@ export function insertStoredDeviceIdentityIfAbsent(
     },
     { env: options.env, path: resolved.databasePath },
     { operationLabel: "device-identity.create" },
+  );
+}
+
+/** Atomically seal an existing plaintext identity when a wrapping key becomes available. */
+export function wrapStoredDeviceIdentityIfPlaintext(
+  options: DeviceIdentityReadOptions & { wrappingKeyProvider: SyncWrappingKeyProvider },
+): { identity: StoredDeviceIdentity | null; migrated: boolean } {
+  const resolved = resolveDeviceIdentityStore(options);
+  return runOpenClawStateWriteTransaction(
+    ({ db }) => {
+      const existing = readStoredIdentityFromDatabase(
+        { db },
+        resolved.identityKey,
+        options.wrappingKeyProvider,
+      );
+      if (!existing) {
+        return { identity: null, migrated: false };
+      }
+      validateStoredDeviceIdentity(existing, resolved.identityKey);
+      if (existing.mldsaPrivateKeyWrapped && existing.mldsaPrivateKeyWrapKeyId) {
+        return { identity: existing, migrated: false };
+      }
+
+      const { keyId, key } = options.wrappingKeyProvider.getActiveKey();
+      const rawSecret = decodeMlDsa65SecretKey(existing.privateKeyPem);
+      const envelope = wrapSecret(Buffer.from(rawSecret), keyId, key, Date.now());
+      executeSqliteQuerySync(
+        db,
+        getNodeSqliteKysely<DeviceIdentityDatabase>(db)
+          .updateTable("device_identities")
+          .set({
+            private_key_pem: "",
+            mldsa_private_key_pem: null,
+            mldsa_private_key_wrapped: Buffer.from(serializeWrappedSecret(envelope), "utf8"),
+            mldsa_private_key_wrap_key_id: keyId,
+            updated_at_ms: Date.now(),
+          })
+          .where("identity_key", "=", resolved.identityKey),
+      );
+      const migrated = readStoredIdentityFromDatabase(
+        { db },
+        resolved.identityKey,
+        options.wrappingKeyProvider,
+      );
+      if (!migrated) {
+        throw new DeviceIdentityStorageError(
+          `SQLite device identity "${resolved.identityKey}" disappeared during wrap migration.`,
+        );
+      }
+      validateStoredDeviceIdentity(migrated, resolved.identityKey);
+      return { identity: migrated, migrated: true };
+    },
+    { env: options.env, path: resolved.databasePath },
+    { operationLabel: "device-identity.wrap-plaintext" },
   );
 }
 

@@ -14,7 +14,7 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg?style=for-the-badge" alt="MIT License"></a>
 </p>
 
-**OpenClaw PQC（抗量子龙虾）** 是 OpenClaw 的抗量子密码分支，加入 ML-DSA-65 设备身份、密钥封装和结构化 PQC 审计能力，同时保留 OpenClaw 的本地网关、模型和多渠道功能。完整实现范围见 [PQC 白皮书](docs/security/pqc-whitepaper.md)。
+**OpenClaw PQC（抗量子龙虾）** 是 OpenClaw 的抗量子密码迁移分支。当前生产保证覆盖 Node/CLI 的 ML-DSA-65 设备身份、兼容客户端的强制签名设备证明、静态密钥封装和结构化 PQC 审计。KEM、Nostr 和第三方推送的端到端 PQC 状态及限制见 [PQC 白皮书](docs/security/pqc-whitepaper.md)，不要把库函数存在误解为所有消息通道都已抗量子化。
 
 面向普通用户的下载、ZIP 解压、安装、首次配置和验证步骤见 **[中文安装说明](INSTALL.zh-CN.md)**；English instructions: **[INSTALL.md](INSTALL.md)**.
 
@@ -84,7 +84,7 @@ Supported channels: WhatsApp, Telegram, Slack, Discord, Google Chat, Signal, iMe
 
 ## 安装 OpenClaw PQC
 
-推荐环境：**Node 24.16.0 或更新版本**。
+支持 **Node 22.22.3+、24.15.0+ 或 25.9.0+**（Node 23 不支持；推荐 Node 26）。
 
 1. 从本仓库点击 **Code → Download ZIP** 并完整解压，或运行：
 

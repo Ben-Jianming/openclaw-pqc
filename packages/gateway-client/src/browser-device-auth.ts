@@ -139,6 +139,7 @@ export class GatewayBrowserDeviceAuthLifecycle {
       auth: buildGatewayConnectAuth(selectedAuth),
       device: {
         id: identity.deviceId,
+        algorithm: "ed25519",
         publicKey: identity.publicKey,
         signature: await identity.sign(payload),
         signedAt: signedAtMs,

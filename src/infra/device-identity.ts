@@ -1,7 +1,8 @@
 // Gateway/device ML-DSA-65 (FIPS 204) identity API backed by canonical shared SQLite state.
 //
-// M2 (PQC migration, whitepaper 2.1): Ed25519 device identity has been removed.
-// All public functions in this module now speak ML-DSA-65 (FIPS 204) only.
+// Locally generated Node/CLI identities use ML-DSA-65 (FIPS 204). Gateway
+// verification also accepts explicitly versioned Ed25519 proofs from native
+// clients while their on-device key stores migrate to ML-DSA-65.
 //
 // Wire format used for stored PEM-shaped fields:
 //   publicKeyPem  = "MLDSA65-PUBLIC-KEY:" + base64url(raw 1952 bytes)
@@ -17,6 +18,7 @@
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
+import { ed25519 } from "@noble/curves/ed25519.js";
 import { resolveStateDir } from "../config/paths.js";
 import { pqcLog } from "../logging/pqc-log.js";
 import { decodeBase64UrlKey } from "../security/keyring-provider.js";
@@ -28,6 +30,7 @@ import {
   readStoredDeviceIdentity,
   readStoredDeviceIdentityReadOnly,
   resolveDeviceIdentityStore,
+  wrapStoredDeviceIdentityIfPlaintext,
   type DeviceIdentity,
   type DeviceIdentityStoreOptions,
   type SyncWrappingKeyProvider,
@@ -47,6 +50,22 @@ import {
 } from "./mldsa65-key-storage.js";
 
 export type { DeviceIdentity } from "./device-identity-store.js";
+export type DeviceIdentityAlgorithm = "ed25519" | "ml-dsa-65";
+
+const ED25519_PUBLIC_KEY_BYTES = 32;
+const ED25519_SIGNATURE_BYTES = 64;
+
+function decodeCanonicalBase64Url(value: string): Buffer | null {
+  if (!/^[A-Za-z0-9_-]+$/.test(value)) {
+    return null;
+  }
+  try {
+    const raw = Buffer.from(value, "base64url");
+    return raw.toString("base64url") === value ? raw : null;
+  } catch {
+    return null;
+  }
+}
 
 const LEGACY_DEVICE_IDENTITY_RELATIVE_PATH = path.join("identity", "device.json");
 const DOCTOR_CLAIM_SUFFIX = ".doctor-importing";
@@ -176,7 +195,7 @@ function resolveDeviceIdentityKeyring(
       throw new Error(`OPENCLAW_WRAP_KEY_FILE must be absolute; got: ${wrapKeyFile}`);
     }
     const stat = fs.statSync(wrapKeyFile);
-    if ((stat.mode & 0o777) !== 0o600) {
+    if (process.platform !== "win32" && (stat.mode & 0o777) !== 0o600) {
       throw new Error(
         `OPENCLAW_WRAP_KEY_FILE ${wrapKeyFile} must be chmod 0600; got 0o${(stat.mode & 0o777).toString(8)}`,
       );
@@ -233,8 +252,23 @@ function loadOrCreateDeviceIdentityOwned(options: DeviceIdentityStoreOptions): D
   }
   const readOptions = { ...options, wrappingKeyProvider };
 
-  const existing = readStoredDeviceIdentity(readOptions);
+  let existing = readStoredDeviceIdentity(readOptions);
   if (existing) {
+    if (wrapEnvEnabled && existing.mldsaPrivateKeyWrapped == null) {
+      const migration = wrapStoredDeviceIdentityIfPlaintext({
+        ...readOptions,
+        wrappingKeyProvider: wrappingKeyProvider!,
+      });
+      existing = migration.identity ?? existing;
+      if (migration.migrated) {
+        pqcLog.info({
+          event: "device-identity",
+          status: "ok",
+          identityKey: PRIMARY_DEVICE_IDENTITY_KEY,
+          detail: "migrated existing plaintext identity to wrapped storage",
+        });
+      }
+    }
     // M17: emit pqcLog so dashboard can see device-identity activity.
     // Distinguish: row state (actual wrap) vs env state (config intent).
     const rowIsWrapped = existing.mldsaPrivateKeyWrapped != null;
@@ -248,9 +282,8 @@ function loadOrCreateDeviceIdentityOwned(options: DeviceIdentityStoreOptions): D
         "loaded existing wrapped identity, env has no wrap (M5 fallback would kick in on next generate)";
       status = "ok";
     } else if (!rowIsWrapped && wrapEnvEnabled) {
-      detail =
-        "loaded existing legacy plaintext identity (env has wrap but row is plaintext, M15 task to migrate)";
-      status = "ok"; // load succeeded, just legacy state
+      detail = "loaded plaintext identity while wrap migration was unavailable";
+      status = "fail";
     } else {
       detail = "loaded existing legacy plaintext identity (no wrap, M5 fallback)";
       status = "ok";
@@ -347,19 +380,40 @@ export function signDevicePayload(privateKeyPem: string, payload: string): strin
  * length mismatch.
  */
 function tryDecodeRawMlDsa65PublicKey(base64Url: string): Uint8Array | null {
-  try {
-    const raw = Buffer.from(base64Url, "base64url");
-    if (raw.length !== MLDSA65_PUBLIC_KEY_BYTES) {
-      return null;
-    }
-    return new Uint8Array(raw);
-  } catch {
+  const raw = decodeCanonicalBase64Url(base64Url);
+  if (!raw || raw.length !== MLDSA65_PUBLIC_KEY_BYTES) {
     return null;
   }
+  return new Uint8Array(raw);
+}
+
+function tryDecodeRawEd25519PublicKey(base64Url: string): Uint8Array | null {
+  const raw = decodeCanonicalBase64Url(base64Url);
+  return raw?.length === ED25519_PUBLIC_KEY_BYTES ? new Uint8Array(raw) : null;
+}
+
+export function resolveDeviceIdentityAlgorithm(
+  publicKey: string,
+  declared?: string,
+): DeviceIdentityAlgorithm | null {
+  const inferred = publicKey.startsWith(MLDSA65_PUBLIC_KEY_PREFIX)
+    ? "ml-dsa-65"
+    : tryDecodeRawMlDsa65PublicKey(publicKey)
+      ? "ml-dsa-65"
+      : tryDecodeRawEd25519PublicKey(publicKey)
+        ? "ed25519"
+        : null;
+  if (!inferred || (declared !== undefined && declared !== inferred)) {
+    return null;
+  }
+  return inferred;
 }
 
 /** Normalize ML-DSA-65 public key (PEM-prefixed or raw base64url) to canonical prefixed form. */
-export function normalizeDevicePublicKeyBase64Url(publicKey: string): string | null {
+export function normalizeDevicePublicKeyBase64Url(
+  publicKey: string,
+  algorithm?: string,
+): string | null {
   if (typeof publicKey !== "string" || publicKey.length === 0) {
     return null;
   }
@@ -371,25 +425,38 @@ export function normalizeDevicePublicKeyBase64Url(publicKey: string): string | n
       return null;
     }
   }
+  if (algorithm === "ed25519") {
+    const edRaw = tryDecodeRawEd25519PublicKey(publicKey);
+    return edRaw ? Buffer.from(edRaw).toString("base64url") : null;
+  }
   // Try raw base64url ML-DSA-65 public key (1952 bytes after decode).
   const raw = tryDecodeRawMlDsa65PublicKey(publicKey);
-  if (!raw) {
-    return null;
+  if (raw) {
+    return algorithm && algorithm !== "ml-dsa-65" ? null : encodeMlDsa65PublicKey(raw);
   }
-  return encodeMlDsa65PublicKey(raw);
+  const edRaw = tryDecodeRawEd25519PublicKey(publicKey);
+  return !algorithm || algorithm === "ed25519"
+    ? edRaw
+      ? Buffer.from(edRaw).toString("base64url")
+      : null
+    : null;
 }
 
 /** Derive the stable device id from an ML-DSA-65 public key (PEM-prefixed or raw base64url). */
-export function deriveDeviceIdFromPublicKey(publicKey: string): string | null {
+export function deriveDeviceIdFromPublicKey(publicKey: string, algorithm?: string): string | null {
   try {
-    const normalized = normalizeDevicePublicKeyBase64Url(publicKey);
+    const resolvedAlgorithm = resolveDeviceIdentityAlgorithm(publicKey, algorithm);
+    if (!resolvedAlgorithm) {
+      return null;
+    }
+    const normalized = normalizeDevicePublicKeyBase64Url(publicKey, resolvedAlgorithm);
     if (!normalized) {
       return null;
     }
-    const raw = decodeMlDsa65PublicKey(normalized);
-    if (raw.length !== MLDSA65_PUBLIC_KEY_BYTES) {
-      return null;
-    }
+    const raw =
+      resolvedAlgorithm === "ml-dsa-65"
+        ? decodeMlDsa65PublicKey(normalized)
+        : Buffer.from(normalized, "base64url");
     return crypto.createHash("sha256").update(raw).digest("hex");
   } catch {
     return null;
@@ -428,8 +495,26 @@ export function verifyDeviceSignature(
   publicKey: string,
   payload: string,
   signatureBase64Url: string,
+  algorithm?: string,
 ): boolean {
   if (typeof publicKey !== "string" || publicKey.length === 0) {
+    return false;
+  }
+  const resolvedAlgorithm = resolveDeviceIdentityAlgorithm(publicKey, algorithm);
+  if (resolvedAlgorithm === "ed25519") {
+    try {
+      const raw = tryDecodeRawEd25519PublicKey(publicKey);
+      const signature = Buffer.from(signatureBase64Url, "base64url");
+      return Boolean(
+        raw &&
+        signature.length === ED25519_SIGNATURE_BYTES &&
+        ed25519.verify(signature, new TextEncoder().encode(payload), raw),
+      );
+    } catch {
+      return false;
+    }
+  }
+  if (resolvedAlgorithm !== "ml-dsa-65") {
     return false;
   }
   let prefixed: string;

@@ -1298,6 +1298,7 @@ class GatewaySession(
         if (!signature.isNullOrBlank() && !publicKey.isNullOrBlank()) {
           buildJsonObject {
             put("id", JsonPrimitive(identity.deviceId))
+            put("algorithm", JsonPrimitive("ed25519"))
             put("publicKey", JsonPrimitive(publicKey))
             put("signature", JsonPrimitive(signature))
             put("signedAt", JsonPrimitive(signedAtMs))

@@ -224,6 +224,7 @@ impl GatewayDeviceIdentity {
         let signature = signing_key.sign(payload.as_bytes()).to_bytes();
         Ok(json!({
             "id": self.stored.device_id,
+            "algorithm": "ed25519",
             "publicKey": URL_SAFE_NO_PAD.encode(public_key),
             "signature": URL_SAFE_NO_PAD.encode(signature),
             "signedAt": signed_at_ms,

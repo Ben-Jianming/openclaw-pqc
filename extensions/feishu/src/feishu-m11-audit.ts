@@ -29,11 +29,11 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "n
 import { dirname, join } from "node:path";
 import { ed25519 } from "@noble/curves/ed25519.js";
 import { ml_dsa65 } from "@noble/post-quantum/ml-dsa.js";
+import { pqcLog } from "openclaw/plugin-sdk/pqc-log";
+import { resolveStateDir } from "openclaw/plugin-sdk/state-paths";
 
 const PUSH_SIGNING_KEY_FILE_ENV = "OPENCLAW_FEISHU_PUSH_SIGNING_KEY_FILE";
 const MLDSA_KEY_FILE_ENV = "OPENCLAW_FEISHU_MLDSA_KEY_FILE";
-const STATE_DIR_ENV = "OPENCLAW_STATE_DIR";
-const DEFAULT_STATE_DIR = "/home/benjamin/pqc-fork-state";
 
 const ED25519_RAW_SECRET = 32;
 const MLDSA65_RAW_SECRET = 4032;
@@ -58,8 +58,7 @@ function resolveKeyFile(env: NodeJS.ProcessEnv, keyEnv: string, filename: string
   if (fromEnv && fromEnv.length > 0) {
     return fromEnv;
   }
-  const stateDir = env[STATE_DIR_ENV] || DEFAULT_STATE_DIR;
-  return join(stateDir, filename);
+  return join(resolveStateDir(env), filename);
 }
 
 function getOrCreateEd25519Key(env: NodeJS.ProcessEnv): { secretRaw: Uint8Array; keyId: string } {
@@ -175,39 +174,27 @@ export function auditFeishuSendWithM11(
       key_id_ed25519: ed.keyId,
       key_id_mldsa65: mldsa.keyId,
     };
-    // Emit to console (default pqcLog emitter format)
-    // The dashboard's find_all_pqc_log_paths may or may not pick this
-    // up depending on where console output is captured; for the
-    // primary Feishu session this is best-effort. The event is
-    // structured so future plugin-sdk extensions can route it to
-    // pqcLog directly.
-    console.log(
-      `[PQC] ${JSON.stringify({
-        event: "push-signature",
-        status: "ok",
-        level: "info",
-        detail:
-          "Feishu outgoing message: M11 dual-signature envelope computed (Ed25519 + ML-DSA-65, audit-only — envelope not transmitted to Lark)",
-        identityKey: mldsa.keyId,
-        keyId: ed.keyId,
-        contentSha256,
-        contentBytes: content.length,
-      })}`,
-    );
+    pqcLog.info({
+      event: "push-signature",
+      status: "ok",
+      detail:
+        "Feishu outgoing message: M11 dual-signature envelope computed (Ed25519 + ML-DSA-65, audit-only — envelope not transmitted to Lark)",
+      identityKey: mldsa.keyId,
+      keyId: ed.keyId,
+      contentSha256,
+      contentBytes: content.length,
+    });
     return { signed: true, envelope, contentSha256, error: null };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    console.log(
-      `[PQC] ${JSON.stringify({
-        event: "push-signature",
-        status: "fail",
-        level: "warn",
-        detail: "Feishu M11 envelope signing failed; message will still send (degraded mode)",
-        error: message,
-        contentSha256,
-        contentBytes: content.length,
-      })}`,
-    );
+    pqcLog.warn({
+      event: "push-signature",
+      status: "fail",
+      detail: "Feishu M11 envelope signing failed; message will still send (degraded mode)",
+      error: message,
+      contentSha256,
+      contentBytes: content.length,
+    });
     return { signed: false, envelope: null, contentSha256, error: message };
   }
 }

@@ -145,6 +145,9 @@ describe("M15.B device-identity file-based wrap (v3-style)", () => {
   });
 
   it("rejects OPENCLAW_WRAP_KEY_FILE with wrong mode (0644 too loose)", () => {
+    if (process.platform === "win32") {
+      return;
+    }
     writeWrapKeyFile(wrapKeyFile, WRAP_KEY, 0o644);
     expect(() => loadOrCreateDeviceIdentity(options())).toThrow(/chmod 0600/);
   });
@@ -168,5 +171,22 @@ describe("M15.B device-identity file-based wrap (v3-style)", () => {
     expect(stored!.mldsaPrivateKeyPem).not.toBeNull();
     expect(stored!.mldsaPrivateKeyPem!.startsWith("MLDSA65-SECRET-KEY:")).toBe(true);
     expect(records.some((record) => String(record.detail).includes("plaintext"))).toBe(true);
+  });
+
+  it("migrates an existing plaintext identity when a wrapping key is later configured", () => {
+    delete process.env.OPENCLAW_WRAP_KEY_FILE;
+    delete process.env.OPENCLAW_PQC_WRAP_KEY;
+    delete process.env.OPENCLAW_PQC_WRAP_KEY_ID;
+    const before = loadOrCreateDeviceIdentity(options());
+    expect(readStoredDeviceIdentityReadOnly(options())!.mldsaPrivateKeyPem).not.toBeNull();
+
+    process.env.OPENCLAW_WRAP_KEY_FILE = wrapKeyFile;
+    process.env.OPENCLAW_PQC_WRAP_KEY_ID = WRAP_KEY_ID;
+    const after = loadOrCreateDeviceIdentity(options());
+    expect(after.deviceId).toBe(before.deviceId);
+    const stored = readStoredDeviceIdentity(readOptions());
+    expect(stored!.mldsaPrivateKeyPem).toBeNull();
+    expect(stored!.mldsaPrivateKeyWrapped).not.toBeNull();
+    expect(stored!.mldsaPrivateKeyWrapKeyId).toBe(WRAP_KEY_ID);
   });
 });

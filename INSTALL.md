@@ -7,7 +7,7 @@ This repository is the post-quantum cryptography fork of OpenClaw. Its installer
 ## Requirements
 
 - 64-bit Windows 10/11, macOS, or a common Linux distribution
-- Node.js 24.16.0 or newer (Node 24 LTS recommended)
+- Node.js 22.22.3+, 24.15.0+, or 25.9.0+ (Node 23 is unsupported; Node 26 recommended)
 - Internet access to the npm package registry
 - Git only when cloning; a ZIP installation does not need Git
 
@@ -58,6 +58,8 @@ node openclaw.mjs onboard --install-daemon
 
 Provide API keys only through the setup wizard, secure storage, or environment variables. Never save keys in launcher scripts or commit them to GitHub.
 
+For encrypted device-key storage, create a file containing one base64url-encoded 32-byte key, keep it outside the repository, and set `OPENCLAW_WRAP_KEY_FILE` to its absolute path. On macOS/Linux run `chmod 600 <file>`. Copy `.env.example` to `~/.openclaw/.env` for a daemon and set the path there. Back up this key offline: wrapped identities cannot be recovered without it. An existing plaintext identity is wrapped automatically on the next start after the variable is configured.
+
 ## Run and verify
 
 On Windows:
@@ -76,7 +78,7 @@ On macOS or Linux:
 ./stop.sh
 ```
 
-After installing the daemon, use `node openclaw.mjs gateway status` first. The start script runs the Gateway in the foreground when no service is running; press `Ctrl+C` to stop it. The verify script checks the PQC sources, build output, CLI version, and CLI help.
+After installing the daemon, use `node openclaw.mjs gateway status` first. The start script runs the Gateway in the foreground when no service is running; press `Ctrl+C` to stop it. The verify script checks the build, CLI, device-proof algorithms, and production wiring contract.
 
 ## Troubleshooting
 

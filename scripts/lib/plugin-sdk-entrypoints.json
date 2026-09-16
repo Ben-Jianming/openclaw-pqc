@@ -133,6 +133,7 @@
   "temp-path",
   "time-runtime",
   "logging-core",
+  "pqc-log",
   "migration",
   "migration-runtime",
   "plugin-state-runtime",

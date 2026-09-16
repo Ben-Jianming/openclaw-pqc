@@ -1,11 +1,9 @@
 // Manages APNs registration state and direct/relay push sending.
 import { resolveTimerTimeoutMs } from "@openclaw/normalization-core/number-coercion";
-import { normalizeOptionalString } from "@openclaw/normalization-core/string-coerce";
 import { truncateUtf16Safe } from "@openclaw/normalization-core/utf16-slice";
 import type { DeviceIdentity } from "./device-identity.js";
 import { toErrorObject } from "./errors.js";
 import { getApnsBearerToken, type ApnsAuthConfig } from "./push-apns-auth.js";
-import { APNS_PQC_ENVELOPE_HEADER, buildApnsEnvelopeHeader } from "./push-apns-http2-m11.js";
 import {
   APNS_HTTP2_CANCEL_CODE,
   appendApnsResponseBodyCapture,
@@ -15,11 +13,9 @@ import {
 } from "./push-apns-http2.js";
 import {
   createApnsAlertPayload,
-  createApnsApprovalAlertPayload,
+  createApnsApprovalWakePayload,
   createApnsApprovalResolvedPayload,
   createApnsBackgroundPayload,
-  resolveExecApprovalAlertBody,
-  resolvePluginApprovalAlertBody,
 } from "./push-apns-payloads.js";
 import {
   isLikelyApnsToken,
@@ -67,9 +63,6 @@ type ApnsPushResult = {
 
 type ApnsPushAlertResult = ApnsPushResult;
 type ApnsPushWakeResult = ApnsPushResult;
-
-const EXEC_APPROVAL_NOTIFICATION_CATEGORY = "openclaw.exec-approval";
-const PLUGIN_APPROVAL_NOTIFICATION_CATEGORY = "openclaw.plugin-approval";
 
 type ApnsPushType = "alert" | "background";
 
@@ -233,12 +226,6 @@ async function sendApnsRequest(params: {
           return;
         }
 
-        // M11 (PQC migration): attach dual-signature envelope as a custom
-        // APNs HTTP/2 header. APNs body is 4 KB; the envelope alone is
-        // ~4.5 KB so it cannot go in the body. Receiver (iOS app) reads
-        // the apns-pqc-envelope header and verifies against the body.
-        const envelopeResult = buildApnsEnvelopeHeader(params.payload);
-
         const req = client.request({
           ":method": "POST",
           ":path": requestPath,
@@ -249,7 +236,6 @@ async function sendApnsRequest(params: {
           "apns-expiration": "0",
           "content-type": "application/json",
           "content-length": Buffer.byteLength(body).toString(),
-          ...(envelopeResult.header ? { [APNS_PQC_ENVELOPE_HEADER]: envelopeResult.header } : {}),
         });
         activeRequest = req;
 
@@ -632,16 +618,17 @@ export async function sendApnsExecApprovalAlert(
 ): Promise<ApnsPushAlertResult> {
   return await sendApnsApprovalPush({
     transport: params,
-    payload: createApnsApprovalAlertPayload({
+    // APNs cannot carry the ML-DSA envelope within its 4 KB payload and does
+    // not deliver provider request headers to the app. Send only an opaque
+    // wake; the app obtains canonical approval content over its authenticated
+    // gateway connection.
+    payload: createApnsApprovalWakePayload({
       kind: "exec",
       approvalId: params.approvalId,
       gatewayDeviceId: params.gatewayDeviceId,
-      title: "Exec approval required",
-      body: resolveExecApprovalAlertBody(),
-      category: EXEC_APPROVAL_NOTIFICATION_CATEGORY,
     }),
-    pushType: "alert",
-    priority: "10",
+    pushType: "background",
+    priority: "5",
   });
 }
 
@@ -651,16 +638,13 @@ export async function sendApnsPluginApprovalAlert(
 ): Promise<ApnsPushAlertResult> {
   return await sendApnsApprovalPush({
     transport: params,
-    payload: createApnsApprovalAlertPayload({
+    payload: createApnsApprovalWakePayload({
       kind: "plugin",
       approvalId: params.approvalId,
       gatewayDeviceId: params.gatewayDeviceId,
-      title: normalizeOptionalString(params.title) ?? "Approval required",
-      body: resolvePluginApprovalAlertBody(params.description),
-      category: PLUGIN_APPROVAL_NOTIFICATION_CATEGORY,
     }),
-    pushType: "alert",
-    priority: "10",
+    pushType: "background",
+    priority: "5",
   });
 }
 

@@ -15,11 +15,9 @@ import type {
 // `parseWrapEnvelope` is a defensive probe used by both the CLI and
 // Doctor when a row's BLOB looks suspicious.
 //
-// `wrapKeyStatusCommand`, `wrapKeyExportCommand`, `wrapKeyImportCommand`
-// are the CLI entry aliases. The actual CLI registration is left for a
-// later milestone; the aliases are wired to the same shared helpers so a
-// future `openclaw wrap-key status|export|import` invocation lands on the
-// right code path.
+// `wrapKeyStatusCommand`, `wrapKeyExportCommand`, and `wrapKeyImportCommand`
+// are reusable command-layer primitives. They are not advertised as root CLI
+// commands until registration and end-to-end recovery tests ship together.
 import { deserializeWrappedSecret, type WrappedSecret } from "./secret-wrapping.js";
 
 export interface WrapKeyRowHealth {
@@ -93,9 +91,7 @@ export function wrapKeyHealthCheck(options: WrapKeyHealthCheckOptions): WrapKeyS
       }
     } else if (identity.mldsaPrivateKeyPem) {
       row.status = "plaintext";
-      row.notes.push(
-        "plaintext row — rewrap with `openclaw wrap-key import` or wait for Doctor refresh",
-      );
+      row.notes.push("plaintext row — configure OPENCLAW_WRAP_KEY_FILE and restart to migrate");
       plaintextCount += 1;
       notes.push(`Identity "${identityKey}" is stored as plaintext (M1/M2 legacy)`);
     } else {
@@ -112,7 +108,7 @@ export function wrapKeyHealthCheck(options: WrapKeyHealthCheckOptions): WrapKeyS
   }
   if (wrappedStaleCount > 0) {
     notes.unshift(
-      `${wrappedStaleCount} row(s) sealed under a non-active keyId — run "openclaw wrap-key rotate"`,
+      `${wrappedStaleCount} row(s) sealed under a non-active keyId — restore the matching key backup before rotation`,
     );
   }
   if (invalidCount > 0) {
@@ -146,7 +142,7 @@ export function parseWrapEnvelope(serialized: string | null | undefined): Wrappe
   }
 }
 
-// --- CLI aliases (M8 ships the helper code, registration is later) ---
+// --- Command-layer primitives (registration requires a recovery UX) ---
 
 export interface WrapKeyStatusCommandOptions {
   list: WrapKeyHealthCheckOptions["list"];
@@ -164,7 +160,7 @@ export interface WrapKeyExportCommandOptions {
   now?: number;
 }
 
-/** Re-export from M7 for the future `openclaw wrap-key export` command. */
+/** Re-export from M7 for a future registered backup command. */
 export async function wrapKeyExportCommand(options: WrapKeyExportCommandOptions): Promise<string> {
   const { exportWrapKey } = await import("./wrap-key-rotation.js");
   return exportWrapKey(options.rawKey, options.passphrase, options.keyId, options.now);

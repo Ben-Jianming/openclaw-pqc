@@ -602,7 +602,7 @@ describe("push APNs send semantics", () => {
     }
   });
 
-  it("sends exec approval alert pushes with generic modal-only metadata", async () => {
+  it("sends exec approval requests as opaque background wakes", async () => {
     const { send, registration, auth } = createDirectApnsSendFixture({
       nodeId: "ios-node-approval-alert",
       environment: "sandbox",
@@ -624,17 +624,9 @@ describe("push APNs send semantics", () => {
 
     expect(send).toHaveBeenCalledTimes(1);
     const sent = requireSendRequest(send);
-    expect(sent.pushType).toBe("alert");
+    expect(sent.pushType).toBe("background");
     const payload = requirePayload(sent);
-    expect(payload.aps).toEqual({
-      alert: {
-        title: "Exec approval required",
-        body: "Open OpenClaw to review this request.",
-      },
-      sound: "default",
-      category: "openclaw.exec-approval",
-      "content-available": 1,
-    });
+    expect(payload.aps).toEqual({ "content-available": 1 });
     const openclawPayload = requireRecord(payload.openclaw, "openclaw payload");
     expectRecordFields(openclawPayload, {
       kind: "exec.approval.requested",
@@ -692,7 +684,7 @@ describe("push APNs send semantics", () => {
     expect(result.transport).toBe("direct");
   });
 
-  it("builds plugin approval alerts with request copy and a bounded body", async () => {
+  it("omits plugin approval title and body from the push transport", async () => {
     const { send, registration, auth } = createDirectApnsSendFixture({
       nodeId: "ios-node-plugin-approval-alert",
       environment: "sandbox",
@@ -716,15 +708,7 @@ describe("push APNs send semantics", () => {
     });
 
     const payload = requirePayload(requireSendRequest(send));
-    expect(payload.aps).toEqual({
-      alert: {
-        title: "Install plugin update",
-        body: `${"x".repeat(255)}…`,
-      },
-      sound: "default",
-      category: "openclaw.plugin-approval",
-      "content-available": 1,
-    });
+    expect(payload.aps).toEqual({ "content-available": 1 });
     const openclawPayload = requireRecord(payload.openclaw, "openclaw payload");
     expectRecordFields(openclawPayload, {
       kind: "plugin.approval.requested",
@@ -741,7 +725,7 @@ describe("push APNs send semantics", () => {
     ]);
   });
 
-  it("falls back to the generic plugin approval title", async () => {
+  it("does not render a fallback title for an unverified plugin push", async () => {
     const { send, registration, auth } = createDirectApnsSendFixture({
       nodeId: "ios-node-plugin-approval-fallback",
       environment: "sandbox",
@@ -760,7 +744,7 @@ describe("push APNs send semantics", () => {
     });
 
     const aps = requireRecord(requirePayload(requireSendRequest(send)).aps, "APNs aps payload");
-    expect(requireRecord(aps.alert, "APNs alert").title).toBe("Approval required");
+    expect(aps).toEqual({ "content-available": 1 });
   });
 
   it("builds plugin approval cleanup pushes as silent background notifications", async () => {
@@ -996,7 +980,7 @@ describe("push APNs send semantics", () => {
     });
   });
 
-  it("sends relay exec approval alerts with generic modal-only metadata", async () => {
+  it("sends relay exec approval requests as opaque background wakes", async () => {
     const { send, registration, relayConfig, gatewayIdentity } = createRelayApnsSendFixture({
       nodeId: "ios-node-relay-approval-alert",
       sendResult: {
@@ -1018,15 +1002,7 @@ describe("push APNs send semantics", () => {
     });
 
     const payload = requirePayload(requireSendRequest(send));
-    expect(payload.aps).toEqual({
-      alert: {
-        title: "Exec approval required",
-        body: "Open OpenClaw to review this request.",
-      },
-      sound: "default",
-      category: "openclaw.exec-approval",
-      "content-available": 1,
-    });
+    expect(payload.aps).toEqual({ "content-available": 1 });
     const openclawPayload = requireRecord(payload.openclaw, "openclaw payload");
     expectRecordFields(openclawPayload, {
       kind: "exec.approval.requested",

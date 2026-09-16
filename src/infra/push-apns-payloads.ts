@@ -1,9 +1,4 @@
 // Builds portable APNs payloads for alerts, wakes, and approval lifecycle events.
-import { normalizeOptionalString } from "@openclaw/normalization-core/string-coerce";
-import { truncateUtf16Safe } from "@openclaw/normalization-core/utf16-slice";
-
-const EXEC_APPROVAL_GENERIC_ALERT_BODY = "Open OpenClaw to review this request.";
-const PLUGIN_APPROVAL_ALERT_BODY_MAX_LENGTH = 256;
 
 function toPushMetadata(params: {
   kind: "push.test" | "node.wake";
@@ -54,28 +49,14 @@ export function createApnsBackgroundPayload(params: {
   };
 }
 
-export function resolveExecApprovalAlertBody(): string {
-  return EXEC_APPROVAL_GENERIC_ALERT_BODY;
-}
-
-export function createApnsApprovalAlertPayload(params: {
+/** Opaque approval wake; canonical title/body are fetched over the authenticated gateway. */
+export function createApnsApprovalWakePayload(params: {
   kind: "exec" | "plugin";
   approvalId: string;
   gatewayDeviceId: string;
-  title: string;
-  body: string;
-  category: string;
 }): object {
   return {
-    aps: {
-      alert: {
-        title: params.title,
-        body: params.body,
-      },
-      sound: "default",
-      category: params.category,
-      "content-available": 1,
-    },
+    aps: { "content-available": 1 },
     openclaw: {
       kind: `${params.kind}.approval.requested`,
       approvalId: params.approvalId,
@@ -83,14 +64,6 @@ export function createApnsApprovalAlertPayload(params: {
       ts: Date.now(),
     },
   };
-}
-
-export function resolvePluginApprovalAlertBody(description: string): string {
-  const body = normalizeOptionalString(description) ?? "";
-  if (body.length <= PLUGIN_APPROVAL_ALERT_BODY_MAX_LENGTH) {
-    return body;
-  }
-  return `${truncateUtf16Safe(body, PLUGIN_APPROVAL_ALERT_BODY_MAX_LENGTH - 1).trimEnd()}…`;
 }
 
 export function createApnsApprovalResolvedPayload(params: {

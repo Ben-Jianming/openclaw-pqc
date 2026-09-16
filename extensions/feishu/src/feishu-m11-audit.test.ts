@@ -13,11 +13,18 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 let tmpDir: string;
 let savedEnv: Record<string, string | undefined>;
 let pqcLogCalls: Array<{ level: string; payload: Record<string, unknown> }> = [];
+
+vi.mock("openclaw/plugin-sdk/pqc-log", () => ({
+  pqcLog: {
+    info: (payload: Record<string, unknown>) => pqcLogCalls.push({ level: "info", payload }),
+    warn: (payload: Record<string, unknown>) => pqcLogCalls.push({ level: "warn", payload }),
+  },
+}));
 
 beforeEach(() => {
   tmpDir = mkdtempSync(join(tmpdir(), "feishu-m11-audit-test-"));
@@ -31,21 +38,7 @@ beforeEach(() => {
   delete process.env.OPENCLAW_FEISHU_PUSH_SIGNING_KEY_FILE;
   delete process.env.OPENCLAW_FEISHU_MLDSA_KEY_FILE;
 
-  // Spy on console.log to capture pqcLog emissions
   pqcLogCalls = [];
-  const origLog = console.log;
-  vi.spyOn(console, "log").mockImplementation((...args: unknown[]) => {
-    const first = args[0];
-    if (typeof first === "string" && first.startsWith("[PQC] ")) {
-      try {
-        const payload = JSON.parse(first.slice("[PQC] ".length));
-        pqcLogCalls.push({ level: payload.level, payload });
-      } catch {
-        // ignore non-JSON console.log
-      }
-    }
-    return origLog.call(console, ...args);
-  });
 });
 
 afterEach(() => {
@@ -69,7 +62,6 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-import { vi } from "vitest";
 import { auditFeishuSendWithM11 } from "./feishu-m11-audit.js";
 
 describe("feishu-m11-audit step 6 — happy path", () => {
@@ -134,8 +126,10 @@ describe("feishu-m11-audit step 6 — persistence", () => {
     expect(edStat.size).toBe(32); // 32-byte raw Ed25519 secret
     expect(mldsaStat.size).toBe(4032 + 1952); // raw secret + public
     // Verify chmod 0600 (mask out file-type bits)
-    expect(edStat.mode & 0o777).toBe(0o600);
-    expect(mldsaStat.mode & 0o777).toBe(0o600);
+    if (process.platform !== "win32") {
+      expect(edStat.mode & 0o777).toBe(0o600);
+      expect(mldsaStat.mode & 0o777).toBe(0o600);
+    }
   });
 
   it("reuses existing keys on subsequent calls (deterministic keyId)", () => {

@@ -9,6 +9,7 @@ const requiredSources = [
   "src/infra/mldsa65-key-storage.ts",
   "src/logging/pqc-log.ts",
   "src/security/secret-wrapping.ts",
+  "docs/security/pqc-whitepaper.md",
 ];
 
 for (const source of requiredSources) {
@@ -41,6 +42,22 @@ function verifyCli(argument) {
 
 verifyCli("--version");
 verifyCli("--help");
+
+const vitestEntry = path.join(repoRoot, "node_modules", "vitest", "vitest.mjs");
+if (!existsSync(vitestEntry)) {
+  throw new Error("Runtime verification dependency is missing. Re-run the repository installer.");
+}
+const contract = spawnSync(
+  process.execPath,
+  [vitestEntry, "run", "src/infra/pqc-production-contract.test.ts"],
+  { cwd: repoRoot, encoding: "utf8", timeout: 120_000, windowsHide: true },
+);
+if (contract.error) {
+  throw contract.error;
+}
+if (contract.status !== 0) {
+  throw new Error(`PQC production contract failed:\n${contract.stderr || contract.stdout}`);
+}
 process.stdout.write(
-  "OpenClaw PQC installation verified: PQC sources, build output, and CLI are ready.\n",
+  "OpenClaw PQC installation verified: build, CLI, device-proof algorithms, and production wiring are ready.\n",
 );

@@ -340,6 +340,7 @@ function buildUnauthorizedHandshakeContext(params: {
 export function resolveDeviceSignaturePayloadVersion(params: {
   device: {
     id: string;
+    algorithm?: "ed25519" | "ml-dsa-65";
     signature: string;
     publicKey: string;
   };
@@ -365,12 +366,26 @@ export function resolveDeviceSignaturePayloadVersion(params: {
     platform: params.connectParams.client.platform,
     deviceFamily: params.connectParams.client.deviceFamily,
   });
-  if (verifyDeviceSignature(params.device.publicKey, payloadV3, params.device.signature)) {
+  if (
+    verifyDeviceSignature(
+      params.device.publicKey,
+      payloadV3,
+      params.device.signature,
+      params.device.algorithm,
+    )
+  ) {
     return "v3";
   }
 
   const payloadV2 = buildDeviceAuthPayload(basePayload);
-  if (verifyDeviceSignature(params.device.publicKey, payloadV2, params.device.signature)) {
+  if (
+    verifyDeviceSignature(
+      params.device.publicKey,
+      payloadV2,
+      params.device.signature,
+      params.device.algorithm,
+    )
+  ) {
     return "v2";
   }
   return null;

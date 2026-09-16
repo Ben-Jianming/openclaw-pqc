@@ -52,6 +52,7 @@ export const ConnectParamsSchema = closedObject({
   device: Type.Optional(
     closedObject({
       id: NonEmptyString,
+      algorithm: Type.Optional(Type.Union([Type.Literal("ed25519"), Type.Literal("ml-dsa-65")])),
       publicKey: NonEmptyString,
       signature: NonEmptyString,
       signedAt: Type.Integer({ minimum: 0 }),

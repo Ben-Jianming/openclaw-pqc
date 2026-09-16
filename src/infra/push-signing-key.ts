@@ -19,9 +19,10 @@
 // of the M11 rollout wires it into push-apns-http2.ts.
 
 import { createHash, randomBytes } from "node:crypto";
-import { chmodSync, existsSync, readFileSync, writeFileSync } from "node:fs";
-import { isAbsolute, join } from "node:path";
+import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, isAbsolute, join } from "node:path";
 import { ed25519 } from "@noble/curves/ed25519.js";
+import { resolveStateDir } from "../config/paths.js";
 
 const ED25519_RAW_SECRET_KEY = 32;
 const ED25519_RAW_PUBLIC_KEY = 32;
@@ -29,8 +30,6 @@ const ED25519_RAW_PUBLIC_KEY = 32;
 const PUSH_SIGNING_KEY_FILE_ENV = "OPENCLAW_PUSH_SIGNING_KEY_FILE";
 const FILE_MODE_0600 = 0o600;
 
-const STATE_DIR_ENV = "OPENCLAW_STATE_DIR";
-const DEFAULT_STATE_DIR = "/home/benjamin/pqc-fork-state";
 const DEFAULT_PUSH_SIGNING_KEY_FILENAME = "push-signing-key.bin";
 
 /** Resolve the file path for the push signing key. */
@@ -42,8 +41,7 @@ export function resolvePushSigningKeyPath(env: NodeJS.ProcessEnv = process.env):
     }
     return fromEnv;
   }
-  const stateDir = env[STATE_DIR_ENV] || DEFAULT_STATE_DIR;
-  return join(stateDir, DEFAULT_PUSH_SIGNING_KEY_FILENAME);
+  return join(resolveStateDir(env), DEFAULT_PUSH_SIGNING_KEY_FILENAME);
 }
 
 export interface PushSigningKey {
@@ -94,6 +92,7 @@ function readExistingKey(filePath: string): Uint8Array | null {
 }
 
 function writeNewKey(filePath: string, secretRaw: Uint8Array): void {
+  mkdirSync(dirname(filePath), { recursive: true, mode: 0o700 });
   writeFileSync(filePath, secretRaw, { mode: FILE_MODE_0600 });
   // Belt-and-suspenders: chmod in case the umask overrode the mode option.
   chmodSync(filePath, FILE_MODE_0600);
