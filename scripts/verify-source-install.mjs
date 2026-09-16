@@ -12,6 +12,7 @@ const requiredSources = [
   "src/cli/wrap-key-cli.ts",
   "src/infra/device-identity-wrap-operations.ts",
   "docs/security/pqc-whitepaper.md",
+  "docs/.generated/plugin-sdk-api-baseline.sha256",
 ];
 
 for (const source of requiredSources) {
