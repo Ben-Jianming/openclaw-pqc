@@ -110,7 +110,7 @@ describe("M17: device-identity pqcLog wire-up", () => {
     expect(String(last.detail)).toMatch(/wrapped/);
   });
 
-  it("emits both warn (no wrap) and load events when wrap becomes available later", () => {
+  it("reports automatic migration when wrap becomes available later", () => {
     // First load without wrap → warn + load (legacy)
     loadOrCreateDeviceIdentity(options());
     expect(capturedEvents.some((e) => e.event === "device-identity" && e.level === "warn")).toBe(
@@ -122,9 +122,12 @@ describe("M17: device-identity pqcLog wire-up", () => {
     process.env.OPENCLAW_PQC_WRAP_KEY = WRAP_KEY;
     process.env.OPENCLAW_PQC_WRAP_KEY_ID = WRAP_KEY_ID;
     loadOrCreateDeviceIdentity(options());
-    // Still load the legacy row (no rewrap until M15 DELETE)
+    // Startup migrates the legacy plaintext row, then reports the wrapped load.
     const devEvents = deviceIdentityEvents(capturedEvents);
-    expect(devEvents.length).toBe(1);
-    expect(String(devEvents[0]!.detail)).toMatch(/legacy/);
+    expect(devEvents).toHaveLength(2);
+    expect(devEvents[0]).toMatchObject({ level: "info", status: "ok" });
+    expect(String(devEvents[0]!.detail)).toMatch(/migrated existing plaintext identity/);
+    expect(devEvents[1]).toMatchObject({ level: "info", status: "ok" });
+    expect(String(devEvents[1]!.detail)).toMatch(/loaded existing wrapped identity/);
   });
 });

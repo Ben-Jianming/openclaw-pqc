@@ -77,7 +77,7 @@ describe("device-identity-store wrap integration (M5, whitepaper 2.2.2)", () => 
       closeOpenClawStateDatabaseForTest();
 
       expect(() => readStoredDeviceIdentity(options)).toThrow(
-        /is wrapped under keyId "wrap-key-2026-08" but no WrappingKeyProvider was supplied/,
+        /is wrapped under keyId "wrap-key-2026-08" but no wrapping key was configured.*OPENCLAW_WRAP_KEY_FILE/,
       );
     });
   });
@@ -91,7 +91,7 @@ describe("device-identity-store wrap integration (M5, whitepaper 2.2.2)", () => 
       closeOpenClawStateDatabaseForTest();
 
       expect(() => readStoredDeviceIdentityReadOnly(options)).toThrow(
-        /is wrapped under keyId "wrap-key-2026-08" but no WrappingKeyProvider was supplied/,
+        /is wrapped under keyId "wrap-key-2026-08" but no wrapping key was configured.*OPENCLAW_WRAP_KEY_FILE/,
       );
     });
   });
@@ -110,7 +110,9 @@ describe("device-identity-store wrap integration (M5, whitepaper 2.2.2)", () => 
       };
       expect(() =>
         readStoredDeviceIdentity({ ...options, wrappingKeyProvider: otherKeyring }),
-      ).toThrow(/Wrapping key "wrap-key-2026-08" is not present in the keyring/);
+      ).toThrow(
+        /Wrapping key "wrap-key-2026-08" is not available.*OPENCLAW_WRAP_KEY_FILE.*OPENCLAW_PQC_WRAP_KEY_ID/,
+      );
     });
   });
 
@@ -227,7 +229,7 @@ describe("device-identity-store wrap integration (M5, whitepaper 2.2.2)", () => 
           id === "wrap-key-2026-09" ? { keyId: "wrap-key-2026-09", key: newKey() } : null,
       };
       expect(() => readStoredDeviceIdentity({ ...options, wrappingKeyProvider: other })).toThrow(
-        /Wrapping key "wrap-key-2026-08" is not present in the keyring/,
+        /Wrapping key "wrap-key-2026-08" is not available.*OPENCLAW_WRAP_KEY_FILE.*OPENCLAW_PQC_WRAP_KEY_ID/,
       );
     });
   });
