@@ -11,7 +11,7 @@
     "@agentclientprotocol/claude-agent-acp": "0.59.0",
     "@agentclientprotocol/codex-acp": "1.1.7",
     "acpx": "0.12.0",
-    "smol-toml": "1.7.0",
+    "smol-toml": "1.7.1",
     "zod": "4.4.3"
   },
   "devDependencies": {
