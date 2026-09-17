@@ -1915,7 +1915,7 @@
     },
     {
       "kind": "conditional-branch",
-      "line": 1563,
+      "line": 1564,
       "path": "apps/android/app/src/main/java/ai/openclaw/app/gateway/GatewaySession.kt",
       "source": "Connecting…",
       "surface": "android",
@@ -1923,7 +1923,7 @@
     },
     {
       "kind": "conditional-branch",
-      "line": 1563,
+      "line": 1564,
       "path": "apps/android/app/src/main/java/ai/openclaw/app/gateway/GatewaySession.kt",
       "source": "Reconnecting…",
       "surface": "android",
