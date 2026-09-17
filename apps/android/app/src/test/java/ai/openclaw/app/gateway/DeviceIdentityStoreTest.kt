@@ -87,9 +87,9 @@ class DeviceIdentityStoreTest {
   fun sharedFips204VectorVerifiesWithBouncyCastle() {
     val fixture = findRepositoryFixture("test/fixtures/pqc/ml-dsa-65-fips204.json")
     val vector = Json.parseToJsonElement(fixture.readText()).jsonObject
-    val decode = Base64.getUrlDecoder()::decode
-    val publicKey = decode(vector.getValue("publicKeyBase64Url").jsonPrimitive.content)
-    val signature = decode(vector.getValue("deterministicSignatureBase64Url").jsonPrimitive.content)
+    val decoder = Base64.getUrlDecoder()
+    val publicKey = decoder.decode(vector.getValue("publicKeyBase64Url").jsonPrimitive.content)
+    val signature = decoder.decode(vector.getValue("deterministicSignatureBase64Url").jsonPrimitive.content)
     val message = vector.getValue("messageUtf8").jsonPrimitive.content.toByteArray(Charsets.UTF_8)
     val verifier = org.bouncycastle.crypto.signers.MLDSASigner()
     verifier.init(
