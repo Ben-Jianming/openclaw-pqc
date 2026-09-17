@@ -1,0 +1,81 @@
+name: PQC Native Interoperability
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "apps/android/**"
+      - "apps/linux/**"
+      - "apps/shared/OpenClawKit/**"
+      - "packages/gateway-client/**"
+      - "test/fixtures/pqc/**"
+      - ".github/workflows/pqc-native-interoperability.yml"
+  pull_request:
+    paths:
+      - "apps/android/**"
+      - "apps/linux/**"
+      - "apps/shared/OpenClawKit/**"
+      - "packages/gateway-client/**"
+      - "test/fixtures/pqc/**"
+      - ".github/workflows/pqc-native-interoperability.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: pqc-native-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  apple:
+    name: Apple ML-DSA-65 vectors and identity migration
+    runs-on: macos-26
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+      - name: Run OpenClawKit identity tests
+        run: swift test --package-path apps/shared/OpenClawKit --filter DeviceIdentityStoreTests
+
+  android:
+    name: Android ML-DSA-65 vectors and identity migration
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-android-toolchain
+      - name: Run identity tests for both application variants
+        working-directory: apps/android
+        run: |
+          ./gradlew --no-daemon --build-cache \
+            :app:testPlayDebugUnitTest \
+            :app:testThirdPartyDebugUnitTest \
+            --tests ai.openclaw.app.gateway.DeviceIdentityStoreTest
+
+  linux:
+    name: Linux ML-DSA-65 vectors and identity migration
+    runs-on: ubuntu-22.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+      - name: Install Tauri system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            libssl-dev \
+            libwebkit2gtk-4.1-dev \
+            libxdo-dev
+      - name: Install Rust
+        run: rustup toolchain install 1.93.0 --profile minimal --component rustfmt
+      - name: Run identity tests
+        working-directory: apps/linux/src-tauri
+        run: cargo +1.93.0 test --locked gateway_device_identity

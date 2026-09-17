@@ -1,12 +1,12 @@
 ---
-summary: "Nostr DM channel via NIP-04 encrypted messages"
+summary: "Nostr DMs with optional ML-KEM-768/PQC encryption and NIP-04 compatibility"
 read_when:
   - You want OpenClaw to receive DMs via Nostr
   - You're setting up decentralized messaging
 title: "Nostr"
 ---
 
-Nostr is a downloadable channel plugin (`@openclaw/nostr`) that lets OpenClaw receive and answer NIP-04 encrypted direct messages over Nostr relays. One account per gateway; DMs only.
+Nostr is a downloadable channel plugin (`@openclaw/nostr`) that lets OpenClaw receive and answer encrypted direct messages over Nostr relays. It supports ML-KEM-768 hybrid envelopes for configured peers and NIP-04 compatibility. One account per gateway; DMs only.
 
 ## Install
 
@@ -64,15 +64,46 @@ export NOSTR_PRIVATE_KEY="nsec1..."
 
 ## Configuration reference
 
-| Key          | Type     | Default                                     | Description                                              |
-| ------------ | -------- | ------------------------------------------- | -------------------------------------------------------- |
-| `privateKey` | string   | required                                    | Private key in `nsec` or hex format; secret refs allowed |
-| `relays`     | string[] | `['wss://relay.damus.io', 'wss://nos.lol']` | Relay URLs (WebSocket)                                   |
-| `dmPolicy`   | string   | `pairing`                                   | DM access policy                                         |
-| `allowFrom`  | string[] | `[]`                                        | Allowed sender pubkeys                                   |
-| `enabled`    | boolean  | `true`                                      | Enable/disable channel                                   |
-| `name`       | string   | -                                           | Display name                                             |
-| `profile`    | object   | -                                           | NIP-01 profile metadata                                  |
+| Key                      | Type                   | Default                                     | Description                                                      |
+| ------------------------ | ---------------------- | ------------------------------------------- | ---------------------------------------------------------------- |
+| `privateKey`             | string                 | required                                    | Private key in `nsec` or hex format; secret refs allowed         |
+| `pqcMode`                | string                 | `preferred` when a PQC key exists           | `disabled`, `preferred`, or fail-closed `required`               |
+| `pqcPrivateKey`          | string                 | -                                           | Base64url ML-KEM-768 secret key; secret refs allowed             |
+| `pqcPreviousPrivateKeys` | string[]               | `[]`                                        | Up to two prior secret keys retained during rotation             |
+| `pqcPeerPublicKeys`      | record<string, string> | `{}`                                        | Trusted Nostr pubkey/npub to base64url ML-KEM-768 public-key map |
+| `relays`                 | string[]               | `['wss://relay.damus.io', 'wss://nos.lol']` | Relay URLs (WebSocket)                                           |
+| `dmPolicy`               | string                 | `pairing`                                   | DM access policy                                                 |
+| `allowFrom`              | string[]               | `[]`                                        | Allowed sender pubkeys                                           |
+| `enabled`                | boolean                | `true`                                      | Enable/disable channel                                           |
+| `name`                   | string                 | -                                           | Display name                                                     |
+| `profile`                | object                 | -                                           | NIP-01 profile metadata                                          |
+
+## Post-quantum direct messages
+
+Generate an ML-KEM-768 keypair from a source checkout after dependencies are installed:
+
+```bash
+node --input-type=module -e 'import { ml_kem768 } from "@noble/post-quantum/ml-kem.js"; const k=ml_kem768.keygen(); console.log("private="+Buffer.from(k.secretKey).toString("base64url")); console.log("public="+Buffer.from(k.publicKey).toString("base64url"))'
+```
+
+Store the private value in a secret provider or environment variable. Exchange the public value over an authenticated channel and bind it to the peer's Nostr pubkey:
+
+```json5
+{
+  channels: {
+    nostr: {
+      privateKey: "${NOSTR_PRIVATE_KEY}",
+      pqcMode: "required",
+      pqcPrivateKey: "${NOSTR_MLKEM_PRIVATE_KEY}",
+      pqcPeerPublicKeys: {
+        "peer-npub-or-64-character-hex-key": "base64url-ml-kem-768-public-key",
+      },
+    },
+  },
+}
+```
+
+`preferred` encrypts with ML-KEM-768 when a trusted peer key is present and accepts legacy NIP-04 messages. `required` rejects legacy inbound messages and refuses outbound delivery when the peer has no trusted ML-KEM key. During rotation, put the old private key in `pqcPreviousPrivateKeys`, distribute the new public key, and remove the old key after queued messages have drained.
 
 ## Profile metadata
 
@@ -168,9 +199,9 @@ Tips:
 | NIP    | Status    | Description                           |
 | ------ | --------- | ------------------------------------- |
 | NIP-01 | Supported | Basic event format + profile metadata |
-| NIP-04 | Supported | Encrypted DMs (`kind:4`)              |
+| NIP-04 | Supported | Compatibility encryption for DMs      |
 | NIP-17 | Planned   | Gift-wrapped DMs                      |
-| NIP-44 | Planned   | Versioned encryption                  |
+| NIP-44 | Supported | `pqc2` ML-KEM-768 hybrid DM envelopes |
 
 ## Testing
 
@@ -230,7 +261,7 @@ docker run -p 7777:7777 ghcr.io/hoytech/strfry
 
 - Direct messages only (no group chats).
 - No media attachments.
-- NIP-04 only (NIP-17 gift-wrap planned).
+- NIP-17 gift-wrap is planned.
 
 ## Related
 

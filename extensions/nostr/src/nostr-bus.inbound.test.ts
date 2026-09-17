@@ -2,6 +2,7 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { ml_kem768 } from "@noble/post-quantum/ml-kem.js";
 import {
   closeOpenClawStateDatabaseForTest,
   createChannelIngressQueueForTests,
@@ -9,6 +10,7 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { PluginRuntime } from "../runtime-api.js";
 import { startNostrBus } from "./nostr-bus.js";
+import { encryptNip44V2 } from "./pqc-nip44.js";
 import { setNostrRuntime } from "./runtime.js";
 import { buildResolvedNostrAccount, TEST_HEX_PRIVATE_KEY } from "./test-fixtures.js";
 
@@ -202,6 +204,55 @@ describe("startNostrBus inbound guards", () => {
       });
     }
 
+    await bus.close();
+  });
+
+  it("decrypts an ML-KEM-768 envelope before dispatch", async () => {
+    const keyPair = ml_kem768.keygen();
+    const onMessage = vi.fn(async () => {});
+    const bus = await startTestNostrBus({
+      privateKey: TEST_HEX_PRIVATE_KEY,
+      pqc: {
+        mode: "required",
+        privateKeys: [Buffer.from(keyPair.secretKey).toString("base64url")],
+        peerPublicKeys: {},
+      },
+      onMessage,
+      onMetric: () => {},
+    });
+    const content = encryptNip44V2(keyPair.publicKey, new TextEncoder().encode("pqc plaintext"));
+
+    await emitEvent(createEvent({ content }));
+
+    expect(onMessage).toHaveBeenCalledWith(
+      "a".repeat(64),
+      "pqc plaintext",
+      expect.any(Function),
+      expect.any(Object),
+      expect.any(Object),
+    );
+    expect(mockState.decrypt).not.toHaveBeenCalled();
+    await bus.close();
+  });
+
+  it("rejects legacy NIP-04 ciphertext when PQC mode is required", async () => {
+    const keyPair = ml_kem768.keygen();
+    const onMessage = vi.fn(async () => {});
+    const bus = await startTestNostrBus({
+      privateKey: TEST_HEX_PRIVATE_KEY,
+      pqc: {
+        mode: "required",
+        privateKeys: [Buffer.from(keyPair.secretKey).toString("base64url")],
+        peerPublicKeys: {},
+      },
+      onMessage,
+      onMetric: () => {},
+    });
+
+    await emitEvent(createEvent());
+
+    expect(onMessage).not.toHaveBeenCalled();
+    expect(mockState.decrypt).not.toHaveBeenCalled();
     await bus.close();
   });
 

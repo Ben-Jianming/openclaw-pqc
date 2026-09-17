@@ -155,6 +155,11 @@ export const startNostrGatewayAccount: NostrGatewayStart = async (ctx) => {
       const bus = await startNostrBus({
         accountId: account.accountId,
         privateKey: account.privateKey,
+        pqc: {
+          mode: account.pqcMode,
+          privateKeys: account.pqcPrivateKeys,
+          peerPublicKeys: account.pqcPeerPublicKeys,
+        },
         relays: account.relays,
         authorizeSender: async ({ senderPubkey, reply }) =>
           await authorizeSender({ senderId: senderPubkey, reply }),

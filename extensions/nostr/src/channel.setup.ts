@@ -138,7 +138,7 @@ export const nostrSetupPlugin: ChannelPlugin<ResolvedNostrSetupAccount> = {
     selectionLabel: "Nostr",
     docsPath: "/channels/nostr",
     docsLabel: "nostr",
-    blurb: "Decentralized DMs via Nostr relays (NIP-04)",
+    blurb: "ML-KEM-768 DMs with NIP-04 compatibility via Nostr relays",
     order: 100,
   },
   capabilities: {

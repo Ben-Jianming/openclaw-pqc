@@ -1,6 +1,5 @@
 // Nostr plugin module implements nostr bus behavior.
 import { SimplePool, finalizeEvent, getPublicKey, verifyEvent, type Event } from "nostr-tools";
-import { decrypt, encrypt } from "nostr-tools/nip04";
 import {
   createDirectDmPreCryptoGuardPolicy,
   type DirectDmPreCryptoGuardPolicyOverrides,
@@ -22,6 +21,13 @@ import {
   type NostrIngressLifecycle,
 } from "./nostr-ingress.js";
 import { validatePrivateKey } from "./nostr-key-utils.js";
+import {
+  createNostrPqcRuntime,
+  decryptDirectMessage,
+  encryptDirectMessage,
+  type NostrPqcConfig,
+  type NostrPqcRuntime,
+} from "./nostr-pqc-runtime.js";
 import { publishProfile as publishProfileFn, type ProfilePublishResult } from "./nostr-profile.js";
 import { createFixedWindowRateLimiter } from "./nostr-rate-limiter.js";
 import { createNostrRelaySubscriptionGroup } from "./nostr-relay-subscription.js";
@@ -58,6 +64,8 @@ const HEALTH_WINDOW_MS = 60000; // 1 minute window for health stats
 interface NostrBusOptions {
   /** Private key in hex or nsec format */
   privateKey: string;
+  /** ML-KEM-768 direct-message policy and explicitly trusted peer keys. */
+  pqc?: NostrPqcConfig;
   /** WebSocket relay URLs (defaults to damus + nos.lol) */
   relays?: string[];
   /** Account ID for state persistence (optional, defaults to pubkey prefix) */
@@ -303,6 +311,7 @@ export async function startNostrBus(options: NostrBusOptions): Promise<NostrBusH
 
   const sk = validatePrivateKey(privateKey);
   const pk = getPublicKey(sk);
+  const pqc = createNostrPqcRuntime(options.pqc);
   const pool = new SimplePool();
   pool.onRelayConnectionSuccess = options.onConnect;
   const accountId = options.accountId ?? pk.slice(0, 16);
@@ -430,6 +439,7 @@ export async function startNostrBus(options: NostrBusOptions): Promise<NostrBusH
       await sendEncryptedDm(
         pool,
         sk,
+        pqc,
         event.pubkey,
         text,
         relays,
@@ -476,7 +486,7 @@ export async function startNostrBus(options: NostrBusOptions): Promise<NostrBusH
 
     let plaintext: string;
     try {
-      plaintext = decrypt(sk, event.pubkey, event.content);
+      plaintext = decryptDirectMessage(pqc, sk, event.pubkey, event.content);
       metrics.emit("decrypt.success");
     } catch (error) {
       metrics.emit("decrypt.failure");
@@ -663,6 +673,7 @@ export async function startNostrBus(options: NostrBusOptions): Promise<NostrBusH
     return await sendEncryptedDm(
       pool,
       sk,
+      pqc,
       toPubkey,
       text,
       relays,
@@ -743,6 +754,7 @@ export async function startNostrBus(options: NostrBusOptions): Promise<NostrBusH
 async function sendEncryptedDm(
   pool: SimplePool,
   sk: Uint8Array,
+  pqc: NostrPqcRuntime,
   toPubkey: string,
   text: string,
   relays: string[],
@@ -752,16 +764,19 @@ async function sendEncryptedDm(
   onError?: (error: Error, context: string) => void,
   replyToEventId?: string,
 ): Promise<string> {
-  const ciphertext = encrypt(sk, toPubkey, text);
+  const encrypted = encryptDirectMessage(pqc, sk, toPubkey, text);
   // NIP-04 uses an e tag to keep a reply attached to its verified inbound event.
   const tags = [["p", toPubkey]];
+  if (encrypted.pqc) {
+    tags.push(["openclaw-pqc", "ml-kem-768+nip44-v2"]);
+  }
   if (replyToEventId) {
     tags.push(["e", replyToEventId]);
   }
   const reply = finalizeEvent(
     {
       kind: 4,
-      content: ciphertext,
+      content: encrypted.ciphertext,
       tags,
       created_at: Math.floor(Date.now() / 1000),
     },

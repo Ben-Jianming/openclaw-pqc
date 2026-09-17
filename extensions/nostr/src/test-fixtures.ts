@@ -38,6 +38,9 @@ export function buildResolvedNostrAccount(
     privateKey: TEST_HEX_PRIVATE_KEY,
     publicKey: TEST_HEX_PUBLIC_KEY,
     relays: [TEST_RELAY_URL],
+    pqcMode: "disabled",
+    pqcPrivateKeys: [],
+    pqcPeerPublicKeys: {},
     config: {},
     ...overrides,
   };

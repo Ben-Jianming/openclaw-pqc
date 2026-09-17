@@ -66,6 +66,9 @@ export interface NostrProfile {
   lud16?: string;
 }
 
+export const NostrPqcModeSchema = z.enum(["disabled", "preferred", "required"]);
+export type NostrPqcMode = z.infer<typeof NostrPqcModeSchema>;
+
 /**
  * Zod schema for channels.nostr.* configuration
  */
@@ -84,6 +87,18 @@ export const NostrConfigSchema = z.object({
 
   /** Private key in hex or nsec bech32 format */
   privateKey: buildSecretInputSchema().optional(),
+
+  /** ML-KEM-768 policy for direct messages. */
+  pqcMode: NostrPqcModeSchema.optional(),
+
+  /** Base64url ML-KEM-768 secret key used to decrypt PQC direct messages. */
+  pqcPrivateKey: buildSecretInputSchema().optional(),
+
+  /** Previous ML-KEM-768 keys retained temporarily while rotating. */
+  pqcPreviousPrivateKeys: z.array(buildSecretInputSchema()).max(2).optional(),
+
+  /** Trusted Nostr pubkey/npub to base64url ML-KEM-768 public-key mapping. */
+  pqcPeerPublicKeys: z.record(z.string(), z.string()).optional(),
 
   /** WebSocket relay URLs to connect to */
   relays: z.array(z.string()).optional(),

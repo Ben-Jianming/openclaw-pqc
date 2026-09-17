@@ -2,6 +2,7 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { ml_kem768 } from "@noble/post-quantum/ml-kem.js";
 import {
   closeOpenClawStateDatabaseForTest,
   createChannelIngressQueueForTests,
@@ -26,8 +27,8 @@ vi.mock("nostr-tools", () => {
       return { close: vi.fn() };
     }
 
-    publish(relays: string[]) {
-      return mocks.poolPublish(relays);
+    publish(relays: string[], event: unknown) {
+      return mocks.poolPublish(relays, event);
     }
 
     close(relays: string[]) {
@@ -127,6 +128,52 @@ describe("Nostr outbound relay failover", () => {
     );
     expect(onError).toHaveBeenCalledWith(expect.any(Error), `publish to ${BAD_RELAY}`);
 
+    await bus.close();
+  });
+
+  it("publishes an ML-KEM-768 envelope for a configured peer", async () => {
+    const recipient = ml_kem768.keygen();
+    const bus = await startNostrBus({
+      privateKey: "1".repeat(64),
+      pqc: {
+        mode: "required",
+        privateKeys: [Buffer.from(recipient.secretKey).toString("base64url")],
+        peerPublicKeys: {
+          [RECIPIENT_PUBKEY]: Buffer.from(recipient.publicKey).toString("base64url"),
+        },
+      },
+      relays: [GOOD_RELAY],
+      onMessage: vi.fn(async () => {}),
+    });
+
+    await bus.sendDm(RECIPIENT_PUBKEY, "hello");
+
+    const event = mocks.poolPublish.mock.calls[0]?.[1] as {
+      content: string;
+      tags: string[][];
+    };
+    expect(event.content).toMatch(/^pqc2:/);
+    expect(event.tags).toContainEqual(["openclaw-pqc", "ml-kem-768+nip44-v2"]);
+    await bus.close();
+  });
+
+  it("fails closed when required mode has no trusted peer key", async () => {
+    const recipient = ml_kem768.keygen();
+    const bus = await startNostrBus({
+      privateKey: "1".repeat(64),
+      pqc: {
+        mode: "required",
+        privateKeys: [Buffer.from(recipient.secretKey).toString("base64url")],
+        peerPublicKeys: {},
+      },
+      relays: [GOOD_RELAY],
+      onMessage: vi.fn(async () => {}),
+    });
+
+    await expect(bus.sendDm(RECIPIENT_PUBKEY, "hello")).rejects.toThrow(
+      "no trusted ML-KEM-768 public key",
+    );
+    expect(mocks.poolPublish).not.toHaveBeenCalled();
     await bus.close();
   });
 });
