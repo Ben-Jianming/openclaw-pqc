@@ -105,7 +105,10 @@ class DeviceIdentityStoreTest {
   }
 
   private fun findRepositoryFixture(path: String): File {
-    var current = File(System.getProperty("user.dir")).canonicalFile
+    val workingDirectory = requireNotNull(System.getProperty("user.dir")) {
+      "user.dir system property is unavailable"
+    }
+    var current = File(workingDirectory).canonicalFile
     repeat(8) {
       val candidate = File(current, path)
       if (candidate.isFile) return candidate
