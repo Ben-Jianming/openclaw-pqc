@@ -119,7 +119,7 @@ public enum GatewayDeviceAuthPayload {
         }
         return [
             "id": OpenClawProtocol.AnyCodable(identity.deviceId),
-            "algorithm": OpenClawProtocol.AnyCodable("ed25519"),
+            "algorithm": OpenClawProtocol.AnyCodable(identity.algorithm),
             "publicKey": OpenClawProtocol.AnyCodable(publicKey),
             "signature": OpenClawProtocol.AnyCodable(signature),
             "signedAt": OpenClawProtocol.AnyCodable(signedAtMs),

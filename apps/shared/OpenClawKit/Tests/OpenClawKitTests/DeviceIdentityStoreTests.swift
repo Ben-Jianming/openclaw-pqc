@@ -108,6 +108,35 @@ struct DeviceIdentityStoreTests {
         #expect(reloaded.deviceId == identity.deviceId)
         #expect(reloaded.publicKey == identity.publicKey)
         #expect(reloaded.privateKey == identity.privateKey)
+        if #available(iOS 26.0, macOS 26.0, watchOS 26.0, tvOS 26.0, visionOS 26.0, *) {
+            #expect(reloaded.algorithm == DeviceIdentity.mlDsa65Algorithm)
+            #expect(Data(base64Encoded: reloaded.publicKey)?.count == 1952)
+            let signature = try #require(DeviceIdentityStore.signPayload("gateway-proof", identity: reloaded))
+            #expect(Self.base64UrlDecode(signature)?.count == 3309)
+        } else {
+            #expect(reloaded.algorithm == DeviceIdentity.ed25519Algorithm)
+        }
+    }
+
+    @Test
+    func `shared FIPS 204 vector verifies with CryptoKit`() throws {
+        guard #available(iOS 26.0, macOS 26.0, watchOS 26.0, tvOS 26.0, visionOS 26.0, *) else {
+            return
+        }
+        let fixture = try Self.repositoryFixture("test/fixtures/pqc/ml-dsa-65-fips204.json")
+        let object = try #require(
+            JSONSerialization.jsonObject(with: Data(contentsOf: fixture)) as? [String: String])
+        let seed = try #require(Self.base64UrlDecode(try #require(object["seedBase64Url"])))
+        let expectedPublicKey = try #require(
+            Self.base64UrlDecode(try #require(object["publicKeyBase64Url"])))
+        let signature = try #require(
+            Self.base64UrlDecode(try #require(object["deterministicSignatureBase64Url"])))
+        let privateKey = try MLDSA65.PrivateKey(seedRepresentation: seed, publicKey: nil)
+
+        #expect(privateKey.publicKey.rawRepresentation == expectedPublicKey)
+        #expect(privateKey.publicKey.isValidSignature(
+            signature: signature,
+            for: Data(try #require(object["messageUtf8"]).utf8)))
     }
 
     @Test(.stateDirectoryIsolated)
@@ -1055,6 +1084,18 @@ struct DeviceIdentityStoreTests {
 }
 
 extension DeviceIdentityStoreTests {
+    fileprivate static func repositoryFixture(_ path: String) throws -> URL {
+        var directory = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
+        for _ in 0..<8 {
+            let candidate = directory.appendingPathComponent(path, isDirectory: false)
+            if FileManager.default.fileExists(atPath: candidate.path) {
+                return candidate
+            }
+            directory.deleteLastPathComponent()
+        }
+        throw DeviceIdentityStore.storageError("Could not locate repository fixture: \(path)")
+    }
+
     fileprivate static func base64UrlDecode(_ value: String) -> Data? {
         let normalized = value
             .replacingOccurrences(of: "-", with: "+")

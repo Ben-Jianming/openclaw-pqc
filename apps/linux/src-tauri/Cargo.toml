@@ -18,6 +18,7 @@ ed25519-dalek = "3.0.0"
 futures-util = "0.3.32"
 getrandom = "0.4.3"
 image = { version = "0.25.10", default-features = false, features = ["jpeg", "png"] }
+ml-dsa = { version = "0.1.1", features = ["getrandom"] }
 mdns-sd = { version = "0.20", default-features = false }
 rustls = { version = "0.23.42", default-features = false, features = ["ring", "std", "tls12"] }
 serde = { version = "1.0.228", features = ["derive"] }

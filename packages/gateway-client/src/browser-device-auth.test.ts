@@ -14,7 +14,12 @@ describe("GatewayBrowserDeviceAuthLifecycle", () => {
     const sign = vi.fn(async () => "signature");
     const store = vi.fn();
     const lifecycle = new GatewayBrowserDeviceAuthLifecycle({
-      loadIdentity: async () => ({ deviceId: "device", publicKey: "public", sign }),
+      loadIdentity: async () => ({
+        deviceId: "device",
+        algorithm: "ml-dsa-65",
+        publicKey: "public",
+        sign,
+      }),
       tokenStore: {
         load: () => ({ token: "test-token-placeholder", scopes: ["operator.read"] }),
         store,
@@ -39,6 +44,7 @@ describe("GatewayBrowserDeviceAuthLifecycle", () => {
       agentRuntimeIdentityToken: undefined,
     });
     expect(plan.scopes).toEqual(["operator.read"]);
+    expect(plan.device?.algorithm).toBe("ml-dsa-65");
     expect(sign).toHaveBeenCalledWith(
       "v3|device|openclaw-browser-copilot|ui|operator|operator.read|123|test-token-placeholder|nonce|chrome|extension",
     );
@@ -81,5 +87,25 @@ describe("GatewayBrowserDeviceAuthLifecycle", () => {
     expect(plan.auth?.password).toBe("test-password");
     await lifecycle.acceptHello({ auth: { role: "operator", scopes: [] } }, plan);
     expect(store).not.toHaveBeenCalled();
+  });
+
+  it("keeps Ed25519 as the compatibility algorithm for legacy identity providers", async () => {
+    const lifecycle = new GatewayBrowserDeviceAuthLifecycle({
+      loadIdentity: async () => ({
+        deviceId: "legacy-device",
+        publicKey: "legacy-public",
+        sign: async () => "legacy-signature",
+      }),
+      tokenStore: { load: () => null, store: vi.fn(), clear: vi.fn() },
+    });
+
+    const plan = await lifecycle.buildPlan({
+      client,
+      role: "operator",
+      defaultScopes: ["operator.read"],
+      nonce: "nonce",
+    });
+
+    expect(plan.device?.algorithm).toBe("ed25519");
   });
 });

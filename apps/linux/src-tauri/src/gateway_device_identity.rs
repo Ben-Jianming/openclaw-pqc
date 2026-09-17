@@ -1,6 +1,7 @@
 use base64::engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD};
 use base64::Engine as _;
 use ed25519_dalek::{Signer, SigningKey};
+use ml_dsa::{Generate, KeyExport, Keypair, MlDsa65, SignatureEncoding};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -27,6 +28,8 @@ pub(crate) const CLIENT_SCOPES: [&str; 5] = [
 ];
 
 const IDENTITY_VERSION: u8 = 1;
+const ALGORITHM_ED25519: &str = "ed25519";
+const ALGORITHM_ML_DSA_65: &str = "ml-dsa-65";
 // A valid identity is well under 1 KiB; 64 KiB leaves ample JSON headroom while
 // preventing a damaged or replaced credential file from causing an unbounded read.
 const MAX_IDENTITY_BYTES: u64 = 64 * 1024;
@@ -35,6 +38,8 @@ const MAX_IDENTITY_BYTES: u64 = 64 * 1024;
 #[serde(rename_all = "camelCase")]
 struct StoredGatewayIdentity {
     version: u8,
+    #[serde(default = "default_identity_algorithm")]
+    algorithm: String,
     device_id: String,
     public_key: String,
     private_key: String,
@@ -50,6 +55,7 @@ struct StoredGatewayIdentityVersion {
     version: u8,
 }
 
+#[derive(Debug)]
 enum DecodeIdentityError {
     VersionMismatch { found: u8 },
     Malformed(String),
@@ -203,12 +209,6 @@ impl GatewayDeviceIdentity {
         nonce: &str,
         signed_at_ms: u64,
     ) -> Result<Value, String> {
-        let signing_key_bytes = Zeroizing::new(decode_key(&self.stored.private_key, "private")?);
-        let signing_key = SigningKey::from_bytes(&signing_key_bytes);
-        let public_key = signing_key.verifying_key().to_bytes();
-        if STANDARD.encode(public_key) != self.stored.public_key {
-            return Err("Gateway device identity keypair is invalid.".to_string());
-        }
         let payload = build_device_auth_payload(DeviceAuthPayloadFields {
             device_id: &self.stored.device_id,
             client_id: CLIENT_ID,
@@ -221,11 +221,11 @@ impl GatewayDeviceIdentity {
             platform: CLIENT_PLATFORM,
             device_family: CLIENT_DEVICE_FAMILY,
         });
-        let signature = signing_key.sign(payload.as_bytes()).to_bytes();
+        let (public_key, signature) = sign_payload(&self.stored, payload.as_bytes())?;
         Ok(json!({
             "id": self.stored.device_id,
-            "algorithm": "ed25519",
-            "publicKey": URL_SAFE_NO_PAD.encode(public_key),
+            "algorithm": self.stored.algorithm,
+            "publicKey": URL_SAFE_NO_PAD.encode(&public_key),
             "signature": URL_SAFE_NO_PAD.encode(signature),
             "signedAt": signed_at_ms,
             "nonce": nonce,
@@ -303,18 +303,16 @@ fn select_auth(
 }
 
 fn generate_identity() -> Result<GatewayDeviceIdentity, String> {
-    let mut secret = [0_u8; 32];
-    getrandom::fill(&mut secret)
-        .map_err(|error| format!("Could not generate Gateway device identity: {error}"))?;
-    let signing_key = SigningKey::from_bytes(&secret);
-    secret.zeroize();
+    let signing_key = ml_dsa::SigningKey::<MlDsa65>::generate();
     let public_key = signing_key.verifying_key().to_bytes();
+    let private_key = signing_key.to_seed();
     Ok(GatewayDeviceIdentity {
         stored: StoredGatewayIdentity {
             version: IDENTITY_VERSION,
-            device_id: device_id(&public_key),
-            public_key: STANDARD.encode(public_key),
-            private_key: STANDARD.encode(signing_key.to_bytes()),
+            algorithm: ALGORITHM_ML_DSA_65.to_string(),
+            device_id: device_id(public_key.as_slice()),
+            public_key: STANDARD.encode(public_key.as_slice()),
+            private_key: STANDARD.encode(private_key.as_slice()),
             created_at_ms: unix_time_ms()?,
             device_token: None,
             device_token_gateway: None,
@@ -334,17 +332,9 @@ fn decode_identity(bytes: &[u8]) -> Result<GatewayDeviceIdentity, DecodeIdentity
     let stored = serde_json::from_slice::<StoredGatewayIdentity>(bytes).map_err(|error| {
         DecodeIdentityError::Malformed(format!("Gateway device identity is invalid: {error}"))
     })?;
-    let signing_key_bytes = Zeroizing::new(
-        decode_key(&stored.private_key, "private").map_err(DecodeIdentityError::Malformed)?,
-    );
+    validate_keypair(&stored).map_err(DecodeIdentityError::Malformed)?;
     let public_key =
-        decode_key(&stored.public_key, "public").map_err(DecodeIdentityError::Malformed)?;
-    let signing_key = SigningKey::from_bytes(&signing_key_bytes);
-    if signing_key.verifying_key().to_bytes() != public_key {
-        return Err(DecodeIdentityError::Malformed(
-            "Gateway device identity keypair is invalid.".to_string(),
-        ));
-    }
+        decode_key_vec(&stored.public_key, "public").map_err(DecodeIdentityError::Malformed)?;
     if stored.device_id != device_id(&public_key) {
         return Err(DecodeIdentityError::Malformed(
             "Gateway device identity fingerprint is invalid.".to_string(),
@@ -366,7 +356,78 @@ fn decode_key(encoded: &str, kind: &str) -> Result<[u8; 32], String> {
         .map_err(|_| format!("Gateway device {kind} key has the wrong length."))
 }
 
-fn device_id(public_key: &[u8; 32]) -> String {
+fn decode_key_vec(encoded: &str, kind: &str) -> Result<Vec<u8>, String> {
+    STANDARD
+        .decode(encoded)
+        .map_err(|_| format!("Gateway device {kind} key is invalid."))
+}
+
+fn default_identity_algorithm() -> String {
+    ALGORITHM_ED25519.to_string()
+}
+
+fn validate_keypair(stored: &StoredGatewayIdentity) -> Result<(), String> {
+    let expected_public = decode_key_vec(&stored.public_key, "public")?;
+    let actual_public = match stored.algorithm.as_str() {
+        ALGORITHM_ED25519 => {
+            let secret = Zeroizing::new(decode_key(&stored.private_key, "private")?);
+            SigningKey::from_bytes(&secret)
+                .verifying_key()
+                .to_bytes()
+                .to_vec()
+        }
+        ALGORITHM_ML_DSA_65 => {
+            let seed = Zeroizing::new(decode_key(&stored.private_key, "private")?);
+            let seed = ml_dsa::Seed::try_from(seed.as_slice())
+                .map_err(|_| "Gateway device private key has the wrong length.".to_string())?;
+            let signing_key = ml_dsa::SigningKey::<MlDsa65>::from_seed(&seed);
+            signing_key.verifying_key().to_bytes().as_slice().to_vec()
+        }
+        algorithm => return Err(format!("Unsupported Gateway device algorithm: {algorithm}")),
+    };
+    if actual_public != expected_public {
+        return Err("Gateway device identity keypair is invalid.".to_string());
+    }
+    Ok(())
+}
+
+fn sign_payload(
+    stored: &StoredGatewayIdentity,
+    payload: &[u8],
+) -> Result<(Vec<u8>, Vec<u8>), String> {
+    match stored.algorithm.as_str() {
+        ALGORITHM_ED25519 => {
+            let secret = Zeroizing::new(decode_key(&stored.private_key, "private")?);
+            let signing_key = SigningKey::from_bytes(&secret);
+            let public_key = signing_key.verifying_key().to_bytes();
+            if STANDARD.encode(public_key) != stored.public_key {
+                return Err("Gateway device identity keypair is invalid.".to_string());
+            }
+            Ok((
+                public_key.to_vec(),
+                signing_key.sign(payload).to_bytes().to_vec(),
+            ))
+        }
+        ALGORITHM_ML_DSA_65 => {
+            let seed = Zeroizing::new(decode_key(&stored.private_key, "private")?);
+            let seed = ml_dsa::Seed::try_from(seed.as_slice())
+                .map_err(|_| "Gateway device private key has the wrong length.".to_string())?;
+            let signing_key = ml_dsa::SigningKey::<MlDsa65>::from_seed(&seed);
+            let public_key = signing_key.verifying_key().to_bytes();
+            if STANDARD.encode(public_key.as_slice()) != stored.public_key {
+                return Err("Gateway device identity keypair is invalid.".to_string());
+            }
+            let signature = ml_dsa::Signer::sign(&signing_key, payload);
+            Ok((
+                public_key.as_slice().to_vec(),
+                signature.to_bytes().as_slice().to_vec(),
+            ))
+        }
+        algorithm => Err(format!("Unsupported Gateway device algorithm: {algorithm}")),
+    }
+}
+
+fn device_id(public_key: &[u8]) -> String {
     Sha256::digest(public_key)
         .iter()
         .map(|byte| format!("{byte:02x}"))
@@ -489,6 +550,7 @@ fn enforce_private_permissions(path: &Path) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ml_dsa::{KeyInit, Signature, Verifier, VerifyingKey};
     #[cfg(unix)]
     use std::os::unix::fs::{symlink, MetadataExt};
 
@@ -616,6 +678,26 @@ mod tests {
         let reloaded = GatewayDeviceIdentityStore::load_or_create(path.clone())
             .expect("reload device identity");
 
+        assert_eq!(reloaded.identity.stored.algorithm, ALGORITHM_ML_DSA_65);
+        assert_eq!(
+            decode_key_vec(&reloaded.identity.stored.public_key, "public")
+                .expect("decode ML-DSA public key")
+                .len(),
+            1952
+        );
+        let signed = reloaded
+            .identity()
+            .signed_device(&GatewayAuth::None, "test-nonce", 1_800_000_000_000)
+            .expect("sign ML-DSA device proof");
+        assert_eq!(signed["algorithm"], ALGORITHM_ML_DSA_65);
+        assert_eq!(
+            URL_SAFE_NO_PAD
+                .decode(signed["signature"].as_str().expect("signature string"))
+                .expect("decode ML-DSA signature")
+                .len(),
+            3309
+        );
+
         assert_eq!(
             original.identity.stored.device_id,
             reloaded.identity.stored.device_id
@@ -639,6 +721,71 @@ mod tests {
         );
 
         fs::remove_dir_all(directory).expect("remove identity fixture");
+    }
+
+    #[test]
+    fn legacy_ed25519_identity_without_algorithm_stays_usable() {
+        let mut seed = [7_u8; 32];
+        let signing_key = SigningKey::from_bytes(&seed);
+        seed.zeroize();
+        let public_key = signing_key.verifying_key().to_bytes();
+        let legacy = json!({
+            "version": IDENTITY_VERSION,
+            "deviceId": device_id(&public_key),
+            "publicKey": STANDARD.encode(public_key),
+            "privateKey": STANDARD.encode(signing_key.to_bytes()),
+            "createdAtMs": 1_800_000_000_000_u64
+        });
+        let identity =
+            decode_identity(&serde_json::to_vec(&legacy).expect("encode legacy identity"))
+                .expect("decode legacy Ed25519 identity");
+        assert_eq!(identity.stored.algorithm, ALGORITHM_ED25519);
+        let signed = identity
+            .signed_device(&GatewayAuth::None, "legacy-nonce", 1_800_000_000_000)
+            .expect("sign legacy device proof");
+        assert_eq!(signed["algorithm"], ALGORITHM_ED25519);
+    }
+
+    #[test]
+    fn shared_fips204_vector_verifies_with_rustcrypto() {
+        let fixture = find_repository_fixture("test/fixtures/pqc/ml-dsa-65-fips204.json");
+        let vector: Value =
+            serde_json::from_slice(&fs::read(fixture).expect("read ML-DSA fixture"))
+                .expect("decode ML-DSA fixture");
+        let public_key = URL_SAFE_NO_PAD
+            .decode(vector["publicKeyBase64Url"].as_str().expect("public key"))
+            .expect("decode public key");
+        let signature = URL_SAFE_NO_PAD
+            .decode(
+                vector["deterministicSignatureBase64Url"]
+                    .as_str()
+                    .expect("signature"),
+            )
+            .expect("decode signature");
+        let verifying_key = VerifyingKey::<MlDsa65>::new_from_slice(&public_key)
+            .expect("construct ML-DSA verifying key");
+        let signature = Signature::<MlDsa65>::try_from(signature.as_slice())
+            .expect("construct ML-DSA signature");
+        verifying_key
+            .verify(
+                vector["messageUtf8"].as_str().expect("message").as_bytes(),
+                &signature,
+            )
+            .expect("verify shared ML-DSA signature");
+    }
+
+    fn find_repository_fixture(path: &str) -> PathBuf {
+        let mut current = std::env::current_dir().expect("current directory");
+        for _ in 0..8 {
+            let candidate = current.join(path);
+            if candidate.is_file() {
+                return candidate;
+            }
+            if !current.pop() {
+                break;
+            }
+        }
+        panic!("Could not locate repository fixture: {path}");
     }
 
     #[test]

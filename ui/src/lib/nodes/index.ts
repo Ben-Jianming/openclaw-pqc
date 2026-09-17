@@ -1,5 +1,6 @@
 // Shared Nodes operations used by the Control UI page and Gateway event hooks.
-import { getPublicKeyAsync, signAsync, utils } from "@noble/ed25519";
+import { signAsync } from "@noble/ed25519";
+import { ml_dsa65 } from "@noble/post-quantum/ml-dsa.js";
 import {
   type DeviceAuthEntry,
   type DeviceAuthStore,
@@ -161,8 +162,11 @@ type ExecApprovalsState = NodesRequestState & {
 
 export type NodesPageDataState = NodesState & DevicesState & ExecApprovalsState;
 
+type DeviceIdentityAlgorithm = "ed25519" | "ml-dsa-65";
+
 type StoredIdentity = {
-  version: 1;
+  version: 1 | 2;
+  algorithm?: DeviceIdentityAlgorithm;
   deviceId: string;
   publicKey: string;
   privateKey: string;
@@ -170,6 +174,7 @@ type StoredIdentity = {
 };
 
 type DeviceIdentity = {
+  algorithm: DeviceIdentityAlgorithm;
   deviceId: string;
   publicKey: string;
   privateKey: string;
@@ -830,10 +835,10 @@ async function fingerprintPublicKey(publicKey: Uint8Array): Promise<string> {
 }
 
 async function generateIdentity(): Promise<DeviceIdentity> {
-  const privateKey = utils.randomSecretKey();
-  const publicKey = await getPublicKeyAsync(privateKey);
+  const { secretKey: privateKey, publicKey } = ml_dsa65.keygen();
   const deviceId = await fingerprintPublicKey(publicKey);
   return {
+    algorithm: "ml-dsa-65",
     deviceId,
     publicKey: base64UrlEncode(publicKey),
     privateKey: base64UrlEncode(privateKey),
@@ -852,7 +857,9 @@ export function peekStoredDeviceIdentityId(): string | null {
       return null;
     }
     const parsed = JSON.parse(raw) as StoredIdentity;
-    return parsed?.version === 1 && typeof parsed.deviceId === "string" && parsed.deviceId
+    return (parsed?.version === 1 || parsed?.version === 2) &&
+      typeof parsed.deviceId === "string" &&
+      parsed.deviceId
       ? parsed.deviceId
       : null;
   } catch {
@@ -867,7 +874,7 @@ export async function loadOrCreateDeviceIdentity(): Promise<DeviceIdentity> {
     if (raw) {
       const parsed = JSON.parse(raw) as StoredIdentity;
       if (
-        parsed?.version === 1 &&
+        (parsed?.version === 1 || parsed?.version === 2) &&
         typeof parsed.deviceId === "string" &&
         typeof parsed.publicKey === "string" &&
         typeof parsed.privateKey === "string"
@@ -880,12 +887,14 @@ export async function loadOrCreateDeviceIdentity(): Promise<DeviceIdentity> {
           };
           storage?.setItem(DEVICE_IDENTITY_STORAGE_KEY, JSON.stringify(updated));
           return {
+            algorithm: parsed.algorithm ?? "ed25519",
             deviceId: derivedId,
             publicKey: parsed.publicKey,
             privateKey: parsed.privateKey,
           };
         }
         return {
+          algorithm: parsed.algorithm ?? "ed25519",
           deviceId: parsed.deviceId,
           publicKey: parsed.publicKey,
           privateKey: parsed.privateKey,
@@ -898,7 +907,8 @@ export async function loadOrCreateDeviceIdentity(): Promise<DeviceIdentity> {
 
   const identity = await generateIdentity();
   const stored: StoredIdentity = {
-    version: 1,
+    version: 2,
+    algorithm: identity.algorithm,
     deviceId: identity.deviceId,
     publicKey: identity.publicKey,
     privateKey: identity.privateKey,
@@ -908,10 +918,14 @@ export async function loadOrCreateDeviceIdentity(): Promise<DeviceIdentity> {
   return identity;
 }
 
-export async function signDevicePayload(privateKeyBase64Url: string, payload: string) {
+export async function signDevicePayload(
+  privateKeyBase64Url: string,
+  payload: string,
+  algorithm: DeviceIdentityAlgorithm = "ed25519",
+) {
   const key = base64UrlDecode(privateKeyBase64Url);
   const data = new TextEncoder().encode(payload);
-  const sig = await signAsync(data, key);
+  const sig = algorithm === "ml-dsa-65" ? ml_dsa65.sign(data, key) : await signAsync(data, key);
   return base64UrlEncode(sig);
 }
 /* oxlint-disable max-lines -- TODO: split this grandfathered oversized file. */

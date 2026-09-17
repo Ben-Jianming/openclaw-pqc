@@ -8,13 +8,14 @@ import kotlinx.serialization.json.Json
 import java.io.File
 import java.security.MessageDigest
 
-/** Persistent Ed25519 identity used to register this Android node with gateways. */
+/** Persistent device identity used to register this Android node with gateways. */
 @Serializable
 data class DeviceIdentity(
   val deviceId: String,
   val publicKeyRawBase64: String,
   val privateKeyPkcs8Base64: String,
   val createdAtMs: Long,
+  val algorithm: String = DeviceIdentityStore.ALGORITHM_ED25519,
 )
 
 /** Owns device identity generation, persistence, and auth payload signatures. */
@@ -52,7 +53,7 @@ class DeviceIdentityStore private constructor(
     return fresh
   }
 
-  /** Signs gateway connect payload text with the persisted Ed25519 private key. */
+  /** Signs gateway connect payload text with the persisted device private key. */
   fun signPayload(
     payload: String,
     identity: DeviceIdentity,
@@ -60,20 +61,13 @@ class DeviceIdentityStore private constructor(
     try {
       // Use BC lightweight API directly; R8 can break JCA provider registration.
       val privateKeyBytes = Base64.decode(identity.privateKeyPkcs8Base64, Base64.DEFAULT)
-      val pkInfo =
-        org.bouncycastle.asn1.pkcs.PrivateKeyInfo
-          .getInstance(privateKeyBytes)
-      val parsed = pkInfo.parsePrivateKey()
-      val rawPrivate =
-        org.bouncycastle.asn1.DEROctetString
-          .getInstance(parsed)
-          .octets
-      val privateKey =
-        org.bouncycastle.crypto.params
-          .Ed25519PrivateKeyParameters(rawPrivate, 0)
+      val privateKey = org.bouncycastle.crypto.util.PrivateKeyFactory.createKey(privateKeyBytes)
       val signer =
-        org.bouncycastle.crypto.signers
-          .Ed25519Signer()
+        when (identity.algorithm) {
+          ALGORITHM_ML_DSA_65 -> org.bouncycastle.crypto.signers.MLDSASigner()
+          ALGORITHM_ED25519 -> org.bouncycastle.crypto.signers.Ed25519Signer()
+          else -> error("Unsupported device identity algorithm: ${identity.algorithm}")
+        }
       signer.init(true, privateKey)
       val payloadBytes = payload.toByteArray(Charsets.UTF_8)
       signer.update(payloadBytes, 0, payloadBytes.size)
@@ -92,12 +86,23 @@ class DeviceIdentityStore private constructor(
     try {
       val rawPublicKey = Base64.decode(identity.publicKeyRawBase64, Base64.DEFAULT)
       val pubKey =
-        org.bouncycastle.crypto.params
-          .Ed25519PublicKeyParameters(rawPublicKey, 0)
+        when (identity.algorithm) {
+          ALGORITHM_ML_DSA_65 ->
+            org.bouncycastle.crypto.params.MLDSAPublicKeyParameters(
+              org.bouncycastle.crypto.params.MLDSAParameters.ml_dsa_65,
+              rawPublicKey,
+            )
+          ALGORITHM_ED25519 ->
+            org.bouncycastle.crypto.params.Ed25519PublicKeyParameters(rawPublicKey, 0)
+          else -> error("Unsupported device identity algorithm: ${identity.algorithm}")
+        }
       val sigBytes = base64UrlDecode(signatureBase64Url)
       val verifier =
-        org.bouncycastle.crypto.signers
-          .Ed25519Signer()
+        when (identity.algorithm) {
+          ALGORITHM_ML_DSA_65 -> org.bouncycastle.crypto.signers.MLDSASigner()
+          ALGORITHM_ED25519 -> org.bouncycastle.crypto.signers.Ed25519Signer()
+          else -> error("Unsupported device identity algorithm: ${identity.algorithm}")
+        }
       verifier.init(false, pubKey)
       val payloadBytes = payload.toByteArray(Charsets.UTF_8)
       verifier.update(payloadBytes, 0, payloadBytes.size)
@@ -172,18 +177,21 @@ class DeviceIdentityStore private constructor(
   }
 
   private fun generate(): DeviceIdentity {
-    // Use BC lightweight API directly to avoid JCA provider issues with R8.
+    // Use BC's FIPS 204 lightweight API directly; provider registration is unreliable after R8.
     val kpGen =
       org.bouncycastle.crypto.generators
-        .Ed25519KeyPairGenerator()
+        .MLDSAKeyPairGenerator()
     kpGen.init(
       org.bouncycastle.crypto.params
-        .Ed25519KeyGenerationParameters(java.security.SecureRandom()),
+        .MLDSAKeyGenerationParameters(
+          java.security.SecureRandom(),
+          org.bouncycastle.crypto.params.MLDSAParameters.ml_dsa_65,
+        ),
     )
     val kp = kpGen.generateKeyPair()
-    val pubKey = kp.public as org.bouncycastle.crypto.params.Ed25519PublicKeyParameters
-    val privKey = kp.private as org.bouncycastle.crypto.params.Ed25519PrivateKeyParameters
-    val rawPublic = pubKey.encoded // 32 bytes
+    val pubKey = kp.public as org.bouncycastle.crypto.params.MLDSAPublicKeyParameters
+    val privKey = kp.private as org.bouncycastle.crypto.params.MLDSAPrivateKeyParameters
+    val rawPublic = pubKey.encoded
     val deviceId = sha256Hex(rawPublic)
     // Store private key as PKCS8 so signPayload can parse the same persisted
     // shape after app restarts and upgrades.
@@ -196,6 +204,7 @@ class DeviceIdentityStore private constructor(
       publicKeyRawBase64 = Base64.encodeToString(rawPublic, Base64.NO_WRAP),
       privateKeyPkcs8Base64 = Base64.encodeToString(pkcs8Bytes, Base64.NO_WRAP),
       createdAtMs = System.currentTimeMillis(),
+      algorithm = ALGORITHM_ML_DSA_65,
     )
   }
 
@@ -227,6 +236,8 @@ class DeviceIdentityStore private constructor(
     )
 
   companion object {
+    const val ALGORITHM_ED25519 = "ed25519"
+    const val ALGORITHM_ML_DSA_65 = "ml-dsa-65"
     private const val identityKey = "device.identity"
     private val HEX = "0123456789abcdef".toCharArray()
 

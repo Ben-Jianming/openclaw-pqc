@@ -23,7 +23,12 @@ const ROSITA_CRED = "rosita-device-token";
 const WILFRED_CRED = "wilfred-device-token";
 const TENANT_A_CRED = "tenant-a-device-token";
 const TENANT_B_CRED = "tenant-b-device-token";
-type DeviceIdentity = { deviceId: string; privateKey: string; publicKey: string };
+type DeviceIdentity = {
+  algorithm: "ed25519" | "ml-dsa-65";
+  deviceId: string;
+  privateKey: string;
+  publicKey: string;
+};
 const CONTROL_UI_OPERATOR_SCOPES = [
   "operator.admin",
   "operator.read",
@@ -42,6 +47,7 @@ const CONTROL_UI_BOOTSTRAP_OPERATOR_SCOPES = [
 const loadOrCreateDeviceIdentityMock = vi.hoisted(() =>
   vi.fn(
     async (): Promise<DeviceIdentity> => ({
+      algorithm: "ml-dsa-65",
       deviceId: "device-1",
       privateKey: "private-key", // pragma: allowlist secret
       publicKey: "public-key", // pragma: allowlist secret
@@ -389,6 +395,7 @@ describe("GatewayBrowserClient", () => {
     loadOrCreateDeviceIdentityMock.mockReset();
     signDevicePayloadMock.mockClear();
     loadOrCreateDeviceIdentityMock.mockResolvedValue({
+      algorithm: "ml-dsa-65",
       deviceId: "device-1",
       privateKey: "private-key", // pragma: allowlist secret
       publicKey: "public-key", // pragma: allowlist secret

@@ -9,6 +9,7 @@ import { buildDeviceAuthPayloadV3 } from "./device-auth.js";
 
 export type GatewayBrowserDeviceIdentity = {
   deviceId: string;
+  algorithm?: "ed25519" | "ml-dsa-65";
   publicKey: string;
   sign: (payload: string) => Promise<string>;
 };
@@ -139,7 +140,7 @@ export class GatewayBrowserDeviceAuthLifecycle {
       auth: buildGatewayConnectAuth(selectedAuth),
       device: {
         id: identity.deviceId,
-        algorithm: "ed25519",
+        algorithm: identity.algorithm ?? "ed25519",
         publicKey: identity.publicKey,
         signature: await identity.sign(payload),
         signedAt: signedAtMs,
