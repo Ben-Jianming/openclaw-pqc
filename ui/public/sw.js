@@ -120,15 +120,20 @@ self.addEventListener("push", (event) => {
     data = { title: "OpenClaw", body: event.data.text() };
   }
 
-  const title = data.title || "OpenClaw";
+  // The static worker has no provisioned ML-DSA trust anchor. A signed push is
+  // therefore treated as an opaque wake: never render or route fields that a
+  // compromised relay could alter. The authenticated app session fetches the
+  // canonical content after the user opens OpenClaw.
+  const isPqcWake = Boolean(data.pqcenvelope);
+  const title = isPqcWake ? "OpenClaw" : data.title || "OpenClaw";
   const options = {
-    body: data.body || "",
+    body: isPqcWake ? "New secure notification. Open OpenClaw to view." : data.body || "",
     icon: "./apple-touch-icon.png",
     badge: "./favicon-32.png",
-    tag: data.tag || "openclaw-notification",
+    tag: isPqcWake ? "openclaw-secure-wake" : data.tag || "openclaw-notification",
     data: {
-      url: data.url || self.registration.scope,
-      explicitUrl: Boolean(data.url),
+      url: isPqcWake ? self.registration.scope : data.url || self.registration.scope,
+      explicitUrl: isPqcWake ? false : Boolean(data.url),
     },
   };
 

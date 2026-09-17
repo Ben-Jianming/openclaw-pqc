@@ -441,6 +441,22 @@ describe("Control UI service worker notification scope", () => {
     },
   );
 
+  it("treats PQC push payloads as opaque wakes before authenticated fetch", async () => {
+    const worker = createNotificationServiceWorker(nestedScope, []);
+
+    const notification = await worker.dispatchPush({
+      title: "Forged approval title",
+      body: "Approve this command now",
+      url: "https://attacker.example/phish",
+      pqcenvelope: { algorithms: ["ed25519", "ml-dsa-65"] },
+    });
+
+    expect(notification.title).toBe("OpenClaw");
+    expect(notification.options.body).toBe("New secure notification. Open OpenClaw to view.");
+    expect(notification.options.tag).toBe("openclaw-secure-wake");
+    expect(notification.options.data).toEqual({ url: nestedScope, explicitUrl: false });
+  });
+
   it.each([
     {
       name: "root",
@@ -553,6 +569,7 @@ type ServiceWorkerPushPayload = {
   title: string;
   body: string;
   url?: string;
+  pqcenvelope?: unknown;
 };
 
 type ServiceWorkerNotificationOptions = {
