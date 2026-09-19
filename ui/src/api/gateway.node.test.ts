@@ -1692,6 +1692,7 @@ describe("GatewayBrowserClient", () => {
     expect(secondWs).not.toBe(firstWs);
 
     identity.resolve({
+      algorithm: "ml-dsa-65",
       deviceId: "device-1",
       privateKey: "private-key", // pragma: allowlist secret
       publicKey: "public-key", // pragma: allowlist secret
