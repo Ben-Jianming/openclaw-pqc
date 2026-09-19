@@ -282,15 +282,11 @@ public enum DeviceIdentityStore {
                 let privateKey = try Curve25519.Signing.PrivateKey(rawRepresentation: privateKeyData)
                 return self.base64UrlEncode(try privateKey.signature(for: Data(payload.utf8)))
             case DeviceIdentity.mlDsa65Algorithm:
-                if #available(iOS 26.0, macOS 26.0, watchOS 26.0, tvOS 26.0, visionOS 26.0, *) {
-                    guard let publicKeyData = Data(base64Encoded: identity.publicKey) else { return nil }
-                    let publicKey = try MLDSA65.PublicKey(rawRepresentation: publicKeyData)
-                    let privateKey = try MLDSA65.PrivateKey(
-                        seedRepresentation: privateKeyData,
-                        publicKey: publicKey)
-                    return self.base64UrlEncode(try privateKey.signature(for: Data(payload.utf8)))
-                }
-                return nil
+                guard let publicKeyData = Data(base64Encoded: identity.publicKey) else { return nil }
+                return self.base64UrlEncode(try MLDSA65Provider.sign(
+                    message: Data(payload.utf8),
+                    seed: privateKeyData,
+                    publicKey: publicKeyData))
             default:
                 return nil
             }
@@ -300,27 +296,16 @@ public enum DeviceIdentityStore {
     }
 
     static func generateMaterial() -> DeviceIdentityMaterial {
-        if #available(iOS 26.0, macOS 26.0, watchOS 26.0, tvOS 26.0, visionOS 26.0, *) {
-            do {
-                let privateKey = try MLDSA65.PrivateKey()
-                return self.material(
-                    publicKeyData: privateKey.publicKey.rawRepresentation,
-                    privateKeyData: privateKey.seedRepresentation,
-                    createdAtMs: Int64(Date().timeIntervalSince1970 * 1000),
-                    algorithm: DeviceIdentity.mlDsa65Algorithm)
-            } catch {
-                preconditionFailure("Could not generate an ML-DSA-65 device identity: \(error)")
-            }
+        do {
+            let keyPair = try MLDSA65Provider.generate()
+            return self.material(
+                publicKeyData: keyPair.publicKey,
+                privateKeyData: keyPair.seed,
+                createdAtMs: Int64(Date().timeIntervalSince1970 * 1000),
+                algorithm: DeviceIdentity.mlDsa65Algorithm)
+        } catch {
+            preconditionFailure("Could not generate an ML-DSA-65 device identity: \(error)")
         }
-        let privateKey = Curve25519.Signing.PrivateKey()
-        let publicKey = privateKey.publicKey
-        let publicKeyData = publicKey.rawRepresentation
-        let privateKeyData = privateKey.rawRepresentation
-        return self.material(
-            publicKeyData: publicKeyData,
-            privateKeyData: privateKeyData,
-            createdAtMs: Int64(Date().timeIntervalSince1970 * 1000),
-            algorithm: DeviceIdentity.ed25519Algorithm)
     }
 
     private static func base64UrlEncode(_ data: Data) -> String {
@@ -456,15 +441,7 @@ public enum DeviceIdentityStore {
             return privateKey.publicKey.rawRepresentation == publicKeyData
         case DeviceIdentity.mlDsa65Algorithm:
             guard publicKeyData.count == 1952, privateKeyData.count == 32 else { return false }
-            if #available(iOS 26.0, macOS 26.0, watchOS 26.0, tvOS 26.0, visionOS 26.0, *) {
-                guard let publicKey = try? MLDSA65.PublicKey(rawRepresentation: publicKeyData),
-                      let privateKey = try? MLDSA65.PrivateKey(
-                          seedRepresentation: privateKeyData,
-                          publicKey: publicKey)
-                else { return false }
-                return privateKey.publicKey.rawRepresentation == publicKeyData
-            }
-            return false
+            return (try? MLDSA65Provider.publicKey(seed: privateKeyData)) == publicKeyData
         default:
             return false
         }

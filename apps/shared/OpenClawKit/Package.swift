@@ -27,6 +27,27 @@ let package = Package(
     ],
     targets: [
         .target(
+            name: "CMLDSANative",
+            path: "Sources/CMLDSANative",
+            exclude: [
+                "UPSTREAM.md",
+                "Vendor/LICENSE",
+                "Vendor/src",
+            ],
+            sources: [
+                "bridge.c",
+                "Vendor/mldsa_native.c",
+            ],
+            publicHeadersPath: "include",
+            cSettings: [
+                .headerSearchPath("Vendor"),
+                .define("MLD_CONFIG_PARAMETER_SET", to: "65"),
+                .define("MLD_CONFIG_NAMESPACE_PREFIX", to: "openclaw_mldsa"),
+                .define("MLD_CONFIG_NO_RANDOMIZED_API"),
+                .define("MLD_CONFIG_CORE_API_ONLY"),
+                .define("MLD_CONFIG_REDUCE_RAM"),
+            ]),
+        .target(
             name: "OpenClawProtocol",
             path: "Sources/OpenClawProtocol",
             swiftSettings: [
@@ -41,6 +62,7 @@ let package = Package(
         .target(
             name: "OpenClawKit",
             dependencies: [
+                "CMLDSANative",
                 "OpenClawNativeState",
                 "OpenClawProtocol",
                 .product(

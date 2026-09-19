@@ -108,14 +108,10 @@ struct DeviceIdentityStoreTests {
         #expect(reloaded.deviceId == identity.deviceId)
         #expect(reloaded.publicKey == identity.publicKey)
         #expect(reloaded.privateKey == identity.privateKey)
-        if #available(iOS 26.0, macOS 26.0, watchOS 26.0, tvOS 26.0, visionOS 26.0, *) {
-            #expect(reloaded.algorithm == DeviceIdentity.mlDsa65Algorithm)
-            #expect(Data(base64Encoded: reloaded.publicKey)?.count == 1952)
-            let signature = try #require(DeviceIdentityStore.signPayload("gateway-proof", identity: reloaded))
-            #expect(Self.base64UrlDecode(signature)?.count == 3309)
-        } else {
-            #expect(reloaded.algorithm == DeviceIdentity.ed25519Algorithm)
-        }
+        #expect(reloaded.algorithm == DeviceIdentity.mlDsa65Algorithm)
+        #expect(Data(base64Encoded: reloaded.publicKey)?.count == 1952)
+        let signature = try #require(DeviceIdentityStore.signPayload("gateway-proof", identity: reloaded))
+        #expect(Self.base64UrlDecode(signature)?.count == 3309)
     }
 
     @Test
@@ -137,6 +133,39 @@ struct DeviceIdentityStoreTests {
 
         #expect(privateKey.publicKey.rawRepresentation == expectedPublicKey)
         #expect(privateKey.publicKey.isValidSignature(signature, for: Data(message.utf8)))
+    }
+
+    @Test
+    func `portable ML-DSA-65 matches shared FIPS 204 vector`() throws {
+        let fixture = try Self.repositoryFixture("test/fixtures/pqc/ml-dsa-65-fips204.json")
+        let object = try #require(
+            JSONSerialization.jsonObject(with: Data(contentsOf: fixture)) as? [String: String])
+        let seed = try #require(Self.base64UrlDecode(try #require(object["seedBase64Url"])))
+        let expectedPublicKey = try #require(
+            Self.base64UrlDecode(try #require(object["publicKeyBase64Url"])))
+        let expectedSignature = try #require(
+            Self.base64UrlDecode(try #require(object["deterministicSignatureBase64Url"])))
+        let message = Data(try #require(object["messageUtf8"]).utf8)
+
+        let publicKey = try MLDSA65Provider.portablePublicKey(seed: seed)
+        let signature = try MLDSA65Provider.portableSign(
+            message: message,
+            seed: seed,
+            randomness: Data(repeating: 0, count: 32))
+
+        #expect(publicKey == expectedPublicKey)
+        #expect(signature == expectedSignature)
+        #expect(MLDSA65Provider.portableVerify(
+            signature: signature,
+            message: message,
+            publicKey: publicKey))
+
+        var tampered = signature
+        tampered[0] ^= 0x01
+        #expect(!MLDSA65Provider.portableVerify(
+            signature: tampered,
+            message: message,
+            publicKey: publicKey))
     }
 
     @Test(.stateDirectoryIsolated)
