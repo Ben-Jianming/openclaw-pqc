@@ -111,6 +111,7 @@ describe("scripts/test-live-shard", () => {
       "src/system-agent/setup-app-recommendations.live.test.ts",
     ]);
     expect(selectLiveShardFiles("native-live-src-infra", allFiles)).toEqual([
+      "src/infra/push-apns-device.live.test.ts",
       "src/infra/push-apns-http2.live.test.ts",
     ]);
     expect(selectLiveShardFiles("native-live-test", allFiles)).toEqual([
