@@ -30,23 +30,7 @@ const ML_KEM_768_PK_BYTES = 1184;
 const ML_KEM_768_SK_BYTES = 2400;
 const HMAC_TAG_LEN = 32;
 
-export const NIP44_V2_PQC = {
-  PREFIX,
-  HKDF_INFO,
-  CHACHA_KEY_LEN,
-  CHACHA_IV_LEN,
-  HMAC_KEY_LEN,
-  PAD_ALIGNMENT,
-  LENGTH_PREFIX_BYTES,
-  MAX_PLAINTEXT_LEN,
-  ML_KEM_768_CT_BYTES,
-  ML_KEM_768_SS_BYTES,
-  ML_KEM_768_PK_BYTES,
-  ML_KEM_768_SK_BYTES,
-  HMAC_TAG_LEN,
-} as const;
-
-export class Nip44V2Error extends Error {
+class Nip44V2Error extends Error {
   constructor(message: string, options?: ErrorOptions) {
     super(message, options);
     this.name = "Nip44V2Error";
@@ -76,7 +60,7 @@ function fromBase64Url(s: string, label: string): Buffer {
  * Derive the 32-byte conversation key from a 32-byte shared secret using
  * HKDF-SHA256. Matches the NIP-44 v2 reference ("hkdf_sha256(shared_x, salt, info)").
  */
-export function deriveConversationKey(sharedSecret: Uint8Array): Uint8Array {
+function deriveConversationKey(sharedSecret: Uint8Array): Uint8Array {
   if (!(sharedSecret instanceof Uint8Array) || sharedSecret.length !== 32) {
     throw new Nip44V2Error("sharedSecret must be a 32-byte Uint8Array");
   }
@@ -110,7 +94,7 @@ function conversationKeys(sharedSecret: Uint8Array): {
  * plaintext to the next multiple of 32 bytes. Minimum padded length is 32
  * (one length byte + 30 zero bytes after a single byte of plaintext).
  */
-export function pad(plaintext: Uint8Array): Uint8Array {
+function pad(plaintext: Uint8Array): Uint8Array {
   if (!(plaintext instanceof Uint8Array)) {
     throw new Nip44V2Error("plaintext must be a Uint8Array");
   }
@@ -138,7 +122,7 @@ export function pad(plaintext: Uint8Array): Uint8Array {
  * NIP-44 v2 specifies — the total length (2-byte length prefix + data +
  * zero pad) is padded to a multiple of 32 bytes.
  */
-export function unpad(padded: Uint8Array): Uint8Array {
+function unpad(padded: Uint8Array): Uint8Array {
   if (
     !(padded instanceof Uint8Array) ||
     padded.length < LENGTH_PREFIX_BYTES + MIN_PADDED_PLAINTEXT
@@ -263,13 +247,6 @@ export function decodeMlKemSecretKey(value: string): Uint8Array {
   const decoded = fromBase64Url(value.trim(), "ML-KEM-768 secret key");
   assertMlKemSecretKey(decoded);
   return new Uint8Array(decoded);
-}
-
-export function deriveMlKemPublicKey(secretKey: Uint8Array): Uint8Array {
-  assertMlKemSecretKey(Buffer.from(secretKey));
-  const publicKey = ml_kem768.getPublicKey(new Uint8Array(secretKey));
-  assertMlKemPublicKey(Buffer.from(publicKey));
-  return publicKey;
 }
 
 /**

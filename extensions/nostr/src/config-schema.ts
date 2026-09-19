@@ -66,7 +66,7 @@ export interface NostrProfile {
   lud16?: string;
 }
 
-export const NostrPqcModeSchema = z.enum(["disabled", "preferred", "required"]);
+const NostrPqcModeSchema = z.enum(["disabled", "preferred", "required"]);
 export type NostrPqcMode = z.infer<typeof NostrPqcModeSchema>;
 
 /**

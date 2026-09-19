@@ -4,7 +4,6 @@ import {
   decodeMlKemPublicKey,
   decodeMlKemSecretKey,
   decryptNip44V2,
-  deriveMlKemPublicKey,
   encryptNip44V2,
 } from "./pqc-nip44.js";
 
@@ -17,12 +16,12 @@ describe("Nostr ML-KEM-768 envelopes", () => {
     expect(new TextDecoder().decode(decryptNip44V2(keyPair.secretKey, envelope))).toBe("hello PQC");
   });
 
-  it("loads canonical base64url keys and derives the matching public key", () => {
+  it("loads canonical base64url public and secret keys", () => {
     const keyPair = ml_kem768.keygen();
     const publicKey = decodeMlKemPublicKey(Buffer.from(keyPair.publicKey).toString("base64url"));
     const secretKey = decodeMlKemSecretKey(Buffer.from(keyPair.secretKey).toString("base64url"));
-
-    expect(deriveMlKemPublicKey(secretKey)).toEqual(publicKey);
+    expect(publicKey).toEqual(keyPair.publicKey);
+    expect(secretKey).toEqual(keyPair.secretKey);
   });
 
   it("rejects malformed and wrong-sized configured keys", () => {
