@@ -140,11 +140,12 @@ struct DeviceIdentityStoreTests {
         let fixture = try Self.repositoryFixture("test/fixtures/pqc/ml-dsa-65-fips204.json")
         let object = try #require(
             JSONSerialization.jsonObject(with: Data(contentsOf: fixture)) as? [String: String])
-        let seed = try #require(Self.base64UrlDecode(try #require(object["seedBase64Url"])))
-        let expectedPublicKey = try #require(
-            Self.base64UrlDecode(try #require(object["publicKeyBase64Url"])))
-        let expectedSignature = try #require(
-            Self.base64UrlDecode(try #require(object["deterministicSignatureBase64Url"])))
+        let seedBase64URL = try #require(object["seedBase64Url"])
+        let publicKeyBase64URL = try #require(object["publicKeyBase64Url"])
+        let signatureBase64URL = try #require(object["deterministicSignatureBase64Url"])
+        let seed = try #require(Self.base64UrlDecode(seedBase64URL))
+        let expectedPublicKey = try #require(Self.base64UrlDecode(publicKeyBase64URL))
+        let expectedSignature = try #require(Self.base64UrlDecode(signatureBase64URL))
         let message = Data(try #require(object["messageUtf8"]).utf8)
 
         let publicKey = try MLDSA65Provider.portablePublicKey(seed: seed)
