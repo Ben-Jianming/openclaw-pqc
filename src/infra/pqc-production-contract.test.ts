@@ -26,8 +26,11 @@ describe("installed PQC production contract", () => {
   it("keeps every shipping client explicit about its device-proof algorithm", () => {
     const contracts = [
       ["packages/gateway-client/src/client.ts", 'algorithm: "ml-dsa-65"'],
-      ["packages/gateway-client/src/browser-device-auth.ts", 'algorithm: "ed25519"'],
-      ["ui/src/api/gateway.ts", 'algorithm: "ed25519"'],
+      [
+        "packages/gateway-client/src/browser-device-auth.ts",
+        'algorithm: identity.algorithm ?? "ed25519"',
+      ],
+      ["ui/src/api/gateway.ts", "algorithm: deviceIdentity.algorithm"],
       ["apps/shared/OpenClawKit/Sources/OpenClawKit/DeviceAuthPayload.swift", '"algorithm"'],
       ["apps/android/app/src/main/java/ai/openclaw/app/gateway/GatewaySession.kt", '"algorithm"'],
       ["apps/linux/src-tauri/src/gateway_device_identity.rs", '"algorithm"'],
