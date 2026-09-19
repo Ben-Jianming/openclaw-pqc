@@ -123,6 +123,40 @@ describe("push-envelope M11 step 2 — signPushEnvelope", () => {
       /payload must be a UTF-8 string/,
     );
   });
+
+  it("provisions pinned public keys and rejects tampered content", async () => {
+    const { getPushEnvelopeVerificationKeys, signPushEnvelope, verifySignedPushEnvelope } =
+      await import("./push-envelope.js");
+    const signed = signPushEnvelope({ payload: "receiver-visible content" });
+    const trustedKeys = getPushEnvelopeVerificationKeys();
+
+    expect(
+      verifySignedPushEnvelope({
+        payload: signed.payload,
+        envelope: signed.envelope,
+        trustedKeys,
+      }),
+    ).toBe(true);
+    expect(() =>
+      verifySignedPushEnvelope({
+        payload: `${signed.payload} tampered`,
+        envelope: signed.envelope,
+        trustedKeys,
+      }),
+    ).toThrow(/signature verification failed/);
+  });
+
+  it("rejects an envelope whose key id is not pinned", async () => {
+    const { getPushEnvelopeVerificationKeys, signPushEnvelope, verifySignedPushEnvelope } =
+      await import("./push-envelope.js");
+    const signed = signPushEnvelope({ payload: "content" });
+    const trustedKeys = getPushEnvelopeVerificationKeys();
+    const envelope = { ...signed.envelope, key_id_ed25519: "attacker-key" };
+
+    expect(() =>
+      verifySignedPushEnvelope({ payload: signed.payload, envelope, trustedKeys }),
+    ).toThrow(/does not match the pinned key/);
+  });
 });
 
 describe("push-envelope M11 step 2 — trySignPushEnvelope", () => {

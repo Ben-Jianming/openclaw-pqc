@@ -603,6 +603,10 @@
       "types": "./dist/plugin-sdk/media-runtime.d.ts",
       "default": "./dist/plugin-sdk/media-runtime.js"
     },
+    "./plugin-sdk/media-local-roots": {
+      "types": "./dist/plugin-sdk/media-local-roots.d.ts",
+      "default": "./dist/plugin-sdk/media-local-roots.js"
+    },
     "./plugin-sdk/media-store": {
       "types": "./dist/plugin-sdk/media-store.d.ts",
       "default": "./dist/plugin-sdk/media-store.js"
@@ -689,6 +693,10 @@
       "types": "./dist/plugin-sdk/gateway-runtime.d.ts",
       "default": "./dist/plugin-sdk/gateway-runtime.js"
     },
+    "./plugin-sdk/cli-argv": {
+      "types": "./dist/plugin-sdk/cli-argv.d.ts",
+      "default": "./dist/plugin-sdk/cli-argv.js"
+    },
     "./plugin-sdk/cli-runtime": {
       "default": "./dist/plugin-sdk/cli-runtime.js"
     },
@@ -765,6 +773,10 @@
       "types": "./dist/plugin-sdk/pqc-log.d.ts",
       "default": "./dist/plugin-sdk/pqc-log.js"
     },
+    "./plugin-sdk/push-envelope": {
+      "types": "./dist/plugin-sdk/push-envelope.d.ts",
+      "default": "./dist/plugin-sdk/push-envelope.js"
+    },
     "./plugin-sdk/migration": {
       "default": "./dist/plugin-sdk/migration.js"
     },
@@ -817,6 +829,10 @@
     "./plugin-sdk/boolean-param": {
       "types": "./dist/plugin-sdk/boolean-param.d.ts",
       "default": "./dist/plugin-sdk/boolean-param.js"
+    },
+    "./plugin-sdk/channel-dm-policy": {
+      "types": "./dist/plugin-sdk/channel-dm-policy.d.ts",
+      "default": "./dist/plugin-sdk/channel-dm-policy.js"
     },
     "./plugin-sdk/dangerous-name-runtime": {
       "default": "./dist/plugin-sdk/dangerous-name-runtime.js"
@@ -998,6 +1014,9 @@
     },
     "./plugin-sdk/session-catalog": {
       "default": "./dist/plugin-sdk/session-catalog.js"
+    },
+    "./plugin-sdk/session-catalog-runtime": {
+      "default": "./dist/plugin-sdk/session-catalog-runtime.js"
     },
     "./plugin-sdk/session-discussion": {
       "types": "./dist/plugin-sdk/session-discussion.d.ts",
@@ -1379,13 +1398,7 @@
     "./plugin-sdk/llm": {
       "default": "./dist/plugin-sdk/llm.js"
     },
-    "./cli-entry": "./openclaw.mjs",
-    "./plugin-sdk/cli-argv": "./packages/plugin-sdk/src/index.ts",
-    "./plugin-sdk/channel-dm-policy": "./packages/plugin-sdk/src/index.ts",
-    "./plugin-sdk/media-local-roots": {
-      "types": "./dist/plugin-sdk/media-local-roots.d.ts",
-      "default": "./dist/plugin-sdk/media-local-roots.js"
-    }
+    "./cli-entry": "./openclaw.mjs"
   },
   "scripts": {
     "android:assemble": "node scripts/run-android-gradle.mjs :app:assemblePlayDebug :wear-shared:assembleDebug",

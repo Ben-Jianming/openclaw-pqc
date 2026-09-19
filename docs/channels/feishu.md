@@ -42,6 +42,19 @@ OpenClaw durably queues authenticated `im.message.receive_v1` and `drive.notice.
 
 If a WebSocket event cannot be persisted after bounded retries, OpenClaw closes that socket and forces a fresh authenticated connection instead of continuing past an uncommitted turn. Other Feishu event types, including reactions and VC meeting invitations, use their normal event paths and do not receive this durable-queue guarantee.
 
+## PQC verification boundary
+
+OpenClaw signs outgoing Feishu content with the gateway's canonical Ed25519 + ML-DSA-65 identities and records the result in the PQC audit log. The official Feishu/Lark clients do not expose a hook that can verify a custom PQC envelope before displaying a message, so this audit record is **not** end-to-end receiver verification.
+
+For receiver-verified delivery, use an operator-controlled client or service and the public `openclaw/plugin-sdk/push-envelope` entrypoint:
+
+1. Provision the result of `getPushEnvelopeVerificationKeys()` to the receiver over an authenticated administrative channel and pin it there. Do not accept public keys attached to an incoming message.
+2. Transport the exact payload and its envelope to that controlled receiver.
+3. Call `verifySignedPushEnvelope({ payload, envelope, trustedKeys })` before displaying, routing, or acting on the payload. The call rejects a changed payload, either invalid signature, or a key-id mismatch.
+4. During acceptance, alter the payload, each signature, and each key id in turn. Every altered case must be rejected; only the original artifact may be shown.
+
+Treat content visible only in the official Feishu client as transport-authenticated Feishu content, not as receiver-verified PQC content. Keep approvals and other sensitive actions behind OpenClaw's authenticated gateway read-back flow.
+
 ## Access control
 
 ### Direct messages

@@ -134,6 +134,7 @@
   "time-runtime",
   "logging-core",
   "pqc-log",
+  "push-envelope",
   "migration",
   "migration-runtime",
   "plugin-state-runtime",

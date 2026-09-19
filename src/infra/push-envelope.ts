@@ -9,14 +9,17 @@
 //    drop the message (per danteng prompt §M11.3 — never lose a
 //    push because of a PQC signing error)
 //
-// IMPORTANT: this module is *helper only* — no transport is wired yet.
-// Steps 3-6 wire this into push-apns-http2.ts / push-apns.relay.ts /
-// push-web.ts / Feishu WebSocket respectively.
+// The same helper is used by push transports and the Feishu audit boundary so
+// they all sign with one canonical pair of gateway-owned identities.
 
 import { pqcLog } from "../logging/pqc-log.js";
-import { type PushDualEnvelope, signPushPayloadDual } from "../security/push-dual-signature.js";
+import {
+  type PushDualEnvelope,
+  signPushPayloadDual,
+  verifyPushPayloadDual,
+} from "../security/push-dual-signature.js";
 import { loadOrCreateProcessDeviceIdentity } from "./device-identity.js";
-import { decodeMlDsa65SecretKey } from "./mldsa65-key-storage.js";
+import { decodeMlDsa65PublicKey, decodeMlDsa65SecretKey } from "./mldsa65-key-storage.js";
 import { getOrCreatePushSigningKey } from "./push-signing-key.js";
 
 const ENVELOPE_KEY_ID_MLDSA65 = "primary";
@@ -26,6 +29,8 @@ export interface SignPushEnvelopeOptions {
   payload: string;
   /** Optional override for the ML-DSA-65 key id (default "primary"). */
   keyIdMldsa65?: string;
+  /** Optional environment override for isolated profiles and tests. */
+  env?: NodeJS.ProcessEnv;
 }
 
 export interface SignPushEnvelopeResult {
@@ -37,6 +42,41 @@ export interface SignPushEnvelopeResult {
   keyIdEd25519: string;
   /** Resolved ML-DSA-65 key id (for logging). */
   keyIdMldsa65: string;
+}
+
+export interface PushEnvelopeVerificationKeys {
+  ed25519PublicKeyBase64Url: string;
+  mldsa65PublicKeyBase64Url: string;
+  keyIdEd25519: string;
+  keyIdMldsa65: string;
+}
+
+export interface VerifySignedPushEnvelopeOptions {
+  payload: string;
+  envelope: PushDualEnvelope | string;
+  trustedKeys: PushEnvelopeVerificationKeys;
+}
+
+function decodeCanonicalBase64Url(value: string, label: string): Uint8Array {
+  if (!/^[A-Za-z0-9_-]+$/.test(value)) {
+    throw new Error(`${label} must be canonical base64url`);
+  }
+  const decoded = Buffer.from(value, "base64url");
+  if (decoded.toString("base64url") !== value) {
+    throw new Error(`${label} must be canonical base64url`);
+  }
+  return new Uint8Array(decoded);
+}
+
+function decodeEnvelope(envelope: PushDualEnvelope | string): PushDualEnvelope {
+  if (typeof envelope !== "string") {
+    return envelope;
+  }
+  const parsed: unknown = JSON.parse(envelope);
+  if (!parsed || typeof parsed !== "object") {
+    throw new Error("push envelope must decode to an object");
+  }
+  return parsed as PushDualEnvelope;
 }
 
 /**
@@ -51,8 +91,8 @@ export function signPushEnvelope(options: SignPushEnvelopeOptions): SignPushEnve
   if (typeof options.payload !== "string") {
     throw new Error("signPushEnvelope: payload must be a UTF-8 string");
   }
-  const pushKey = getOrCreatePushSigningKey();
-  const identity = loadOrCreateProcessDeviceIdentity();
+  const pushKey = getOrCreatePushSigningKey(options.env);
+  const identity = loadOrCreateProcessDeviceIdentity({ env: options.env });
   const mldsaSecretRaw = decodeMlDsa65SecretKey(identity.privateKeyPem);
   const keyIdMldsa65 = options.keyIdMldsa65 ?? ENVELOPE_KEY_ID_MLDSA65;
 
@@ -79,6 +119,46 @@ export function signPushEnvelope(options: SignPushEnvelopeOptions): SignPushEnve
     keyIdEd25519: pushKey.keyId,
     keyIdMldsa65,
   };
+}
+
+/** Return non-secret key material for provisioning a controlled receiver. */
+export function getPushEnvelopeVerificationKeys(
+  env: NodeJS.ProcessEnv = process.env,
+): PushEnvelopeVerificationKeys {
+  const pushKey = getOrCreatePushSigningKey(env);
+  const identity = loadOrCreateProcessDeviceIdentity({ env });
+  return {
+    ed25519PublicKeyBase64Url: Buffer.from(pushKey.publicKeyRaw).toString("base64url"),
+    mldsa65PublicKeyBase64Url: Buffer.from(decodeMlDsa65PublicKey(identity.publicKeyPem)).toString(
+      "base64url",
+    ),
+    keyIdEd25519: pushKey.keyId,
+    keyIdMldsa65: ENVELOPE_KEY_ID_MLDSA65,
+  };
+}
+
+/** Verify both signatures and pinned key ids before accepting content. */
+export function verifySignedPushEnvelope(options: VerifySignedPushEnvelopeOptions): true {
+  const envelope = decodeEnvelope(options.envelope);
+  if (envelope.key_id_ed25519 !== options.trustedKeys.keyIdEd25519) {
+    throw new Error("push envelope Ed25519 key id does not match the pinned key");
+  }
+  if (envelope.key_id_mldsa65 !== options.trustedKeys.keyIdMldsa65) {
+    throw new Error("push envelope ML-DSA-65 key id does not match the pinned key");
+  }
+  verifyPushPayloadDual({
+    payload: options.payload,
+    envelope,
+    ed25519PublicKeyRaw: decodeCanonicalBase64Url(
+      options.trustedKeys.ed25519PublicKeyBase64Url,
+      "trusted Ed25519 public key",
+    ),
+    mldsa65PublicKeyRaw: decodeCanonicalBase64Url(
+      options.trustedKeys.mldsa65PublicKeyBase64Url,
+      "trusted ML-DSA-65 public key",
+    ),
+  });
+  return true;
 }
 
 /**

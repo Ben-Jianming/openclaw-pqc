@@ -9,8 +9,6 @@
   "type": "module",
   "dependencies": {
     "@larksuiteoapi/node-sdk": "1.71.1",
-    "@noble/curves": "1.9.7",
-    "@noble/post-quantum": "0.5.4",
     "mdast-util-from-markdown": "2.0.3",
     "mdast-util-gfm-table": "2.0.0",
     "micromark-extension-gfm-table": "2.1.1",
