@@ -191,7 +191,8 @@ export function readPluginSdkSurfaceBudgets(env = process.env) {
       // +1: logger file-transport flush for graceful shutdown drains.
       // +1: process-local sessions.changed plugin notification payload.
       // +2: structured PQC log event and level contracts.
-      4844,
+      // +9: canonical PQC push-envelope verification and receiver key contracts.
+      4853,
       env,
     ),
     publicFunctionExports: readPluginSdkSurfaceBudgetEnv(
@@ -220,7 +221,8 @@ export function readPluginSdkSurfaceBudgets(env = process.env) {
       // +3: focused CLI root-option parsers.
       // +1: authoritative model-picker session-apply operation.
       // +1: logger file-transport flush for graceful shutdown drains.
-      2941,
+      // +4: canonical PQC push-envelope verification helpers.
+      2945,
       env,
     ),
     publicDeprecatedExports: readPluginSdkSurfaceBudgetEnv(
