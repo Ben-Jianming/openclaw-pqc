@@ -2,6 +2,7 @@
 // Generate Bundled Channel Config Metadata script supports OpenClaw repository automation.
 import fs from "node:fs";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import { loadBundledPluginPublicArtifactModuleSync } from "../src/plugins/public-surface-loader.js";
 import { loadChannelConfigSurfaceModule } from "./load-channel-config-surface.ts";
 
@@ -347,8 +348,29 @@ if (import.meta.url === new URL(process.argv[1] ?? "", "file://").href) {
   if (!result.changed) {
     process.exitCode = 0;
   } else if (check) {
+    const currentModule = (await import(
+      `${pathToFileURL(result.outputPath).href}?stale-check=${Date.now()}`
+    )) as {
+      GENERATED_BUNDLED_CHANNEL_CONFIG_METADATA?: readonly BundledChannelConfigMetadata[];
+    };
+    const currentEntries = currentModule.GENERATED_BUNDLED_CHANNEL_CONFIG_METADATA ?? [];
+    const expectedEntries = await collectBundledChannelConfigMetadata();
+    const currentByKey = new Map(
+      currentEntries.map((entry) => [`${entry.pluginId}/${entry.channelId}`, entry]),
+    );
+    const expectedByKey = new Map(
+      expectedEntries.map((entry) => [`${entry.pluginId}/${entry.channelId}`, entry]),
+    );
+    const changedKeys = [...new Set([...currentByKey.keys(), ...expectedByKey.keys()])]
+      .filter(
+        (key) => JSON.stringify(currentByKey.get(key)) !== JSON.stringify(expectedByKey.get(key)),
+      )
+      .toSorted();
     console.error(
       `[bundled-channel-config-metadata] stale generated output at ${path.relative(process.cwd(), result.outputPath)}`,
+    );
+    console.error(
+      `[bundled-channel-config-metadata] changed channel surfaces: ${changedKeys.join(", ") || "none (format-only difference)"}`,
     );
     process.exitCode = 1;
   } else {
