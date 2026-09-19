@@ -231,6 +231,41 @@ Notes:
 - Optional timeout:
   - `OPENCLAW_LIVE_APNS_TIMEOUT_MS=30000`
 
+## Live: APNs physical-device acceptance
+
+The APNs reachability test above proves that the network path reaches Apple. It
+does not prove that a real enrolled device receives a notification. Run the
+manual **APNs Physical Device Acceptance** workflow for release evidence.
+
+Create a protected GitHub environment named `apns-acceptance` and add these
+environment secrets:
+
+- `OPENCLAW_APNS_TEAM_ID`
+- `OPENCLAW_APNS_KEY_ID`
+- `OPENCLAW_APNS_PRIVATE_KEY_P8`
+- `OPENCLAW_APNS_DEVICE_TOKEN`
+
+Start the workflow with the APNs environment used by the installed build, its
+bundle identifier, and a fresh confirmation code. A passing job proves that
+Apple accepted the provider token, topic, environment, and device token. The
+operator must also confirm the same code on the physical device and record the
+device model, OS version, app build, UTC receipt time, and a screenshot.
+
+The test notification contains only the confirmation code. Production approval
+pushes remain opaque background wakes; the app fetches the canonical approval
+content over its authenticated gateway connection.
+
+For a local run, set the same four secrets plus:
+
+```bash
+export OPENCLAW_LIVE_TEST=1
+export OPENCLAW_LIVE_APNS_DEVICE=1
+export OPENCLAW_APNS_ENVIRONMENT=sandbox
+export OPENCLAW_APNS_TOPIC=ai.openclaw.ios
+export OPENCLAW_APNS_CONFIRMATION_CODE=release-1234
+pnpm test:live -- src/infra/push-apns-device.live.test.ts
+```
+
 ## Live: ACP bind smoke (`/acp spawn ... --bind here`)
 
 - Test: `src/gateway/gateway-acp-bind.live.test.ts`

@@ -1,0 +1,73 @@
+name: APNs Physical Device Acceptance
+
+on:
+  workflow_dispatch:
+    inputs:
+      apns_environment:
+        description: APNs environment used by the installed app build
+        required: true
+        default: sandbox
+        type: choice
+        options:
+          - sandbox
+          - production
+      topic:
+        description: Installed app bundle identifier (APNs topic)
+        required: true
+        default: ai.openclaw.ios
+        type: string
+      confirmation_code:
+        description: 4-32 character code that must appear on the physical device
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: apns-physical-device-${{ github.run_id }}
+  cancel-in-progress: false
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+jobs:
+  deliver:
+    name: Deliver to enrolled physical device
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment: apns-acceptance
+    steps:
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+      - name: Setup Node environment
+        uses: ./.github/actions/setup-node-env
+        with:
+          install-bun: "false"
+      - name: Send non-sensitive APNs acceptance alert
+        env:
+          OPENCLAW_LIVE_TEST: "1"
+          OPENCLAW_LIVE_APNS_DEVICE: "1"
+          OPENCLAW_APNS_ENVIRONMENT: ${{ inputs.apns_environment }}
+          OPENCLAW_APNS_TOPIC: ${{ inputs.topic }}
+          OPENCLAW_APNS_CONFIRMATION_CODE: ${{ inputs.confirmation_code }}
+          OPENCLAW_APNS_TEAM_ID: ${{ secrets.OPENCLAW_APNS_TEAM_ID }}
+          OPENCLAW_APNS_KEY_ID: ${{ secrets.OPENCLAW_APNS_KEY_ID }}
+          OPENCLAW_APNS_PRIVATE_KEY_P8: ${{ secrets.OPENCLAW_APNS_PRIVATE_KEY_P8 }}
+          OPENCLAW_APNS_DEVICE_TOKEN: ${{ secrets.OPENCLAW_APNS_DEVICE_TOKEN }}
+        run: pnpm test:live -- src/infra/push-apns-device.live.test.ts
+      - name: Record operator verification requirement
+        env:
+          CONFIRMATION_CODE: ${{ inputs.confirmation_code }}
+        run: |
+          {
+            echo "## Physical device verification"
+            echo
+            echo "APNs accepted the notification. Confirm that the enrolled device displayed code:"
+            echo
+            echo "\`$CONFIRMATION_CODE\`"
+            echo
+            echo "Record the device model, OS version, app build, UTC receipt time, and a screenshot in the release evidence."
+          } >> "$GITHUB_STEP_SUMMARY"
