@@ -1,4 +1,3 @@
-import CryptoKit
 import Foundation
 import Testing
 @testable import OpenClawKit
@@ -77,11 +76,15 @@ struct DeviceAuthPayloadTests {
         let signaturePadding = String(repeating: "=", count: (4 - signatureBase64.count % 4) % 4)
         let signatureData = try #require(Data(base64Encoded: signatureBase64 + signaturePadding))
         let publicKeyData = try #require(Data(base64Encoded: identity.publicKey))
-        let publicKey = try Curve25519.Signing.PublicKey(rawRepresentation: publicKeyData)
         let data = try JSONEncoder().encode(device)
         let object = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
 
-        #expect(publicKey.isValidSignature(signatureData, for: Data(payload.utf8)))
+        #expect(identity.algorithm == DeviceIdentity.mlDsa65Algorithm)
+        #expect(device["algorithm"]?.value as? String == identity.algorithm)
+        #expect(MLDSA65Provider.portableVerify(
+            signature: signatureData,
+            message: Data(payload.utf8),
+            publicKey: publicKeyData))
         #expect((object["signedAt"] as? NSNumber)?.int64Value == signedAtMs)
     }
 
