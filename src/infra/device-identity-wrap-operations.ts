@@ -30,6 +30,14 @@ export function listStoredDeviceIdentityWrapHealth(
   }
   return withOpenClawStateDatabaseReadOnly(
     (database) => {
+      // An older state database may predate the device identity table. The
+      // writer will migrate it after this read-only recovery check.
+      const table = database.db
+        .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'device_identities'")
+        .get();
+      if (!table) {
+        return [];
+      }
       const db = getNodeSqliteKysely<DeviceIdentityDatabase>(database.db);
       return executeSqliteQuerySync(
         database.db,

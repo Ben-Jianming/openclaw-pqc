@@ -68,7 +68,9 @@ node openclaw.mjs onboard --install-daemon
 
 向导会配置模型服务、网关和工作目录。API 密钥只应通过向导、安全存储或环境变量提供，不要写入 `.bat`、`.sh` 或提交到 GitHub。
 
-如需加密保存设备私钥，请在仓库外创建一个文件，内容为一个 base64url 编码的 32 字节随机密钥，并把 `OPENCLAW_WRAP_KEY_FILE` 设置为该文件的绝对路径。macOS/Linux 还需执行 `chmod 600 <文件>`。守护进程可将 `.env.example` 复制到 `~/.openclaw/.env` 后填写该路径。请离线备份此密钥；丢失后无法恢复已包裹的设备身份。已有明文身份会在配置变量后的下一次启动时自动迁移。
+首次创建 Node/CLI 设备身份时，程序会自动在状态目录（默认 `~/.openclaw`）的 `credentials/device-identity-wrap.key` 生成随机包裹密钥，并加密保存设备私钥。macOS/Linux 要求密钥文件权限为 `0600`；Windows 会设置并核验当前用户和 SYSTEM 的 ACL。权限设置失败时身份创建会停止，不会退回明文落盘。请把密钥文件与状态数据库一起离线备份；丢失后无法恢复已包裹的身份。已有明文身份在下一次加载时会自动迁移。
+
+也可以由运维人员预先配置 `OPENCLAW_WRAP_KEY_FILE`（绝对路径，内容为 base64url 编码的 32 字节密钥）或 `OPENCLAW_PQC_WRAP_KEY`。请在首次创建身份前配置；以后更换密钥应使用 `node openclaw.mjs security wrap-key rotate`，不要直接替换密钥文件。可用 `node openclaw.mjs security wrap-key status` 检查加密状态，并通过 `export` 制作带密码保护的备份。
 
 ## 5. 启动、验证和停止
 

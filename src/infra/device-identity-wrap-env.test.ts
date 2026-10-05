@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { DatabaseSync } from "node:sqlite";
 /**
  * M5 runtime fix: env-var-based wrap auto-wiring.
  */
@@ -11,11 +12,16 @@ import { closeOpenClawStateDatabaseForTest } from "../state/openclaw-state-db.js
 import {
   readStoredDeviceIdentity,
   readStoredDeviceIdentityReadOnly,
+  resolveDeviceIdentityStore,
   type DeviceIdentityReadOptions,
   type DeviceIdentityStoreOptions,
   type SyncWrappingKeyProvider,
 } from "./device-identity-store.js";
-import { loadOrCreateDeviceIdentity } from "./device-identity.js";
+import {
+  loadDeviceIdentityIfPresent,
+  loadOrCreateDeviceIdentity,
+  resolveDeviceIdentityKeyring,
+} from "./device-identity.js";
 
 const WRAP_KEY = "XYU5RKqbBTfbrFvLrcSlgmMSyM5LnlLZk7vUUhKbEVg";
 const WRAP_KEY_ID = "test-env-wrap-2026-08";
@@ -87,24 +93,63 @@ describe("device-identity env-var wrap auto-wiring", () => {
     expect(identity1.privateKeyPem.startsWith("MLDSA65-SECRET-KEY:")).toBe(true);
   });
 
-  it("falls back to plaintext when env vars are absent (with stderr warning)", () => {
+  it("auto-provisions a wrapping key when env vars are absent", () => {
     delete process.env.OPENCLAW_PQC_WRAP_KEY;
     delete process.env.OPENCLAW_PQC_WRAP_KEY_ID;
     const records: PqcLogPayload[] = [];
     setPqcEmit((record) => records.push(record));
     loadOrCreateDeviceIdentity(options());
-    const stored = readStoredDeviceIdentityReadOnly(options());
+    const stored = readStoredDeviceIdentity({
+      ...options(),
+      wrappingKeyProvider: resolveDeviceIdentityKeyring(options().env),
+    });
     expect(stored).not.toBeNull();
-    expect(stored!.mldsaPrivateKeyWrapped).toBeNull();
-    expect(stored!.mldsaPrivateKeyWrapKeyId).toBeNull();
-    expect(stored!.mldsaPrivateKeyPem).not.toBeNull();
-    expect(stored!.mldsaPrivateKeyPem!.startsWith("MLDSA65-SECRET-KEY:")).toBe(true);
-    expect(records.some((record) => String(record.detail).includes("plaintext"))).toBe(true);
+    expect(stored!.mldsaPrivateKeyWrapped).not.toBeNull();
+    expect(stored!.mldsaPrivateKeyWrapKeyId).toBe("file-default");
+    expect(stored!.mldsaPrivateKeyPem).toBeNull();
+    expect(
+      records.some((record) => String(record.detail).includes("created private state-dir")),
+    ).toBe(true);
+  });
+
+  it("auto-provisions against a legacy state database without an identity table", () => {
+    delete process.env.OPENCLAW_PQC_WRAP_KEY;
+    delete process.env.OPENCLAW_PQC_WRAP_KEY_ID;
+    const databasePath = resolveDeviceIdentityStore(options()).databasePath;
+    fs.mkdirSync(path.dirname(databasePath), { recursive: true });
+    const legacyDatabase = new DatabaseSync(databasePath);
+    legacyDatabase.exec("CREATE TABLE legacy_state (id INTEGER PRIMARY KEY)");
+    legacyDatabase.close();
+
+    const identity = loadOrCreateDeviceIdentity(options());
+    expect(identity.publicKeyPem.startsWith("MLDSA65-PUBLIC-KEY:")).toBe(true);
+    const stored = readStoredDeviceIdentity({
+      ...options(),
+      wrappingKeyProvider: resolveDeviceIdentityKeyring(options().env),
+    });
+    expect(stored?.mldsaPrivateKeyWrapped).not.toBeNull();
+    expect(stored?.mldsaPrivateKeyPem).toBeNull();
+  });
+
+  it("does not inherit an ambient wrap key when the caller supplies an isolated env", () => {
+    const isolatedOptions: DeviceIdentityStoreOptions = { env: { OPENCLAW_STATE_DIR: tempDir } };
+    const identity = loadOrCreateDeviceIdentity(isolatedOptions);
+    const stored = readStoredDeviceIdentity({
+      ...isolatedOptions,
+      wrappingKeyProvider: resolveDeviceIdentityKeyring(isolatedOptions.env),
+    });
+    expect(stored?.mldsaPrivateKeyWrapKeyId).toBe("file-default");
+    expect(loadDeviceIdentityIfPresent(isolatedOptions)?.deviceId).toBe(identity.deviceId);
   });
 
   it("rejects malformed OPENCLAW_PQC_WRAP_KEY (non-base64url)", () => {
     process.env.OPENCLAW_PQC_WRAP_KEY = "not-valid-base64!!!";
     expect(() => loadOrCreateDeviceIdentity(options())).toThrow(/base64url/);
+    try {
+      loadOrCreateDeviceIdentity(options());
+    } catch (error) {
+      expect(String(error)).not.toContain("not-valid-base64");
+    }
   });
 
   it("uses 'env-default' as keyId when only OPENCLAW_PQC_WRAP_KEY is set", () => {

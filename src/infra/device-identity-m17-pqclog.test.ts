@@ -65,7 +65,7 @@ function deviceIdentityEvents(events: PqcLogPayload[]): PqcLogPayload[] {
 }
 
 describe("M17: device-identity pqcLog wire-up", () => {
-  it("emits device-identity event on first-time identity generation (no wrap)", () => {
+  it("emits device-identity event on first-time wrapped identity generation", () => {
     loadOrCreateDeviceIdentity(options());
     const devEvents = deviceIdentityEvents(capturedEvents);
     expect(devEvents.length).toBeGreaterThanOrEqual(1);
@@ -73,17 +73,15 @@ describe("M17: device-identity pqcLog wire-up", () => {
     const last = devEvents[devEvents.length - 1]!;
     expect(last.status).toBe("ok");
     expect(last.identityKey).toBe("primary");
-    expect(String(last.detail)).toMatch(/plaintext.*M5 fallback|generated/);
+    expect(String(last.detail)).toMatch(/generated and wrapped/);
   });
 
-  it("emits warn event when wrap is unavailable at startup", () => {
+  it("reports automatic private wrapping-key provisioning", () => {
     loadOrCreateDeviceIdentity(options());
-    const warns = capturedEvents.filter((e) => e.level === "warn");
-    expect(warns.length).toBeGreaterThanOrEqual(1);
-    const devWarn = warns.find((e) => e.event === "device-identity");
-    expect(devWarn).toBeDefined();
-    expect(devWarn!.status).toBe("fail");
-    expect(String(devWarn!.detail)).toMatch(/wrap env unavailable/);
+    expect(capturedEvents.some((e) => String(e.detail).includes("created private state-dir"))).toBe(
+      true,
+    );
+    expect(capturedEvents.some((e) => String(e.detail).includes("plaintext"))).toBe(false);
   });
 
   it("emits ok event on reload (existing identity loaded as-is)", () => {
@@ -110,24 +108,16 @@ describe("M17: device-identity pqcLog wire-up", () => {
     expect(String(last.detail)).toMatch(/wrapped/);
   });
 
-  it("reports automatic migration when wrap becomes available later", () => {
-    // First load without wrap → warn + load (legacy)
-    loadOrCreateDeviceIdentity(options());
-    expect(capturedEvents.some((e) => e.event === "device-identity" && e.level === "warn")).toBe(
-      true,
-    );
-    // Now restart with wrap
+  it("loads the same wrapped identity after automatic provisioning", () => {
+    const before = loadOrCreateDeviceIdentity(options());
     capturedEvents.length = 0;
     closeOpenClawStateDatabaseForTest();
-    process.env.OPENCLAW_PQC_WRAP_KEY = WRAP_KEY;
-    process.env.OPENCLAW_PQC_WRAP_KEY_ID = WRAP_KEY_ID;
-    loadOrCreateDeviceIdentity(options());
-    // Startup migrates the legacy plaintext row, then reports the wrapped load.
-    const devEvents = deviceIdentityEvents(capturedEvents);
-    expect(devEvents).toHaveLength(2);
-    expect(devEvents[0]).toMatchObject({ level: "info", status: "ok" });
-    expect(String(devEvents[0]!.detail)).toMatch(/migrated existing plaintext identity/);
-    expect(devEvents[1]).toMatchObject({ level: "info", status: "ok" });
-    expect(String(devEvents[1]!.detail)).toMatch(/loaded existing wrapped identity/);
+    const after = loadOrCreateDeviceIdentity(options());
+    expect(after.deviceId).toBe(before.deviceId);
+    expect(
+      deviceIdentityEvents(capturedEvents).some((e) =>
+        String(e.detail).includes("loaded existing wrapped"),
+      ),
+    ).toBe(true);
   });
 });

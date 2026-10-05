@@ -24,6 +24,7 @@ import { serializeWrappedSecret, unwrapSecret, wrapSecret } from "./secret-wrapp
 
 const BACKUP_VERSION = 1;
 const PBKDF2_ITERATIONS = 210_000; // OWASP 2023 minimum for PBKDF2-SHA256
+const MAX_PBKDF2_ITERATIONS = 1_000_000;
 const PBKDF2_KEY_BYTES = 32;
 const SALT_BYTES = 16;
 const IV_BYTES = 12;
@@ -37,6 +38,7 @@ const MIN_PASSPHRASE_LENGTH = 8;
 export const WRAP_KEY_BACKUP_CONSTANTS = {
   BACKUP_VERSION,
   PBKDF2_ITERATIONS,
+  MAX_PBKDF2_ITERATIONS,
   PBKDF2_KEY_BYTES,
   SALT_BYTES,
   IV_BYTES,
@@ -215,9 +217,12 @@ export function importWrapKey(
   if (
     typeof obj.iterations !== "number" ||
     !Number.isInteger(obj.iterations) ||
-    obj.iterations < 1
+    obj.iterations < PBKDF2_ITERATIONS ||
+    obj.iterations > MAX_PBKDF2_ITERATIONS
   ) {
-    throw new WrapKeyBackupError("Envelope iterations must be a positive integer");
+    throw new WrapKeyBackupError(
+      `Envelope iterations must be between ${PBKDF2_ITERATIONS} and ${MAX_PBKDF2_ITERATIONS}`,
+    );
   }
   const salt = fromBase64Url(String(obj.salt), "envelope.salt");
   const iv = fromBase64Url(String(obj.iv), "envelope.iv");

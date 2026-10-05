@@ -8,6 +8,7 @@ import {
 } from "../infra/device-identity-wrap-operations.js";
 import { resolveDeviceIdentityKeyring } from "../infra/device-identity.js";
 import { defaultRuntime } from "../runtime.js";
+import { writePrivateKeyFile } from "../security/private-key-file.js";
 import {
   wrapKeyExportCommand,
   wrapKeyHealthCheck,
@@ -24,13 +25,7 @@ function readRequiredTextFile(filePath: string, label: string): string {
 }
 
 function writePrivateFile(filePath: string, contents: string): string {
-  const absolute = path.resolve(filePath);
-  fs.mkdirSync(path.dirname(absolute), { recursive: true, mode: 0o700 });
-  fs.writeFileSync(absolute, contents, { encoding: "utf8", flag: "wx", mode: 0o600 });
-  if (process.platform !== "win32") {
-    fs.chmodSync(absolute, 0o600);
-  }
-  return absolute;
+  return writePrivateKeyFile(filePath, contents);
 }
 
 export function registerWrapKeyCli(security: Command): void {

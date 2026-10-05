@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -12,8 +13,11 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { resetPqcEmit, setPqcEmit, type PqcLogPayload } from "../logging/pqc-log.js";
 import { decodeBase64UrlKey } from "../security/keyring-provider.js";
+import { writePrivateKeyFile } from "../security/private-key-file.js";
 import { closeOpenClawStateDatabaseForTest } from "../state/openclaw-state-db.js";
 import {
+  generateStoredDeviceIdentity,
+  insertStoredDeviceIdentityIfAbsent,
   readStoredDeviceIdentity,
   readStoredDeviceIdentityReadOnly,
   type DeviceIdentityReadOptions,
@@ -24,7 +28,7 @@ import {
   listStoredDeviceIdentityWrapHealth,
   rotateStoredDeviceIdentityWrappingKey,
 } from "./device-identity-wrap-operations.js";
-import { loadOrCreateDeviceIdentity } from "./device-identity.js";
+import { loadOrCreateDeviceIdentity, resolveDeviceIdentityKeyring } from "./device-identity.js";
 
 const WRAP_KEY = "XYU5RKqbBTfbrFvLrcSlgmMSyM5LnlLZk7vUUhKbEVg";
 const WRAP_KEY_ID = "test-file-wrap-2026-08";
@@ -34,8 +38,14 @@ let wrapKeyFile: string;
 let savedEnv: Record<string, string | undefined>;
 
 function writeWrapKeyFile(filePath: string, value: string, mode = 0o600): void {
-  fs.writeFileSync(filePath, value);
-  fs.chmodSync(filePath, mode);
+  if (!fs.existsSync(filePath)) {
+    writePrivateKeyFile(filePath, value);
+  } else {
+    fs.writeFileSync(filePath, value);
+  }
+  if (process.platform !== "win32") {
+    fs.chmodSync(filePath, mode);
+  }
 }
 
 function makeKeyring(rawKey: string, keyId: string): SyncWrappingKeyProvider {
@@ -97,6 +107,11 @@ function readOptions(): DeviceIdentityReadOptions {
 }
 
 describe("M15.B device-identity file-based wrap (v3-style)", () => {
+  it("does not replace or delete an existing private key file", () => {
+    expect(() => writePrivateKeyFile(wrapKeyFile, "replacement-key")).toThrow();
+    expect(fs.readFileSync(wrapKeyFile, "utf8")).toBe(WRAP_KEY);
+  });
+
   it("writes wrapped row with logical keyId when OPENCLAW_WRAP_KEY_FILE is set", () => {
     const identity = loadOrCreateDeviceIdentity(options());
     expect(identity.publicKeyPem.startsWith("MLDSA65-PUBLIC-KEY:")).toBe(true);
@@ -159,29 +174,61 @@ describe("M15.B device-identity file-based wrap (v3-style)", () => {
   it("rejects OPENCLAW_WRAP_KEY_FILE with malformed base64url contents", () => {
     writeWrapKeyFile(wrapKeyFile, "not-valid-base64!!!", 0o600);
     expect(() => loadOrCreateDeviceIdentity(options())).toThrow(/base64url/);
+    try {
+      loadOrCreateDeviceIdentity(options());
+    } catch (error) {
+      expect(String(error)).not.toContain("not-valid-base64");
+    }
   });
 
-  it("falls back to plaintext when neither WRAP_KEY_FILE nor WRAP_KEY is set", () => {
+  it.skipIf(process.platform !== "win32")("rejects a wrap key readable by Windows Users", () => {
+    execFileSync("icacls.exe", [wrapKeyFile, "/grant", "*S-1-5-32-545:R"], {
+      windowsHide: true,
+    });
+    expect(() => loadOrCreateDeviceIdentity(options())).toThrow(/ACL/);
+  });
+
+  it("creates a private state-dir key and never persists plaintext when no key is configured", () => {
     delete process.env.OPENCLAW_WRAP_KEY_FILE;
     delete process.env.OPENCLAW_PQC_WRAP_KEY;
     delete process.env.OPENCLAW_PQC_WRAP_KEY_ID;
     const records: PqcLogPayload[] = [];
     setPqcEmit((record) => records.push(record));
     loadOrCreateDeviceIdentity(options());
-    const stored = readStoredDeviceIdentityReadOnly(options());
+    const stored = readStoredDeviceIdentity({
+      ...options(),
+      wrappingKeyProvider: resolveDeviceIdentityKeyring(options().env),
+    });
     expect(stored).not.toBeNull();
-    expect(stored!.mldsaPrivateKeyWrapped).toBeNull();
-    expect(stored!.mldsaPrivateKeyWrapKeyId).toBeNull();
-    expect(stored!.mldsaPrivateKeyPem).not.toBeNull();
-    expect(stored!.mldsaPrivateKeyPem!.startsWith("MLDSA65-SECRET-KEY:")).toBe(true);
-    expect(records.some((record) => String(record.detail).includes("plaintext"))).toBe(true);
+    expect(stored!.mldsaPrivateKeyWrapped).not.toBeNull();
+    expect(stored!.mldsaPrivateKeyWrapKeyId).toBe("file-default");
+    expect(stored!.mldsaPrivateKeyPem).toBeNull();
+    expect(fs.existsSync(path.join(tempDir, "credentials", "device-identity-wrap.key"))).toBe(true);
+    expect(
+      records.some((record) => String(record.detail).includes("created private state-dir")),
+    ).toBe(true);
+  });
+
+  it("does not replace a lost wrapping key for an existing wrapped identity", () => {
+    delete process.env.OPENCLAW_WRAP_KEY_FILE;
+    delete process.env.OPENCLAW_PQC_WRAP_KEY;
+    delete process.env.OPENCLAW_PQC_WRAP_KEY_ID;
+    loadOrCreateDeviceIdentity(options());
+    const keyPath = path.join(tempDir, "credentials", "device-identity-wrap.key");
+    closeOpenClawStateDatabaseForTest();
+    fs.rmSync(keyPath);
+    expect(() => loadOrCreateDeviceIdentity(options())).toThrow(
+      /Restore.*device-identity-wrap.key/,
+    );
+    expect(fs.existsSync(keyPath)).toBe(false);
   });
 
   it("migrates an existing plaintext identity when a wrapping key is later configured", () => {
     delete process.env.OPENCLAW_WRAP_KEY_FILE;
     delete process.env.OPENCLAW_PQC_WRAP_KEY;
     delete process.env.OPENCLAW_PQC_WRAP_KEY_ID;
-    const before = loadOrCreateDeviceIdentity(options());
+    const before = generateStoredDeviceIdentity();
+    insertStoredDeviceIdentityIfAbsent(before, options());
     expect(readStoredDeviceIdentityReadOnly(options())!.mldsaPrivateKeyPem).not.toBeNull();
 
     process.env.OPENCLAW_WRAP_KEY_FILE = wrapKeyFile;

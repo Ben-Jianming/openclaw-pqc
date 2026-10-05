@@ -116,6 +116,8 @@ node openclaw.mjs onboard --install-daemon
 
 4. 使用 `start.bat` / `./start.sh` 启动，使用 `verify.bat` / `./verify.sh` 验证安装。
 
+首次创建 Node/CLI 设备身份时，程序会在状态目录的 `credentials/device-identity-wrap.key` 自动生成仅当前用户可读取的包裹密钥，并用它加密存储 ML-DSA 私钥。请将该密钥与状态数据库一起离线备份；丢失密钥无法恢复已加密的设备身份。Windows 会核验文件 ACL，无法安全设置权限时会停止身份创建。
+
 > `npm install -g openclaw@latest` 安装的是上游版本，不包含本仓库的 PQC 修改。请使用本仓库自带的安装脚本。
 
 完整步骤和故障排查：[INSTALL.zh-CN.md](INSTALL.zh-CN.md)。

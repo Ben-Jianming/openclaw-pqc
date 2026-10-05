@@ -11,7 +11,7 @@ OpenClaw PQC is a staged migration. This page states what the product enforces t
 
 - Node and CLI device identities use ML-DSA-65 (FIPS 204). The gateway derives the device ID from the public key and verifies the signed connect payload, nonce, timestamp, role, scopes, client metadata, and authentication token binding.
 - Apple, Android, Linux, and browser clients currently use Ed25519 device keys. They declare `algorithm: ed25519`; the gateway verifies that proof through the same mandatory authentication path. A declared algorithm that does not match the key is rejected.
-- Existing plaintext ML-DSA private-key rows are atomically wrapped when `OPENCLAW_WRAP_KEY_FILE` or `OPENCLAW_PQC_WRAP_KEY` becomes available. Wrapped rows fail closed if their key is missing.
+- New Node/CLI ML-DSA private-key rows are always wrapped. Without an explicit key, the runtime provisions a private key at `credentials/device-identity-wrap.key` under the canonical state directory. Existing plaintext rows are atomically wrapped on the next load. Wrapped rows fail closed if their key is missing.
 - PQC security events use the structured PQC audit stream. An audit record is evidence that an operation was attempted or completed; it is not by itself an end-to-end channel guarantee.
 
 ## Current limits
@@ -23,7 +23,7 @@ OpenClaw PQC is a staged migration. This page states what the product enforces t
 
 ## Key wrapping
 
-Set `OPENCLAW_WRAP_KEY_FILE` to an absolute path containing one base64url-encoded 32-byte key. On POSIX the file must have mode `0600`. `OPENCLAW_PQC_WRAP_KEY` remains available for managed environments, but a key file avoids shell-history exposure. Keep an offline backup; losing the wrapping key makes wrapped identities unrecoverable.
+The runtime creates a random 32-byte key on first device-identity creation if no key is configured. Its default location is `credentials/device-identity-wrap.key` under the canonical state directory. The file must have mode `0600` on POSIX. On Windows, the runtime restricts and verifies the ACL to the current user and SYSTEM before writing key material; failure prevents identity creation. Operators can instead set `OPENCLAW_WRAP_KEY_FILE` to an absolute path containing one base64url-encoded 32-byte key. `OPENCLAW_PQC_WRAP_KEY` remains available for managed environments. Keep an offline backup of the key and state database; losing the wrapping key makes wrapped identities unrecoverable. Replace an active key only through the rotation command, not by changing the file in place.
 
 Use `openclaw security wrap-key status` to inspect the store. `export` and `import` use a passphrase file so the passphrase does not appear in shell history. `rotate --output <new-file> --key-id <new-id>` atomically re-wraps every identity row and writes the new raw key to a file that must not already exist. Test a backup/restore before deleting an old key.
 

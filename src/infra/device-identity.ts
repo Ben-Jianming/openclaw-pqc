@@ -22,6 +22,7 @@ import { ed25519 } from "@noble/curves/ed25519.js";
 import { resolveStateDir } from "../config/paths.js";
 import { pqcLog } from "../logging/pqc-log.js";
 import { decodeBase64UrlKey } from "../security/keyring-provider.js";
+import { assertPrivateKeyFile, writePrivateKeyFile } from "../security/private-key-file.js";
 import { acquireDeviceIdentityCoordinator } from "./device-identity-coordinator.js";
 import {
   generateStoredDeviceIdentity,
@@ -36,6 +37,7 @@ import {
   type SyncWrappingKeyProvider,
   type StoredDeviceIdentity,
 } from "./device-identity-store.js";
+import { listStoredDeviceIdentityWrapHealth } from "./device-identity-wrap-operations.js";
 import {
   decodeMlDsa65PublicKey,
   decodeMlDsa65SecretKey,
@@ -163,10 +165,11 @@ function withDeviceIdentityCoordinator<T>(
   return result;
 }
 
+const DEFAULT_WRAP_KEY_RELATIVE_PATH = path.join("credentials", "device-identity-wrap.key");
+
 /**
- * Build a SyncWrappingKeyProvider from wrap env vars. Returns undefined if
- * neither var is set, which triggers the plaintext path (a startup warning
- * is logged in that case).
+ * Build a SyncWrappingKeyProvider from an explicit key or the state-dir key.
+ * Returns undefined only before the state-dir key has been provisioned.
  *
  * Resolution order (first wins):
  *   1. OPENCLAW_WRAP_KEY_FILE (M15.B, v3-style) - absolute path to a chmod 0600
@@ -189,24 +192,23 @@ export function resolveDeviceIdentityKeyring(
   env: NodeJS.ProcessEnv = process.env,
 ): SyncWrappingKeyProvider | undefined {
   // M15.B: v3-style file-based wrap takes precedence.
-  const wrapKeyFile = env.OPENCLAW_WRAP_KEY_FILE?.trim();
+  const explicitFile = env.OPENCLAW_WRAP_KEY_FILE?.trim();
+  const defaultFile = path.join(resolveStateDir(env), DEFAULT_WRAP_KEY_RELATIVE_PATH);
+  const wrapKeyFile =
+    explicitFile ||
+    (env.OPENCLAW_PQC_WRAP_KEY?.trim()
+      ? undefined
+      : fs.existsSync(defaultFile)
+        ? defaultFile
+        : undefined);
   if (wrapKeyFile) {
     if (!path.isAbsolute(wrapKeyFile)) {
       throw new Error(`OPENCLAW_WRAP_KEY_FILE must be absolute; got: ${wrapKeyFile}`);
     }
-    const stat = fs.statSync(wrapKeyFile);
-    if (process.platform !== "win32" && (stat.mode & 0o777) !== 0o600) {
-      throw new Error(
-        `OPENCLAW_WRAP_KEY_FILE ${wrapKeyFile} must be chmod 0600; got 0o${(stat.mode & 0o777).toString(8)}`,
-      );
-    }
+    assertPrivateKeyFile(wrapKeyFile);
     const raw = fs.readFileSync(wrapKeyFile, "utf8").trim();
     if (!/^[A-Za-z0-9_-]+$/.test(raw)) {
-      throw new Error(
-        "OPENCLAW_WRAP_KEY_FILE contents must be base64url (A-Z a-z 0-9 _ -); got: " +
-          raw.slice(0, 16) +
-          "...",
-      );
+      throw new Error("OPENCLAW_WRAP_KEY_FILE contents must be base64url (A-Z a-z 0-9 _ -)");
     }
     const keyId = env.OPENCLAW_PQC_WRAP_KEY_ID?.trim() || "file-default";
     const decode = () => decodeBase64UrlKey(raw);
@@ -221,9 +223,7 @@ export function resolveDeviceIdentityKeyring(
     return undefined;
   }
   if (!/^[A-Za-z0-9_-]+$/.test(raw)) {
-    throw new Error(
-      "OPENCLAW_PQC_WRAP_KEY must be base64url (A-Z a-z 0-9 _ -); got: " + raw.slice(0, 16) + "...",
-    );
+    throw new Error("OPENCLAW_PQC_WRAP_KEY must be base64url (A-Z a-z 0-9 _ -)");
   }
   const keyId = env.OPENCLAW_PQC_WRAP_KEY_ID?.trim() || "env-default";
   const decode = () => decodeBase64UrlKey(raw);
@@ -235,29 +235,40 @@ export function resolveDeviceIdentityKeyring(
 
 function loadOrCreateDeviceIdentityOwned(options: DeviceIdentityStoreOptions): DeviceIdentity {
   assertNoPendingLegacyIdentity(options);
-  // Resolve wrap keyring from env. If absent, the device identity will be
-  // stored with the ML-DSA-65 private key in plaintext (M5 fallback path).
-  // Operators must set OPENCLAW_PQC_WRAP_KEY in production deployments.
-  const wrappingKeyProvider = resolveDeviceIdentityKeyring(options.env ?? process.env);
-  const wrapEnvEnabled = wrappingKeyProvider !== undefined;
-  if (!wrapEnvEnabled) {
-    // M17: emit pqcLog so dashboard can see wrap-disabled state at startup
-    pqcLog.warn({
+  const stateDir = resolveLegacyStateDir(options);
+  const env = { ...(options.env ?? process.env), OPENCLAW_STATE_DIR: stateDir };
+  let wrappingKeyProvider = resolveDeviceIdentityKeyring(env);
+  if (!wrappingKeyProvider) {
+    const wrappedIdentity = listStoredDeviceIdentityWrapHealth(options).find(
+      ({ identity }) => identity.mldsaPrivateKeyWrapped != null,
+    );
+    if (wrappedIdentity) {
+      throw new Error(
+        `Stored device identity "${wrappedIdentity.identityKey}" is wrapped but its key is unavailable. Restore credentials/device-identity-wrap.key or set OPENCLAW_WRAP_KEY_FILE; a new key cannot recover it.`,
+      );
+    }
+    const keyPath = path.join(stateDir, DEFAULT_WRAP_KEY_RELATIVE_PATH);
+    writePrivateKeyFile(keyPath, `${crypto.randomBytes(32).toString("base64url")}\n`);
+    wrappingKeyProvider = resolveDeviceIdentityKeyring(env);
+    pqcLog.info({
       event: "device-identity",
-      status: "fail",
+      status: "ok",
       identityKey: PRIMARY_DEVICE_IDENTITY_KEY,
       detail:
-        "wrap env unavailable, falling back to plaintext storage (set OPENCLAW_PQC_WRAP_KEY to enable)",
+        "created private state-dir wrapping key; back up credentials/device-identity-wrap.key",
     });
+  }
+  if (!wrappingKeyProvider) {
+    throw new Error("Device identity wrapping key could not be provisioned");
   }
   const readOptions = { ...options, wrappingKeyProvider };
 
   let existing = readStoredDeviceIdentity(readOptions);
   if (existing) {
-    if (wrapEnvEnabled && existing.mldsaPrivateKeyWrapped == null) {
+    if (existing.mldsaPrivateKeyWrapped == null) {
       const migration = wrapStoredDeviceIdentityIfPlaintext({
         ...readOptions,
-        wrappingKeyProvider: wrappingKeyProvider!,
+        wrappingKeyProvider,
       });
       existing = migration.identity ?? existing;
       if (migration.migrated) {
@@ -269,28 +280,13 @@ function loadOrCreateDeviceIdentityOwned(options: DeviceIdentityStoreOptions): D
         });
       }
     }
-    // M17: emit pqcLog so dashboard can see device-identity activity.
-    // Distinguish: row state (actual wrap) vs env state (config intent).
     const rowIsWrapped = existing.mldsaPrivateKeyWrapped != null;
-    let detail: string;
-    let status: "ok" | "fail";
-    if (rowIsWrapped && wrapEnvEnabled) {
-      detail = "loaded existing wrapped identity (M2+M4 active)";
-      status = "ok";
-    } else if (rowIsWrapped && !wrapEnvEnabled) {
-      detail =
-        "loaded existing wrapped identity, env has no wrap (M5 fallback would kick in on next generate)";
-      status = "ok";
-    } else if (!rowIsWrapped && wrapEnvEnabled) {
-      detail = "loaded plaintext identity while wrap migration was unavailable";
-      status = "fail";
-    } else {
-      detail = "loaded existing legacy plaintext identity (no wrap, M5 fallback)";
-      status = "ok";
-    }
+    const detail = rowIsWrapped
+      ? "loaded existing wrapped identity (M2+M4 active)"
+      : "loaded plaintext identity while wrap migration was unavailable";
     pqcLog.info({
       event: "device-identity",
-      status,
+      status: rowIsWrapped ? "ok" : "fail",
       identityKey: PRIMARY_DEVICE_IDENTITY_KEY,
       detail,
     });
@@ -306,9 +302,7 @@ function loadOrCreateDeviceIdentityOwned(options: DeviceIdentityStoreOptions): D
     event: "device-identity",
     status: "ok",
     identityKey: PRIMARY_DEVICE_IDENTITY_KEY,
-    detail: wrapEnvEnabled
-      ? "generated and wrapped new identity (M2+M4+M5 v2 active)"
-      : "generated new identity in plaintext (M5 fallback)",
+    detail: "generated and wrapped new identity (M2+M4+M5 v2 active)",
   });
   return toDeviceIdentity(created);
 }
@@ -354,7 +348,14 @@ export function loadDeviceIdentityIfPresent(
 ): DeviceIdentity | null {
   return withDeviceIdentityCoordinator(options, (_resolved, resolvedOptions) => {
     assertNoPendingLegacyIdentity(resolvedOptions);
-    const stored = readStoredDeviceIdentityReadOnly(resolvedOptions);
+    const env = {
+      ...(resolvedOptions.env ?? process.env),
+      OPENCLAW_STATE_DIR: resolveLegacyStateDir(resolvedOptions),
+    };
+    const stored = readStoredDeviceIdentityReadOnly({
+      ...resolvedOptions,
+      wrappingKeyProvider: resolveDeviceIdentityKeyring(env),
+    });
     return stored ? toDeviceIdentity(stored) : null;
   });
 }

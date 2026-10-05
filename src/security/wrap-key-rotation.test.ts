@@ -54,6 +54,7 @@ describe("wrap-key-rotation (M7, whitepaper 2.2.5.C + 2.2.5.D)", () => {
   it("WRAP_KEY_BACKUP_CONSTANTS expose the OWASP 2023 minimums", () => {
     expect(WRAP_KEY_BACKUP_CONSTANTS.BACKUP_VERSION).toBe(1);
     expect(WRAP_KEY_BACKUP_CONSTANTS.PBKDF2_ITERATIONS).toBe(210_000);
+    expect(WRAP_KEY_BACKUP_CONSTANTS.MAX_PBKDF2_ITERATIONS).toBe(1_000_000);
     expect(WRAP_KEY_BACKUP_CONSTANTS.PBKDF2_KEY_BYTES).toBe(32);
     expect(WRAP_KEY_BACKUP_CONSTANTS.SALT_BYTES).toBe(16);
     expect(WRAP_KEY_BACKUP_CONSTANTS.IV_BYTES).toBe(12);
@@ -130,6 +131,18 @@ describe("wrap-key-rotation (M7, whitepaper 2.2.5.C + 2.2.5.D)", () => {
     const tampered = Buffer.from(JSON.stringify(raw), "utf8").toString("base64url");
     expect(() => importWrapKey(tampered, STRONG_PASSPHRASE)).toThrow(/salt must be 16 bytes/);
   });
+
+  it.each([1, 1_000_001, 2_147_483_647])(
+    "rejects unsafe PBKDF2 iteration count %i before deriving a key",
+    (iterations) => {
+      const envelope = exportWrapKey(newKey(), STRONG_PASSPHRASE, "wrap-key-2026-08");
+      const raw = JSON.parse(Buffer.from(envelope, "base64url").toString("utf8"));
+      raw.iterations = iterations;
+      expect(() =>
+        importWrapKey(Buffer.from(JSON.stringify(raw)).toString("base64url"), STRONG_PASSPHRASE),
+      ).toThrow(/iterations must be between/);
+    },
+  );
 
   it("importWrapKey rejects an envelope whose IV has been tampered with", () => {
     const envelope = exportWrapKey(newKey(), STRONG_PASSPHRASE, "wrap-key-2026-08");
