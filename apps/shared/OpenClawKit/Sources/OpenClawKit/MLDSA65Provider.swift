@@ -22,7 +22,7 @@ enum MLDSA65Provider {
             return (privateKey.seedRepresentation, privateKey.publicKey.rawRepresentation)
         }
         let seed = try self.randomData(count: self.seedByteCount)
-        return (seed, try self.portablePublicKey(seed: seed))
+        return try (seed, self.portablePublicKey(seed: seed))
     }
 
     static func publicKey(seed: Data) throws -> Data {

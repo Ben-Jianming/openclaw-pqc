@@ -280,10 +280,10 @@ public enum DeviceIdentityStore {
             switch identity.algorithm {
             case DeviceIdentity.ed25519Algorithm:
                 let privateKey = try Curve25519.Signing.PrivateKey(rawRepresentation: privateKeyData)
-                return self.base64UrlEncode(try privateKey.signature(for: Data(payload.utf8)))
+                return try self.base64UrlEncode(privateKey.signature(for: Data(payload.utf8)))
             case DeviceIdentity.mlDsa65Algorithm:
                 guard let publicKeyData = Data(base64Encoded: identity.publicKey) else { return nil }
-                return self.base64UrlEncode(try MLDSA65Provider.sign(
+                return try self.base64UrlEncode(MLDSA65Provider.sign(
                     message: Data(payload.utf8),
                     seed: privateKeyData,
                     publicKey: publicKeyData))
@@ -329,8 +329,8 @@ public enum DeviceIdentityStore {
         let decoder = JSONDecoder()
         if keys == ["deviceId", "publicKey", "privateKey", "createdAtMs"] ||
             keys == ["deviceId", "publicKey", "privateKey", "createdAtMs", "algorithm"],
-           let decoded = try? decoder.decode(DeviceIdentity.self, from: data),
-           decoded.createdAtMs >= 0
+            let decoded = try? decoder.decode(DeviceIdentity.self, from: data),
+            decoded.createdAtMs >= 0
         {
             guard let normalized = normalizedRawIdentity(decoded),
                   let publicKeyData = Data(base64Encoded: normalized.publicKey),

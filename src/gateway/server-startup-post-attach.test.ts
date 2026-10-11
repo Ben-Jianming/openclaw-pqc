@@ -65,6 +65,7 @@ const hoisted = vi.hoisted(() => {
   const refreshPreparedModelRuntimeSnapshots = vi.fn(async (_cfg?: unknown) => {});
   const ensureRuntimePluginsLoaded = vi.fn();
   const ensureContextWindowCacheLoaded = vi.fn(async () => {});
+  const contextCachePrewarmHandles = new Set<{ stop: () => void | Promise<void> }>();
   const scheduleGatewayHandlerPrewarm = vi.fn(() => ({ stop: vi.fn() }));
   const clearCurrentProviderAuthState = vi.fn();
   const warmCurrentProviderAuthStateOffMainThread = vi.fn(
@@ -106,6 +107,7 @@ const hoisted = vi.hoisted(() => {
     refreshPreparedModelRuntimeSnapshots,
     ensureRuntimePluginsLoaded,
     ensureContextWindowCacheLoaded,
+    contextCachePrewarmHandles,
     scheduleGatewayHandlerPrewarm,
     clearCurrentProviderAuthState,
     warmCurrentProviderAuthStateOffMainThread,
@@ -219,6 +221,20 @@ vi.mock("../agents/runtime-plugins.js", () => ({
 vi.mock("../agents/context.js", () => ({
   ensureContextWindowCacheLoaded: hoisted.ensureContextWindowCacheLoaded,
 }));
+
+vi.mock("./server-startup-context-cache-prewarm.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./server-startup-context-cache-prewarm.js")>();
+  return {
+    ...actual,
+    scheduleContextCachePrewarm: (
+      ...args: Parameters<typeof actual.scheduleContextCachePrewarm>
+    ) => {
+      const handle = actual.scheduleContextCachePrewarm(...args);
+      hoisted.contextCachePrewarmHandles.add(handle);
+      return handle;
+    },
+  };
+});
 
 vi.mock("../agents/model-provider-auth.js", () => ({
   warmCurrentProviderAuthStateOffMainThread: hoisted.warmCurrentProviderAuthStateOffMainThread,
@@ -381,7 +397,13 @@ describe("startGatewayPostAttachRuntime", () => {
     hoisted.createTranscriptsAutoStartService.mockClear();
   });
 
-  afterEach(() => {
+  afterEach(async () => {
+    // Earlier startup tests also schedule real five-second warmups. Stop them
+    // before the next case resets the shared mock and switches to fake timers.
+    for (const handle of hoisted.contextCachePrewarmHandles) {
+      await handle.stop();
+    }
+    hoisted.contextCachePrewarmHandles.clear();
     resetGatewayWorkAdmission();
     closeOpenClawStateDatabaseForTest();
     vi.useRealTimers();
@@ -1110,6 +1132,9 @@ describe("startGatewayPostAttachRuntime", () => {
         onGatewayLifetimeSidecars,
       });
 
+      // Advance deferred startup explicitly; Windows polling ticks can advance
+      // fake time by less than 100 ms before the real waitFor timeout expires.
+      await vi.advanceTimersByTimeAsync(100);
       await vi.dynamicImportSettled();
       await waitForGatewayTestState(() => {
         expect(hoisted.setAuthProfileFailureHook).toHaveBeenCalledTimes(1);
@@ -1226,7 +1251,8 @@ describe("startGatewayPostAttachRuntime", () => {
         onGatewayLifetimeSidecars,
       });
 
-      await vi.advanceTimersToNextTimerAsync();
+      await vi.advanceTimersByTimeAsync(100);
+      await vi.dynamicImportSettled();
       await waitForGatewayTestState(() => {
         expect(onPostReadySidecars).toHaveBeenCalledTimes(1);
         expect(onGatewayLifetimeSidecars).toHaveBeenCalledTimes(1);

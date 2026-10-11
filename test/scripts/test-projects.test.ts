@@ -123,10 +123,12 @@ async function listFullSuiteTestFileMatches(): Promise<Map<string, string[]>> {
 }
 
 function listNormalFullSuiteTestFiles(): string[] {
-  const e2eNamedIntegrationTests = new Set([
+  const separateIntegrationLaneTests = new Set([
     "src/gateway/gateway.test.ts",
     "src/gateway/server.startup-matrix-migration.integration.test.ts",
     "src/gateway/sessions-history-http.test.ts",
+    // IndexedDB/WebCrypto acceptance belongs to ui/vitest.config.ts's real Chromium lane.
+    "ui/src/app/pqc-push.browser.test.ts",
   ]);
   return fg
     .sync(["**/*.{test,spec}.{ts,tsx,mts,cts,js,jsx,mjs,cjs}"], {
@@ -140,7 +142,7 @@ function listNormalFullSuiteTestFiles(): string[] {
         !file.includes(".live.test.") &&
         !file.includes(".e2e.test.") &&
         !file.startsWith("test/fixtures/") &&
-        !e2eNamedIntegrationTests.has(file),
+        !separateIntegrationLaneTests.has(file),
     )
     .toSorted((left, right) => left.localeCompare(right));
 }

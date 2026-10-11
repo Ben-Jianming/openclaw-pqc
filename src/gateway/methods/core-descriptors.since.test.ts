@@ -70,6 +70,10 @@ const CURRENT_TRAIN_METHODS = [
   "channels.pairing.dismiss",
   "cron.scratch.get",
   "cron.scratch.set",
+  "push.pqc.keys",
+  "push.pqc.redeem",
+  "node.push.pqc.keys",
+  "node.push.pqc.redeem",
 ] as const;
 
 describe("core gateway method release trains", () => {

@@ -16,6 +16,11 @@ const CONTROL_CACHE_LIMIT = 3;
 // Minimal app-shell files to precache.
 const PRECACHE_URLS = ["./"];
 
+function postClientMessage(client, message) {
+  // oxlint-disable-next-line unicorn/require-post-message-target-origin -- Service Worker Client.postMessage does not take targetOrigin.
+  client.postMessage(message);
+}
+
 self.addEventListener("install", (event) => {
   event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.addAll(PRECACHE_URLS)));
   self.skipWaiting();
@@ -44,8 +49,7 @@ self.addEventListener("activate", (event) => {
       ]);
 
       for (const client of windowClients) {
-        // oxlint-disable-next-line unicorn/require-post-message-target-origin -- Service Worker Client.postMessage does not take targetOrigin.
-        client.postMessage({ type: "sw-updated", version: CACHE_VERSION });
+        postClientMessage(client, { type: "sw-updated", version: CACHE_VERSION });
       }
     })(),
   );
@@ -243,8 +247,7 @@ self.addEventListener("notificationclick", (event) => {
             type: "pqc-push-reference",
             reference: event.notification.data?.pqc_ref,
           };
-          // oxlint-disable-next-line unicorn/require-post-message-target-origin -- Service Worker Client.postMessage does not take targetOrigin.
-          client.postMessage(message);
+          postClientMessage(client, message);
           return client.focus();
         }
 
@@ -273,8 +276,9 @@ self.addEventListener("notificationclick", (event) => {
             type: "pqc-push-reference",
             reference: event.notification.data?.pqc_ref,
           };
-          // oxlint-disable-next-line unicorn/require-post-message-target-origin -- Service Worker Client.postMessage does not take targetOrigin.
-          client?.postMessage(message);
+          if (client) {
+            postClientMessage(client, message);
+          }
           return client;
         });
       }

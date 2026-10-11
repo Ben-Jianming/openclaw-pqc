@@ -81,7 +81,7 @@ function setRequestUserAgent(req: unknown) {
 }
 
 type FeishuHttpInstanceLike = Pick<
-  typeof feishuClientSdk.defaultHttpInstance,
+  Lark.HttpInstance,
   "request" | "get" | "post" | "put" | "patch" | "delete" | "head" | "options"
 >;
 
@@ -280,7 +280,9 @@ function resolveDomain(domain: FeishuDomain | undefined): Lark.Domain | string {
  * keep axios from taking a separate ambient proxy path for HTTPS requests.
  */
 function createFeishuHttpInstance(defaultTimeoutMs: number): Lark.HttpInstance {
-  const base: FeishuHttpInstanceLike = feishuClientSdk.defaultHttpInstance;
+  // The SDK's response interceptor returns data (or data plus requested headers),
+  // so its HttpInstance contract applies rather than Axios's response-envelope type.
+  const base = feishuClientSdk.defaultHttpInstance as FeishuHttpInstanceLike;
 
   async function injectRequestOptions<D>(
     opts?: Lark.HttpRequestOptions<D>,
