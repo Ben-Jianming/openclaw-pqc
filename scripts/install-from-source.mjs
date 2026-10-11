@@ -32,7 +32,7 @@ function nodeVersionIsSupported(version) {
     return atLeast(version, [22, 22, 3]);
   }
   if (major === 24) {
-    return atLeast(version, [24, 16, 0]);
+    return atLeast(version, [24, 15, 0]);
   }
   if (major === 25) {
     return atLeast(version, [25, 9, 0]);
@@ -121,7 +121,7 @@ function main() {
   const nodeVersion = parseVersion(process.versions.node);
   if (!nodeVersion || !nodeVersionIsSupported(nodeVersion)) {
     throw new Error(
-      `Unsupported Node ${process.versions.node}. Use Node 24.16.0 or newer (Node 22 requires 22.22.3+).`,
+      `Unsupported Node ${process.versions.node}. Use Node 22.22.3+, 24.15.0+, or 25.9.0+ (Node 23 is unsupported).`,
     );
   }
 

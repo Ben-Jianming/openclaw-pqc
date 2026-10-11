@@ -132,12 +132,14 @@ async function verifyGatewayHandshake(env, keys) {
         });
       }
     }
-    // Use the actual installed CLI client, whose device proof uses ML-DSA-65.
+    // The local CLI health call checks shared-token authentication. Device-bound
+    // RPCs below use the built SDK client, which also supplies ML-DSA-65 proof.
     const result = child(
       [cliPath, "gateway", "health", "--port", String(port), "--timeout", "10000", "--json"],
       gatewayEnv,
     );
     assert.equal(JSON.parse(result.stdout).ok, true, "authenticated gateway health failed");
+    child([scriptPath, "--probe", "gateway", url], gatewayEnv);
     await new Promise((resolve, reject) => {
       const socket = new WebSocket(url, { handshakeTimeout: 10000 });
       const timer = setTimeout(() => {
@@ -231,7 +233,50 @@ if (process.argv[2] === "--probe") {
       replayGuard,
       ...overrides,
     });
-  if (mode === "first") {
+  if (mode === "gateway") {
+    const { GatewayClient } = await import(
+      pathToFileURL(path.join(root, "dist/plugin-sdk/gateway-runtime.js")).href
+    );
+    let acceptHello;
+    let rejectHello;
+    const hello = new Promise((resolve, reject) => {
+      acceptHello = resolve;
+      rejectHello = reject;
+    });
+    const client = new GatewayClient({
+      url: process.argv[4],
+      token: process.env.OPENCLAW_GATEWAY_TOKEN,
+      clientName: "cli",
+      mode: "cli",
+      role: "operator",
+      scopes: ["operator.read"],
+      requestTimeoutMs: 10000,
+      onHelloOk: acceptHello,
+      onConnectError: rejectHello,
+    });
+    const timer = setTimeout(() => rejectHello(new Error("device handshake timed out")), 20000);
+    try {
+      assert.equal(client.getConnectionMetadata().hasDeviceIdentity, true);
+      client.start();
+      await hello;
+      // Exercise the installed dispatch table with a cryptographically bound device.
+      const { recipientId, ...verificationKeys } = await client.request("push.pqc.keys", {});
+      assert.equal(recipientId, keys.senderId, "push RPC authenticated another device");
+      assert.deepEqual(verificationKeys, keys, "push RPC returned different verification keys");
+      await assert.rejects(
+        client.request("push.pqc.redeem", {
+          version: 1,
+          object_id: "installation-test-missing-object",
+          token: randomBytes(32).toString("base64url"),
+          expires_at_ms: Date.now() + 60_000,
+        }),
+        (error) => error.code === "UNAVAILABLE" && error.message === "push reference unavailable",
+      );
+    } finally {
+      clearTimeout(timer);
+      await client.stopAndWait();
+    }
+  } else if (mode === "first") {
     const signed = sdk.signPushEnvelope({
       payload: '{"title":"Installation verification"}',
       recipientId: "installation-test",
@@ -345,7 +390,7 @@ if (process.argv[2] === "--probe") {
     child([scriptPath, "--probe", "restored"], recovered);
     assert.ok(proof.keys.senderId);
     process.stdout.write(
-      "Installed PQC behavior verified: encrypted identity, dual signatures, binding, expiry, persistent replay, restart, authenticated gateway handshake, invalid-proof rejection, lost-key refusal and backup recovery. Live services and physical devices are not covered.\n",
+      "Installed PQC behavior verified: encrypted identity, dual signatures, binding, expiry, persistent replay, restart, authenticated gateway handshake, dispatchable push RPCs, invalid-proof rejection, lost-key refusal and backup recovery. Live services and physical devices are not covered.\n",
     );
   } finally {
     assert.equal(path.dirname(directory), path.resolve(tmpdir()));

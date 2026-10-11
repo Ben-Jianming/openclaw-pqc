@@ -52,7 +52,7 @@ suite("Codex native session catalog", () => {
   });
 
   it("omits empty native session catalogs from the sidebar", async () => {
-    const page = await browser.newPage();
+    const page = await browser.newPage({ locale: "en-US" });
     const gateway = await installMockGateway(page, {
       featureMethods: ["chat.metadata", "chat.startup", "sessions.catalog.list"],
       methodResponses: {
@@ -93,7 +93,9 @@ suite("Codex native session catalog", () => {
 
     await page.goto(`${server.baseUrl}chat`);
     await expect
-      .poll(async () => (await gateway.getRequests("sessions.catalog.list")).length)
+      .poll(async () => (await gateway.getRequests("sessions.catalog.list")).length, {
+        timeout: 10_000,
+      })
       .toBeGreaterThan(0);
     expect(await page.locator('[data-session-section="catalog:codex"]').count()).toBe(0);
     expect(await page.locator('[data-session-section="catalog:claude"]').count()).toBe(0);
@@ -102,6 +104,7 @@ suite("Codex native session catalog", () => {
 
   it("separates native catalogs from live Coding rows", async () => {
     const page = await browser.newPage({
+      locale: "en-US",
       deviceScaleFactor: 2,
       viewport: { height: 900, width: 1280 },
     });
@@ -202,7 +205,7 @@ suite("Codex native session catalog", () => {
   });
 
   it("shows a completed host while the aggregate catalog request is still pending", async () => {
-    const page = await browser.newPage({ viewport: { height: 900, width: 1280 } });
+    const page = await browser.newPage({ locale: "en-US", viewport: { height: 900, width: 1280 } });
     const gateway = await installMockGateway(page, {
       deferredMethods: ["sessions.catalog.list"],
       featureMethods: ["chat.metadata", "chat.startup", "sessions.catalog.list"],
@@ -264,7 +267,10 @@ suite("Codex native session catalog", () => {
   });
 
   it("groups sessions by host and hides empty offline nodes", async () => {
-    const page = await browser.newPage({ viewport: { height: 1100, width: 1440 } });
+    const page = await browser.newPage({
+      locale: "en-US",
+      viewport: { height: 1100, width: 1440 },
+    });
     await page.addInitScript((key) => localStorage.removeItem(key), catalogGroupingStorageKey);
     await page.addInitScript(
       (key) => localStorage.removeItem(key),
@@ -485,7 +491,10 @@ suite("Codex native session catalog", () => {
   });
 
   it("explains node-list failures and exposes independent discovery settings", async () => {
-    const page = await browser.newPage({ viewport: { height: 1100, width: 1440 } });
+    const page = await browser.newPage({
+      locale: "en-US",
+      viewport: { height: 1100, width: 1440 },
+    });
     await installMockGateway(page, {
       featureMethods: [
         "chat.metadata",
@@ -666,7 +675,7 @@ suite("Codex native session catalog", () => {
   });
 
   it("shows a catalog Load More rejection without losing the retry cursor", async () => {
-    const page = await browser.newPage();
+    const page = await browser.newPage({ locale: "en-US" });
     const pageErrors: string[] = [];
     page.on("pageerror", (error) => pageErrors.push(error.message));
     const gateway = await installMockGateway(page, {
@@ -736,7 +745,7 @@ suite("Codex native session catalog", () => {
   });
 
   it("adopts from the native chat composer, navigates, and auto-sends", async () => {
-    const page = await browser.newPage();
+    const page = await browser.newPage({ locale: "en-US" });
     const gateway = await installMockGateway(page, {
       featureMethods: ["chat.metadata", "chat.startup", "sessions.catalog.list"],
       methodResponses: {

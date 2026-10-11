@@ -36,7 +36,10 @@ describeControlUiE2e("Control UI chat composer redesign", () => {
   });
 
   it("keeps model and settings in the bottom bar and switches the primary action with input state", async () => {
-    const context = await browser.newContext({ viewport: { width: 1920, height: 1080 } });
+    const context = await browser.newContext({
+      locale: "en-US",
+      viewport: { width: 1920, height: 1080 },
+    });
     const page = await context.newPage();
     const gateway = await installMockGateway(page, {
       assistantName: "Rosita",
@@ -543,7 +546,10 @@ describeControlUiE2e("Control UI chat composer redesign", () => {
   });
 
   it("refreshes the configured usable catalog after advertised chat metadata", async () => {
-    const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+    const context = await browser.newContext({
+      locale: "en-US",
+      viewport: { width: 1280, height: 900 },
+    });
     const page = await context.newPage();
     const gateway = await installMockGateway(page, {
       models: [
@@ -633,7 +639,10 @@ describeControlUiE2e("Control UI chat composer redesign", () => {
   });
 
   it("refreshes agent-scoped models when the pane switches sessions", async () => {
-    const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+    const context = await browser.newContext({
+      locale: "en-US",
+      viewport: { width: 1280, height: 900 },
+    });
     const page = await context.newPage();
     const gateway = await installMockGateway(page, {
       defaultAgentId: "work",
@@ -746,7 +755,10 @@ describeControlUiE2e("Control UI chat composer redesign", () => {
   });
 
   it("keeps startup models when the metadata refresh fails", async () => {
-    const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+    const context = await browser.newContext({
+      locale: "en-US",
+      viewport: { width: 1280, height: 900 },
+    });
     const page = await context.newPage();
     const gateway = await installMockGateway(page, {
       deferredMethods: ["chat.metadata"],
@@ -771,7 +783,10 @@ describeControlUiE2e("Control UI chat composer redesign", () => {
   });
 
   it("does not substitute default-agent models when scoped metadata fails", async () => {
-    const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+    const context = await browser.newContext({
+      locale: "en-US",
+      viewport: { width: 1280, height: 900 },
+    });
     const page = await context.newPage();
     const gateway = await installMockGateway(page, {
       deferredMethods: ["chat.startup"],
@@ -878,7 +893,10 @@ describeControlUiE2e("Control UI chat composer redesign", () => {
   });
 
   it("does not request unscoped models when chat metadata is unavailable", async () => {
-    const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+    const context = await browser.newContext({
+      locale: "en-US",
+      viewport: { width: 1280, height: 900 },
+    });
     const page = await context.newPage();
     const gateway = await installMockGateway(page, {
       models: [{ id: "gpt-default", name: "GPT Default", provider: "openai", available: true }],
@@ -924,7 +942,9 @@ describeControlUiE2e("Control UI chat composer redesign", () => {
 
     try {
       await page.goto(controlUiSessionUrl(server.baseUrl, "agent:work:main"));
-      await expect.poll(async () => (await gateway.getRequests("chat.startup")).length).toBe(1);
+      await expect
+        .poll(async () => (await gateway.getRequests("chat.startup")).length, { timeout: 10_000 })
+        .toBe(1);
 
       const composer = page.locator(".agent-chat__input");
       await expect

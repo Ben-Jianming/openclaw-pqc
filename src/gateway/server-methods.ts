@@ -817,6 +817,10 @@ export const coreGatewayHandlers: GatewayRequestHandlers = {
   ...createLazyCoreHandlers({
     methods: [
       "push.test",
+      "push.pqc.keys",
+      "push.pqc.redeem",
+      "node.push.pqc.keys",
+      "node.push.pqc.redeem",
       "push.web.vapidPublicKey",
       "push.web.subscribe",
       "push.web.unsubscribe",

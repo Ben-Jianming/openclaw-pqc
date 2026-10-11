@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - "apps/android/**"
+      - "apps/ios/**"
       - "apps/linux/**"
       - "apps/shared/OpenClawKit/**"
       - "packages/gateway-client/**"
@@ -19,6 +20,7 @@ on:
   pull_request:
     paths:
       - "apps/android/**"
+      - "apps/ios/**"
       - "apps/linux/**"
       - "apps/shared/OpenClawKit/**"
       - "packages/gateway-client/**"
@@ -60,6 +62,71 @@ jobs:
           install-bun: "false"
       - name: Verify native-generated push signatures in Node
         run: node --import tsx scripts/verify-native-push-v2.ts "${{ runner.temp }}/swift-push-v2.json"
+
+  ios-lifecycle:
+    name: iOS durable notification lifecycle simulator tests
+    runs-on: macos-26
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+      - name: Select Xcode 26
+        run: |
+          set -euo pipefail
+          for xcode_app in /Applications/Xcode_26.5.app /Applications/Xcode-26.5.0.app; do
+            if [ -d "$xcode_app/Contents/Developer" ]; then
+              sudo xcode-select -s "$xcode_app/Contents/Developer"
+              break
+            fi
+          done
+          xcodebuild -version
+          [[ "$(xcodebuild -version | awk 'NR == 1 { print $2 }')" == 26.* ]]
+      - uses: ./.github/actions/setup-node-env
+        with:
+          node-version: "24.x"
+          install-bun: "false"
+      - name: Install pinned iOS build tools
+        run: |
+          swift_tools_dir="$RUNNER_TEMP/openclaw-swift-tools"
+          ./scripts/install-xcodegen.sh "$swift_tools_dir"
+          ./scripts/install-swift-tools.sh "$swift_tools_dir"
+          echo "$swift_tools_dir" >> "$GITHUB_PATH"
+      - name: Build the iOS simulator app
+        run: pnpm ios:build
+      - name: Run notification and approval lifecycle tests
+        id: ios_lifecycle_tests
+        run: |
+          set -euo pipefail
+          simulator_id="$(
+            xcrun simctl list devices available --json | node --input-type=module -e '
+              const chunks = [];
+              for await (const chunk of process.stdin) chunks.push(chunk);
+              const runtimes = JSON.parse(Buffer.concat(chunks).toString("utf8")).devices;
+              const simulator = Object.values(runtimes).flat()
+                .find((device) => device.isAvailable && device.name.startsWith("iPhone"));
+              if (!simulator) throw new Error("No available iPhone simulator");
+              process.stdout.write(simulator.udid);
+            '
+          )"
+          mkdir -p apps/ios/build/LifecycleTestResults
+          xcodebuild \
+            -project apps/ios/OpenClaw.xcodeproj \
+            -scheme OpenClaw -configuration Debug \
+            -destination "platform=iOS Simulator,id=${simulator_id}" \
+            -resultBundlePath apps/ios/build/LifecycleTestResults/OpenClawLifecycleTests.xcresult \
+            -parallel-testing-enabled NO \
+            -only-testing:OpenClawTests/NodeAppModelInvokeTests \
+            -only-testing:OpenClawTests/OpenClawAppDelegateTests \
+            -only-testing:OpenClawTests/NotificationServingPreferenceTests test
+      - name: Retain iOS simulator evidence
+        if: ${{ always() && steps.ios_lifecycle_tests.outcome != '' && steps.ios_lifecycle_tests.outcome != 'skipped' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: pqc-ios-lifecycle-${{ github.sha }}
+          path: apps/ios/build/LifecycleTestResults/*.xcresult
+          if-no-files-found: error
+          retention-days: 14
 
   android:
     name: Android ML-DSA-65 vectors and identity migration

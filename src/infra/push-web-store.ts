@@ -1,5 +1,6 @@
 // Canonical shared-SQLite store for Web Push subscriptions and VAPID identity.
 import type { Insertable, Selectable } from "kysely";
+import { ensurePqcPushStateSchema } from "../state/openclaw-state-db-schema-additive.js";
 import type { DB as OpenClawStateKyselyDatabase } from "../state/openclaw-state-db.generated.js";
 import {
   openOpenClawStateDatabase,
@@ -12,7 +13,7 @@ import {
   executeSqliteQueryTakeFirstSync,
   getNodeSqliteKysely,
 } from "./kysely-sync.js";
-import { bindPushSubscriptionInTransaction, PQC_PUSH_SCHEMA_SQL } from "./pqc-push-state.js";
+import { bindPushSubscriptionInTransaction } from "./pqc-push-state.js";
 
 export const WEB_PUSH_VAPID_KEY_ID = "default";
 export const DEFAULT_WEB_PUSH_VAPID_SUBJECT = "https://openclaw.ai";
@@ -201,7 +202,7 @@ export function deleteWebPushSubscriptionByEndpoint(params: {
   deviceId?: string;
 }): boolean {
   return runOpenClawStateWriteTransaction(({ db }) => {
-    db.exec(PQC_PUSH_SCHEMA_SQL);
+    ensurePqcPushStateSchema(db);
     const stateDb = getNodeSqliteKysely<OpenClawStateKyselyDatabase>(db);
     const row = executeSqliteQueryTakeFirstSync(
       db,
@@ -244,7 +245,7 @@ export function deleteWebPushSubscriptionIfCurrent(params: {
 }): boolean {
   const subscription = params.subscription;
   return runOpenClawStateWriteTransaction(({ db }) => {
-    db.exec(PQC_PUSH_SCHEMA_SQL);
+    ensurePqcPushStateSchema(db);
     const result = executeSqliteQuerySync(
       db,
       getNodeSqliteKysely<WebPushDatabase>(db)

@@ -11,7 +11,6 @@ import { decodeBase64UrlKey } from "../security/keyring-provider.js";
 import { closeOpenClawStateDatabaseForTest } from "../state/openclaw-state-db.js";
 import {
   readStoredDeviceIdentity,
-  readStoredDeviceIdentityReadOnly,
   resolveDeviceIdentityStore,
   type DeviceIdentityReadOptions,
   type DeviceIdentityStoreOptions,

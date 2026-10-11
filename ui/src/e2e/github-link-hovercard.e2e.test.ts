@@ -196,7 +196,9 @@ describeControlUiE2e("GitHub link hover cards", () => {
     const popupPromise = page.waitForEvent("popup");
     await pullLink.click();
     const popup = await popupPromise;
-    await popup.waitForLoadState("domcontentloaded");
+    await popup.waitForURL("https://github.com/openclaw/openclaw/pull/99816", {
+      waitUntil: "domcontentloaded",
+    });
     expect(popup.url()).toBe("https://github.com/openclaw/openclaw/pull/99816");
   });
 });

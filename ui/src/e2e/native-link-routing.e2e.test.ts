@@ -322,7 +322,7 @@ describeControlUiE2e("native link routing", () => {
     const popupPromise = page.waitForEvent("popup");
     await link.click();
     const popup = await popupPromise;
-    await popup.waitForLoadState("domcontentloaded");
+    await popup.waitForURL("https://example.com/report", { waitUntil: "domcontentloaded" });
     expect(popup.url()).toBe("https://example.com/report");
   });
 });

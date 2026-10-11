@@ -11,6 +11,7 @@ import {
   type StoredSignedPush,
 } from "../security/push-reference.js";
 import type { OpenClawStateDatabaseOptions } from "../state/openclaw-state-db-contract.js";
+import { ensurePqcPushStateSchema } from "../state/openclaw-state-db-schema-additive.js";
 import type { DB as OpenClawStateDb } from "../state/openclaw-state-db.generated.js";
 import {
   openOpenClawStateDatabase,
@@ -22,32 +23,6 @@ import {
   getNodeSqliteKysely,
 } from "./kysely-sync.js";
 
-// Additive shared-state tables. Existing v6 databases acquire these on first use.
-export const PQC_PUSH_SCHEMA_SQL = `
-CREATE TABLE IF NOT EXISTS pqc_push_sequences (
-  sender_id TEXT NOT NULL, recipient_id TEXT NOT NULL, sequence INTEGER NOT NULL,
-  PRIMARY KEY (sender_id, recipient_id)
-) STRICT;
-CREATE TABLE IF NOT EXISTS pqc_push_replay (
-  sender_id TEXT NOT NULL, recipient_id TEXT NOT NULL, sequence INTEGER NOT NULL,
-  PRIMARY KEY (sender_id, recipient_id)
-) STRICT;
-CREATE TABLE IF NOT EXISTS pqc_push_nonces (
-  sender_id TEXT NOT NULL, recipient_id TEXT NOT NULL, nonce TEXT NOT NULL, expires_at_ms INTEGER NOT NULL,
-  PRIMARY KEY (sender_id, recipient_id, nonce)
-) STRICT;
-CREATE TABLE IF NOT EXISTS pqc_push_objects (
-  object_id TEXT PRIMARY KEY, token_hash TEXT NOT NULL, recipient_id TEXT NOT NULL,
-  payload TEXT NOT NULL, envelope_json TEXT NOT NULL, expires_at_ms INTEGER NOT NULL
-) STRICT;
-CREATE TABLE IF NOT EXISTS pqc_push_bindings (
-  subscription_id TEXT PRIMARY KEY, device_id TEXT NOT NULL
-) STRICT;
-CREATE TABLE IF NOT EXISTS pqc_push_attempts (
-  device_id TEXT PRIMARY KEY, window_start_ms INTEGER NOT NULL, attempts INTEGER NOT NULL
-) STRICT;
-`;
-const ensured = new WeakSet<object>();
 const MAX_PEERS = 10_000;
 const MAX_OBJECTS = 2_000;
 const MAX_DEVICE_OBJECTS = 100;
@@ -56,10 +31,7 @@ const MAX_NONCES = 50_000;
 
 function state(options: OpenClawStateDatabaseOptions) {
   const database = openOpenClawStateDatabase(options);
-  if (!ensured.has(database.db)) {
-    database.db.exec(PQC_PUSH_SCHEMA_SQL);
-    ensured.add(database.db);
-  }
+  ensurePqcPushStateSchema(database.db);
   return database;
 }
 
@@ -314,7 +286,7 @@ export function bindPushSubscriptionInTransaction(
   subscriptionId: string,
   deviceId: string,
 ): void {
-  db.exec(PQC_PUSH_SCHEMA_SQL);
+  ensurePqcPushStateSchema(db);
   const sql = getNodeSqliteKysely<OpenClawStateDb>(db);
   const row = executeSqliteQueryTakeFirstSync(
     db,

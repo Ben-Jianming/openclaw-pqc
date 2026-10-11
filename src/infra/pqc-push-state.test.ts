@@ -4,13 +4,18 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { PushDualEnvelope } from "../security/push-dual-signature.js";
-import { closeOpenClawStateDatabase } from "../state/openclaw-state-db.js";
+import {
+  closeOpenClawStateDatabase,
+  openOpenClawStateDatabase,
+  runOpenClawStateWriteTransaction,
+} from "../state/openclaw-state-db.js";
 import {
   SqlitePushReferenceStore,
   SqlitePushReplayGuard,
   nextPushSequence,
   pushSubscriptionRecipient,
   allowPushRedemption,
+  bindPushSubscriptionInTransaction,
 } from "./pqc-push-state.js";
 import { upsertWebPushSubscription, listWebPushSubscriptions } from "./push-web-store.js";
 
@@ -79,6 +84,35 @@ function compete(operation: "sequence" | "redeem", descriptor?: unknown): Promis
 }
 
 describe("durable push security state", () => {
+  it("retries first-use subscription binding after its schema transaction rolls back", () => {
+    const database = openOpenClawStateDatabase(options);
+    // Emulate an existing v6 state database before these additive tables existed.
+    for (const table of [
+      "pqc_push_sequences",
+      "pqc_push_replay",
+      "pqc_push_nonces",
+      "pqc_push_objects",
+      "pqc_push_bindings",
+      "pqc_push_attempts",
+    ]) {
+      database.db.exec(`DROP TABLE ${table}`);
+    }
+    expect(() =>
+      runOpenClawStateWriteTransaction(
+        ({ db }) => {
+          bindPushSubscriptionInTransaction(db, "subscription", "alice");
+          throw new Error("registration aborted");
+        },
+        { database },
+      ),
+    ).toThrow("registration aborted");
+    expect(nextPushSequence("gateway", "alice", options)).toBe(1);
+    runOpenClawStateWriteTransaction(
+      ({ db }) => bindPushSubscriptionInTransaction(db, "subscription", "alice"),
+      { database },
+    );
+    expect(pushSubscriptionRecipient("subscription", options)).toBe("alice");
+  });
   it("serializes counters and once-only redemption across independent processes", async () => {
     expect(nextPushSequence("gateway", "alice", options)).toBe(1);
     const descriptor = new SqlitePushReferenceStore(options).create({

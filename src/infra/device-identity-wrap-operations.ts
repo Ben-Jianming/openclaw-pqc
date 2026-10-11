@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import { serializeWrappedSecret, wrapSecret } from "../security/secret-wrapping.js";
 import { withOpenClawStateDatabaseReadOnly } from "../state/openclaw-state-db-readonly.js";
+import { tableExists } from "../state/openclaw-state-db-schema-helpers.js";
 import { runOpenClawStateWriteTransaction } from "../state/openclaw-state-db.js";
 import {
   DeviceIdentityStorageError,
@@ -32,10 +33,7 @@ export function listStoredDeviceIdentityWrapHealth(
     (database) => {
       // An older state database may predate the device identity table. The
       // writer will migrate it after this read-only recovery check.
-      const table = database.db
-        .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'device_identities'")
-        .get();
-      if (!table) {
+      if (!tableExists(database.db, "device_identities")) {
         return [];
       }
       const db = getNodeSqliteKysely<DeviceIdentityDatabase>(database.db);

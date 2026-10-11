@@ -124,17 +124,17 @@ function rememberPqcWake(ref) {
   }
   return new Promise((resolve) => {
     const open = indexedDB.open("openclaw-pqc-push-v2", 1);
-    open.onupgradeneeded = () => {
+    open.addEventListener("upgradeneeded", () => {
       open.result.createObjectStore("replay");
       open.result.createObjectStore("wakes", { keyPath: "object_id" });
-    };
-    open.onerror = () => resolve();
-    open.onsuccess = () => {
+    });
+    open.addEventListener("error", () => resolve());
+    open.addEventListener("success", () => {
       const db = open.result;
       const tx = db.transaction("wakes", "readwrite");
       const store = tx.objectStore("wakes");
       const all = store.getAll();
-      all.onsuccess = () => {
+      all.addEventListener("success", () => {
         const live = all.result.filter((item) => item.expires_at_ms > Date.now());
         for (const item of all.result) {
           if (item.expires_at_ms <= Date.now()) {
@@ -149,16 +149,16 @@ function rememberPqcWake(ref) {
             expires_at_ms: ref.expires_at_ms,
           });
         }
-      };
-      tx.oncomplete = () => {
+      });
+      tx.addEventListener("complete", () => {
         db.close();
         resolve();
-      };
-      tx.onabort = () => {
+      });
+      tx.addEventListener("abort", () => {
         db.close();
         resolve();
-      };
-    };
+      });
+    });
   });
 }
 
@@ -239,10 +239,12 @@ self.addEventListener("notificationclick", (event) => {
           continue;
         }
         if (!hasExplicitTarget) {
-          client.postMessage({
+          const message = {
             type: "pqc-push-reference",
             reference: event.notification.data?.pqc_ref,
-          });
+          };
+          // oxlint-disable-next-line unicorn/require-post-message-target-origin -- Service Worker Client.postMessage does not take targetOrigin.
+          client.postMessage(message);
           return client.focus();
         }
 
@@ -267,10 +269,12 @@ self.addEventListener("notificationclick", (event) => {
 
       if (!targetClient) {
         return self.clients.openWindow(targetUrl.href).then((client) => {
-          client?.postMessage({
+          const message = {
             type: "pqc-push-reference",
             reference: event.notification.data?.pqc_ref,
-          });
+          };
+          // oxlint-disable-next-line unicorn/require-post-message-target-origin -- Service Worker Client.postMessage does not take targetOrigin.
+          client?.postMessage(message);
           return client;
         });
       }

@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SqlitePushReferenceStore } from "../../infra/pqc-push-state.js";
 import type { PushDualEnvelope } from "../../security/push-dual-signature.js";
 import { closeOpenClawStateDatabase } from "../../state/openclaw-state-db.js";
-import { pushHandlers } from "./push.js";
+import { coreGatewayHandlers } from "../server-methods.js";
 import type { GatewayRequestHandlerOptions } from "./types.js";
 
 let directory: string;
@@ -21,7 +21,7 @@ afterEach(() => {
 
 async function invoke(method: string, params: unknown, deviceId?: string, registry?: unknown) {
   const respond = vi.fn();
-  await pushHandlers[method]!({
+  await coreGatewayHandlers[method]!({
     req: { type: "req", id: "test", method, params },
     params,
     respond,

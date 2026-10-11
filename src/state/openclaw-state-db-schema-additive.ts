@@ -13,6 +13,44 @@ import {
 } from "./openclaw-state-db-legacy-backfills.js";
 import { ensureColumn } from "./openclaw-state-db-schema-helpers.js";
 
+// Additive shared-state tables are initialized by their first feature use.
+const PQC_PUSH_SCHEMA_SQL = `
+CREATE TABLE IF NOT EXISTS pqc_push_sequences (
+  sender_id TEXT NOT NULL, recipient_id TEXT NOT NULL, sequence INTEGER NOT NULL,
+  PRIMARY KEY (sender_id, recipient_id)
+) STRICT;
+CREATE TABLE IF NOT EXISTS pqc_push_replay (
+  sender_id TEXT NOT NULL, recipient_id TEXT NOT NULL, sequence INTEGER NOT NULL,
+  PRIMARY KEY (sender_id, recipient_id)
+) STRICT;
+CREATE TABLE IF NOT EXISTS pqc_push_nonces (
+  sender_id TEXT NOT NULL, recipient_id TEXT NOT NULL, nonce TEXT NOT NULL, expires_at_ms INTEGER NOT NULL,
+  PRIMARY KEY (sender_id, recipient_id, nonce)
+) STRICT;
+CREATE TABLE IF NOT EXISTS pqc_push_objects (
+  object_id TEXT PRIMARY KEY, token_hash TEXT NOT NULL, recipient_id TEXT NOT NULL,
+  payload TEXT NOT NULL, envelope_json TEXT NOT NULL, expires_at_ms INTEGER NOT NULL
+) STRICT;
+CREATE TABLE IF NOT EXISTS pqc_push_bindings (
+  subscription_id TEXT PRIMARY KEY, device_id TEXT NOT NULL
+) STRICT;
+CREATE TABLE IF NOT EXISTS pqc_push_attempts (
+  device_id TEXT PRIMARY KEY, window_start_ms INTEGER NOT NULL, attempts INTEGER NOT NULL
+) STRICT;
+`;
+const ensuredPqcPushSchemas = new WeakSet<object>();
+
+export function ensurePqcPushStateSchema(database: DatabaseSync): void {
+  if (!ensuredPqcPushSchemas.has(database)) {
+    database.exec(PQC_PUSH_SCHEMA_SQL);
+    // DDL inside a caller's transaction may still roll back. Cache only a
+    // committed ensure; older runtimes without transaction introspection do not cache.
+    if ("isTransaction" in database && !database.isTransaction) {
+      ensuredPqcPushSchemas.add(database);
+    }
+  }
+}
+
 export function ensureAgentDeletionJournalSchema(database: DatabaseSync): void {
   database.exec(`
     CREATE TABLE IF NOT EXISTS agent_deletion_journal (

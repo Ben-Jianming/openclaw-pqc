@@ -398,6 +398,7 @@ Do not edit it by hand; run `pnpm docs:map:gen`.
 - Headings:
   - H2: Quick start
   - H2: Inbound durability
+  - H2: PQC verification boundary
   - H2: Access control
   - H3: Direct messages
   - H3: Group chats
@@ -785,6 +786,7 @@ Do not edit it by hand; run `pnpm docs:map:gen`.
   - H3: Non-interactive setup
   - H2: Quick setup
   - H2: Configuration reference
+  - H2: Post-quantum direct messages
   - H2: Profile metadata
   - H2: Access control
   - H3: DM policies
@@ -2049,6 +2051,7 @@ Do not edit it by hand; run `pnpm docs:map:gen`.
 - Route: /cli/security
 - Headings:
   - H1: openclaw security
+  - H2: Device wrapping keys
   - H2: Audit modes
   - H2: What it checks
   - H2: SecretRef behavior
@@ -4330,6 +4333,7 @@ Do not edit it by hand; run `pnpm docs:map:gen`.
   - H3: Layer 2: Gateway + dev agent smoke (what "@openclaw" actually does)
   - H2: Live: CLI backend smoke (Claude, Gemini, or other local CLIs)
   - H2: Live: APNs HTTP/2 proxy reachability
+  - H2: Live: APNs physical-device acceptance
   - H2: Live: ACP bind smoke (/acp spawn ... --bind here)
   - H2: Live: Codex app-server harness smoke
   - H2: Live: OpenAI repeated compaction
@@ -7619,6 +7623,7 @@ Do not edit it by hand; run `pnpm docs:map:gen`.
   - H2: defineSetupPluginEntry
   - H2: Registration mode
   - H2: Plugin shapes
+  - H2: PQC channel entry points
   - H2: Related
 
 ## plugins/sdk-migration.md
@@ -9441,6 +9446,38 @@ Do not edit it by hand; run `pnpm docs:map:gen`.
   - H2: Validating the proxy
   - H2: Recommended blocked destinations
   - H2: Limits
+
+## security/pqc-production-v2.md
+
+- Route: /security/pqc-production-v2
+- Headings:
+  - H1: PQC production acceptance
+  - H2: Implementation and release status
+  - H2: Trust and capability boundaries
+  - H2: Push V2 signed envelope
+  - H3: Encode the transcript
+  - H3: Apply the Accept gate
+  - H2: Deliver and redeem a wake reference
+  - H3: Gateway methods and receiver flow
+  - H3: State and resource limits
+  - H2: Experimental message context
+  - H2: Eight acceptance groups
+  - H2: Record product evidence
+  - H3: Check installation behavior
+  - H3: Exercise recovery separately
+  - H3: Complete physical and live-channel acceptance
+  - H2: Benchmark the strict path
+  - H2: Related guidance
+
+## security/pqc-whitepaper.md
+
+- Route: /security/pqc-whitepaper
+- Headings:
+  - H1: PQC security scope
+  - H2: Implemented source paths
+  - H2: Current limits
+  - H2: Key wrapping
+  - H2: Release verification
 
 ## specs/codex-supervision.md
 

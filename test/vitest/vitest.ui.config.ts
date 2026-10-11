@@ -9,7 +9,12 @@ export function createUiVitestConfig(
 ) {
   const includePatterns = options?.includePatterns ?? ["ui/src/**/*.test.ts"];
   // Isolated files must never enter the shared module graph, including scoped runs.
-  const exclude = ["ui/src/**/*.e2e.test.ts", ...uiIsolatedTestFiles];
+  const exclude = [
+    "ui/src/**/*.e2e.test.ts",
+    // IndexedDB/WebCrypto acceptance runs in ui/vitest.config.ts's Chromium project.
+    "ui/src/app/pqc-push.browser.test.ts",
+    ...uiIsolatedTestFiles,
+  ];
   return createScopedVitestConfig(includePatterns, {
     deps: jsdomOptimizedDeps,
     environment: "jsdom",

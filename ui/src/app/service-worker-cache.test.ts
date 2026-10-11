@@ -394,25 +394,15 @@ describe("Control UI service worker notification scope", () => {
   ];
 
   it.each(scenarios)(
-    "$name",
+    "handles a previous worker's notification: $name",
     async ({ scope, target, clientUrls, focusedClientIndex, navigatedUrl, openedUrl }) => {
       const worker = createNotificationServiceWorker(scope, clientUrls);
-      const payload: ServiceWorkerPushPayload = {
-        title: "OpenClaw",
-        body: "Scoped notification",
-      };
-      if (target !== null) {
-        payload.url = target;
-      }
-
-      const notification = await worker.dispatchPush(payload);
-
-      expect(notification.title).toBe(payload.title);
-      expect(notification.options.body).toBe(payload.body);
-      expect(notification.options.data.url).toBe(target ?? scope);
-      expect(notification.options.data.explicitUrl).toBe(target !== null);
-
-      const close = await worker.dispatchNotificationClick(notification.options.data);
+      // Already displayed notifications retain their bounded in-scope navigation.
+      // New carrier payloads never get to choose this notification data.
+      const close = await worker.dispatchNotificationClick({
+        url: target ?? scope,
+        explicitUrl: target !== null,
+      });
 
       expect(close).toHaveBeenCalledOnce();
       expect(worker.clients.matchAll).toHaveBeenCalledWith({
@@ -454,8 +444,88 @@ describe("Control UI service worker notification scope", () => {
     expect(notification.title).toBe("OpenClaw");
     expect(notification.options.body).toBe("New secure notification. Open OpenClaw to view.");
     expect(notification.options.tag).toBe("openclaw-secure-wake");
-    expect(notification.options.data).toEqual({ url: nestedScope, explicitUrl: false });
+    expect(notification.options.data).toEqual({
+      url: nestedScope,
+      explicitUrl: false,
+      pqc_ref: undefined,
+    });
   });
+
+  it.each([
+    { scope: rootScope, clientUrls: [], focusedIndex: -1 },
+    { scope: nestedScope, clientUrls: [], focusedIndex: -1 },
+    { scope: nestedScopeWithoutSlash, clientUrls: [], focusedIndex: -1 },
+    { scope: rootScope, clientUrls: [`${rootScope}settings`], focusedIndex: 0 },
+    {
+      scope: nestedScope,
+      clientUrls: [rootScope, `${nestedScope}settings`, `${nestedScope}chat?session=42`],
+      focusedIndex: 1,
+    },
+    {
+      scope: nestedScopeWithoutSlash,
+      clientUrls: [`${nestedScopeWithoutSlash}/chat?session=7`],
+      focusedIndex: 0,
+    },
+    {
+      scope: nestedScope,
+      clientUrls: ["https://outside.example/openclaw/"],
+      focusedIndex: -1,
+    },
+    {
+      scope: nestedScope,
+      clientUrls: ["https://control.example/openclaw-other/"],
+      focusedIndex: -1,
+    },
+  ])(
+    "ignores carrier text and routes in scope $scope",
+    async ({ scope, clientUrls, focusedIndex }) => {
+      const worker = createNotificationServiceWorker(scope, clientUrls);
+      const reference = {
+        version: 1,
+        object_id: "12345678-1234-4234-8234-123456789abc",
+        token: "A".repeat(43),
+        expires_at_ms: Date.now() + 60_000,
+      };
+      const notification = await worker.dispatchPush({
+        title: "Forged approval title",
+        body: "Approve this command now",
+        url: `${scope}/chat?session=42`,
+        pqc_ref: reference,
+      });
+
+      expect(notification.title).toBe("OpenClaw");
+      expect(notification.options.body).toBe("New secure notification. Open OpenClaw to view.");
+      expect(notification.options.data).toEqual({
+        url: scope,
+        explicitUrl: false,
+        pqc_ref: reference,
+      });
+      await worker.dispatchNotificationClick(notification.options.data);
+
+      for (const [index, client] of worker.windowClients.entries()) {
+        expect(client.navigate).not.toHaveBeenCalled();
+        if (index === focusedIndex) {
+          expect(client.focus).toHaveBeenCalledOnce();
+          expect(client.postMessage).toHaveBeenCalledExactlyOnceWith({
+            type: "pqc-push-reference",
+            reference,
+          });
+        } else {
+          expect(client.focus).not.toHaveBeenCalled();
+          expect(client.postMessage).not.toHaveBeenCalled();
+        }
+      }
+      if (focusedIndex === -1) {
+        expect(worker.clients.openWindow).toHaveBeenCalledExactlyOnceWith(scope);
+        expect(worker.openedClient.postMessage).toHaveBeenCalledExactlyOnceWith({
+          type: "pqc-push-reference",
+          reference,
+        });
+      } else {
+        expect(worker.clients.openWindow).not.toHaveBeenCalled();
+      }
+    },
+  );
 
   it.each([
     {
@@ -570,6 +640,7 @@ type ServiceWorkerPushPayload = {
   body: string;
   url?: string;
   pqcenvelope?: unknown;
+  pqc_ref?: unknown;
 };
 
 type ServiceWorkerNotificationOptions = {
@@ -577,7 +648,7 @@ type ServiceWorkerNotificationOptions = {
   icon: string;
   badge: string;
   tag: string;
-  data: { url: string; explicitUrl: boolean };
+  data: { url: string; explicitUrl: boolean; pqc_ref?: unknown };
 };
 
 type ServiceWorkerNotificationEventStub = {
@@ -587,7 +658,7 @@ type ServiceWorkerNotificationEventStub = {
   };
   notification?: {
     close(): void;
-    data: { url: string; explicitUrl?: boolean };
+    data: { url: string; explicitUrl?: boolean; pqc_ref?: unknown };
   };
   waitUntil(promise: Promise<unknown>): void;
 };
@@ -603,6 +674,7 @@ function createNotificationServiceWorker(
     return {
       url,
       focus,
+      postMessage: vi.fn(),
       navigate: vi.fn(async (_url: string) => {
         if (options.rejectNavigation) {
           throw new Error("Window is controlled by a previous service worker");
@@ -611,9 +683,10 @@ function createNotificationServiceWorker(
       }),
     };
   });
+  const openedClient = { postMessage: vi.fn() };
   const clients = {
     matchAll: vi.fn(async () => windowClients),
-    openWindow: vi.fn(async (_url: string) => null),
+    openWindow: vi.fn(async (_url: string) => openedClient),
   };
   const showNotification = vi.fn(
     async (_title: string, _options: ServiceWorkerNotificationOptions) => undefined,
@@ -635,6 +708,15 @@ function createNotificationServiceWorker(
     URL,
     caches: {},
     fetch: vi.fn(),
+    // Navigation must stay generic even if durable wake storage is unavailable.
+    // The browser suite exercises successful IndexedDB persistence separately.
+    indexedDB: {
+      open: vi.fn(() => {
+        const request = new EventTarget();
+        queueMicrotask(() => request.dispatchEvent(new Event("error")));
+        return request;
+      }),
+    },
     self: serviceWorkerGlobal,
   });
 
@@ -645,6 +727,7 @@ function createNotificationServiceWorker(
   return {
     clients,
     windowClients,
+    openedClient,
     async dispatchPush(payload: ServiceWorkerPushPayload) {
       const listener = listeners.get("push");
       if (!listener) {
@@ -674,7 +757,11 @@ function createNotificationServiceWorker(
 
       return { title: notification[0], options: notification[1] };
     },
-    async dispatchNotificationClick(data: { url: string; explicitUrl?: boolean }) {
+    async dispatchNotificationClick(data: {
+      url: string;
+      explicitUrl?: boolean;
+      pqc_ref?: unknown;
+    }) {
       const listener = listeners.get("notificationclick");
       if (!listener) {
         throw new Error("Service worker did not register a notification-click handler");
