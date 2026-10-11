@@ -106,6 +106,62 @@ self.addEventListener("fetch", (event) => {
   }
 });
 
+// Capability queue shared with the authenticated Control UI. No title/body/url
+// supplied by the push relay is stored or rendered.
+function rememberPqcWake(ref) {
+  if (
+    !ref ||
+    ref.version !== 1 ||
+    typeof ref.object_id !== "string" ||
+    ref.object_id.length > 64 ||
+    typeof ref.token !== "string" ||
+    !/^[A-Za-z0-9_-]{43}$/.test(ref.token) ||
+    !Number.isSafeInteger(ref.expires_at_ms) ||
+    ref.expires_at_ms <= Date.now() ||
+    ref.expires_at_ms > Date.now() + 330000
+  ) {
+    return Promise.resolve();
+  }
+  return new Promise((resolve) => {
+    const open = indexedDB.open("openclaw-pqc-push-v2", 1);
+    open.onupgradeneeded = () => {
+      open.result.createObjectStore("replay");
+      open.result.createObjectStore("wakes", { keyPath: "object_id" });
+    };
+    open.onerror = () => resolve();
+    open.onsuccess = () => {
+      const db = open.result;
+      const tx = db.transaction("wakes", "readwrite");
+      const store = tx.objectStore("wakes");
+      const all = store.getAll();
+      all.onsuccess = () => {
+        const live = all.result.filter((item) => item.expires_at_ms > Date.now());
+        for (const item of all.result) {
+          if (item.expires_at_ms <= Date.now()) {
+            store.delete(item.object_id);
+          }
+        }
+        if (live.length < 64) {
+          store.put({
+            version: 1,
+            object_id: ref.object_id,
+            token: ref.token,
+            expires_at_ms: ref.expires_at_ms,
+          });
+        }
+      };
+      tx.oncomplete = () => {
+        db.close();
+        resolve();
+      };
+      tx.onabort = () => {
+        db.close();
+        resolve();
+      };
+    };
+  });
+}
+
 // --- Web Push ---
 
 self.addEventListener("push", (event) => {
@@ -120,24 +176,21 @@ self.addEventListener("push", (event) => {
     data = { title: "OpenClaw", body: event.data.text() };
   }
 
-  // The static worker has no provisioned ML-DSA trust anchor. A signed push is
-  // therefore treated as an opaque wake: never render or route fields that a
-  // compromised relay could alter. The authenticated app session fetches the
-  // canonical content after the user opens OpenClaw.
-  const isPqcWake = Boolean(data.pqcenvelope);
-  const title = isPqcWake ? "OpenClaw" : data.title || "OpenClaw";
+  // No wake field is trusted for presentation or routing, including unsigned
+  // legacy bodies. Content is shown only by the authenticated app after V2 Accept.
+  const reference = data && typeof data === "object" ? data.pqc_ref : undefined;
+  const title = "OpenClaw";
   const options = {
-    body: isPqcWake ? "New secure notification. Open OpenClaw to view." : data.body || "",
+    body: "New secure notification. Open OpenClaw to view.",
     icon: "./apple-touch-icon.png",
     badge: "./favicon-32.png",
-    tag: isPqcWake ? "openclaw-secure-wake" : data.tag || "openclaw-notification",
-    data: {
-      url: isPqcWake ? self.registration.scope : data.url || self.registration.scope,
-      explicitUrl: isPqcWake ? false : Boolean(data.url),
-    },
+    tag: "openclaw-secure-wake",
+    data: { url: self.registration.scope, explicitUrl: false, pqc_ref: reference },
   };
 
-  event.waitUntil(self.registration.showNotification(title, options));
+  event.waitUntil(
+    rememberPqcWake(reference).then(() => self.registration.showNotification(title, options)),
+  );
 });
 
 self.addEventListener("notificationclick", (event) => {
@@ -186,6 +239,10 @@ self.addEventListener("notificationclick", (event) => {
           continue;
         }
         if (!hasExplicitTarget) {
+          client.postMessage({
+            type: "pqc-push-reference",
+            reference: event.notification.data?.pqc_ref,
+          });
           return client.focus();
         }
 
@@ -209,7 +266,13 @@ self.addEventListener("notificationclick", (event) => {
       }
 
       if (!targetClient) {
-        return self.clients.openWindow(targetUrl.href);
+        return self.clients.openWindow(targetUrl.href).then((client) => {
+          client?.postMessage({
+            type: "pqc-push-reference",
+            reference: event.notification.data?.pqc_ref,
+          });
+          return client;
+        });
       }
 
       // Always navigate explicit targets; old or uncontrolled workers can

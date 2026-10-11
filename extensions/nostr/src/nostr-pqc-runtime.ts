@@ -1,4 +1,5 @@
 import { decrypt, encrypt } from "nostr-tools/nip04";
+import { getPublicKey } from "nostr-tools/pure";
 import type { NostrPqcMode } from "./config-schema.js";
 import {
   decodeMlKemPublicKey,
@@ -48,7 +49,21 @@ export function decryptDirectMessage(
     let lastError: unknown;
     for (const privateKey of pqc.privateKeys) {
       try {
-        return new TextDecoder().decode(decryptNip44V2(privateKey, ciphertext));
+        const context = {
+          senderPubkey: senderPubkey.toLowerCase(),
+          recipientPubkey: getPublicKey(nostrPrivateKey),
+          purpose: "nostr-dm" as const,
+        };
+        if (ciphertext.startsWith("pqc2:") && pqc.mode === "required") {
+          throw new Error("unbound legacy PQC message rejected");
+        }
+        return new TextDecoder("utf-8", { fatal: true }).decode(
+          decryptNip44V2(
+            privateKey,
+            ciphertext,
+            ciphertext.startsWith("pqc3:") ? context : undefined,
+          ),
+        );
       } catch (error) {
         lastError = error;
       }
@@ -70,9 +85,13 @@ export function encryptDirectMessage(
   plaintext: string,
 ): { ciphertext: string; pqc: boolean } {
   const recipientPqcKey = pqc.peerPublicKeys.get(recipientPubkey.toLowerCase());
-  if (recipientPqcKey) {
+  if (recipientPqcKey && pqc.mode !== "disabled") {
     return {
-      ciphertext: encryptNip44V2(recipientPqcKey, new TextEncoder().encode(plaintext)),
+      ciphertext: encryptNip44V2(recipientPqcKey, new TextEncoder().encode(plaintext), {
+        senderPubkey: getPublicKey(nostrPrivateKey),
+        recipientPubkey: recipientPubkey.toLowerCase(),
+        purpose: "nostr-dm",
+      }),
       pqc: true,
     };
   }

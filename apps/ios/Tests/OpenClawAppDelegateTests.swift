@@ -69,6 +69,60 @@ import UIKit
         #expect(link?.token == "tok")
     }
 
+    @Test @MainActor func `queues an opaque cold startup push instead of dropping it`() async throws {
+        OpenClawAppModelRegistry.appModel = nil
+        defer { OpenClawAppModelRegistry.appModel = nil }
+        let delegate = OpenClawAppDelegate()
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let databaseURL = directory.appendingPathComponent("openclaw.sqlite")
+        try delegate._test_usePqcWakeQueue(databaseURL: databaseURL)
+        let nowMs = Int64(Date().timeIntervalSince1970 * 1000)
+        let userInfo: [AnyHashable: Any] = [
+            "kind": "openclaw.pqc.wake.v2",
+            "pqc_ref": [
+                "version": 1,
+                "object_id": "00000000-0000-4000-8000-000000000001",
+                "token": Data(repeating: 1, count: 32).base64EncodedString()
+                    .replacingOccurrences(of: "+", with: "-")
+                    .replacingOccurrences(of: "/", with: "_")
+                    .replacingOccurrences(of: "=", with: ""),
+                "expires_at_ms": nowMs + 10000,
+            ],
+            "title": "unverified content", "approvalId": "unverified route",
+        ]
+        let result: UIBackgroundFetchResult = await withCheckedContinuation { continuation in
+            delegate.application(UIApplication.shared, didReceiveRemoteNotification: userInfo) {
+                continuation.resume(returning: $0)
+            }
+        }
+        #expect(result == .newData)
+        // A new delegate reconstructs the SQLite queue, simulating process loss before retry.
+        let relaunched = OpenClawAppDelegate()
+        try relaunched._test_usePqcWakeQueue(databaseURL: databaseURL)
+        let wakes = try relaunched._test_takeQueuedPqcPushWakes(nowMs: nowMs)
+        #expect(wakes.count == 1)
+        #expect(wakes.first?.userInfo["title"] == nil)
+        #expect(wakes.first?.userInfo["approvalId"] == nil)
+        #expect(try delegate._test_takeQueuedPqcPushWakes(nowMs: nowMs).isEmpty)
+    }
+
+    @Test @MainActor func `does not queue raw remote content before model initialization`() async throws {
+        OpenClawAppModelRegistry.appModel = nil
+        defer { OpenClawAppModelRegistry.appModel = nil }
+        let delegate = OpenClawAppDelegate()
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try delegate._test_usePqcWakeQueue(databaseURL: directory.appendingPathComponent("openclaw.sqlite"))
+        let result: UIBackgroundFetchResult = await withCheckedContinuation { continuation in
+            delegate.application(UIApplication.shared, didReceiveRemoteNotification: ["title": "injected"]) {
+                continuation.resume(returning: $0)
+            }
+        }
+        #expect(result == .noData)
+        #expect(try delegate._test_takeQueuedPqcPushWakes(nowMs: 0).isEmpty)
+    }
+
     @Test @MainActor func `rejects an invalid URL`() throws {
         let delegate = OpenClawAppDelegate()
         let url = try #require(URL(string: "https://example.com/gateway"))

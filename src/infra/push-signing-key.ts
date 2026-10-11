@@ -19,10 +19,11 @@
 // of the M11 rollout wires it into push-apns-http2.ts.
 
 import { createHash, randomBytes } from "node:crypto";
-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, isAbsolute, join } from "node:path";
+import { existsSync, readFileSync } from "node:fs";
+import { isAbsolute, join } from "node:path";
 import { ed25519 } from "@noble/curves/ed25519.js";
 import { resolveStateDir } from "../config/paths.js";
+import { assertPrivateKeyFile, writePrivateKeyFile } from "../security/private-key-file.js";
 
 const ED25519_RAW_SECRET_KEY = 32;
 const ED25519_RAW_PUBLIC_KEY = 32;
@@ -82,6 +83,7 @@ function readExistingKey(filePath: string): Uint8Array | null {
   if (!existsSync(filePath)) {
     return null;
   }
+  assertPrivateKeyFile(filePath);
   const buf = readFileSync(filePath);
   if (buf.length !== ED25519_RAW_SECRET_KEY) {
     throw new Error(
@@ -92,10 +94,7 @@ function readExistingKey(filePath: string): Uint8Array | null {
 }
 
 function writeNewKey(filePath: string, secretRaw: Uint8Array): void {
-  mkdirSync(dirname(filePath), { recursive: true, mode: 0o700 });
-  writeFileSync(filePath, secretRaw, { mode: FILE_MODE_0600 });
-  // Belt-and-suspenders: chmod in case the umask overrode the mode option.
-  chmodSync(filePath, FILE_MODE_0600);
+  writePrivateKeyFile(filePath, secretRaw);
 }
 
 /**
@@ -111,7 +110,17 @@ export function getOrCreatePushSigningKey(env: NodeJS.ProcessEnv = process.env):
   let secretRaw = readExistingKey(filePath);
   if (secretRaw === null) {
     secretRaw = generatePushSigningSecretRaw();
-    writeNewKey(filePath, secretRaw);
+    try {
+      writeNewKey(filePath, secretRaw);
+    } catch (error) {
+      // A competing process may have created the exclusive file first. Always
+      // re-read its protected key rather than signing with our discarded key.
+      const existing = readExistingKey(filePath);
+      if (!existing) {
+        throw error;
+      }
+      secretRaw = existing;
+    }
   }
   const publicRaw = publicKeyRawFromSecretRaw(secretRaw);
   return {

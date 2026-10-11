@@ -59,6 +59,14 @@ export const WebPushTestParamsSchema = closedObject({
   body: Type.Optional(Type.String()),
 });
 
+export const PushPqcKeysParamsSchema = closedObject({});
+export const PushPqcRedeemParamsSchema = closedObject({
+  version: Type.Literal(1),
+  object_id: Type.String({ minLength: 1, maxLength: 64 }),
+  token: Type.String({ minLength: 43, maxLength: 43, pattern: "^[A-Za-z0-9_-]+$" }),
+  expires_at_ms: Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }),
+});
+
 /** Empty request type for fetching the Web Push VAPID public key. */
 export type WebPushVapidPublicKeyParams = Record<string, never>;
 /** Browser PushSubscription subset persisted by the gateway. */

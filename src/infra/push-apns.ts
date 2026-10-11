@@ -3,6 +3,7 @@ import { resolveTimerTimeoutMs } from "@openclaw/normalization-core/number-coerc
 import { truncateUtf16Safe } from "@openclaw/normalization-core/utf16-slice";
 import type { DeviceIdentity } from "./device-identity.js";
 import { toErrorObject } from "./errors.js";
+import { SqlitePushReferenceStore } from "./pqc-push-state.js";
 import { getApnsBearerToken, type ApnsAuthConfig } from "./push-apns-auth.js";
 import {
   APNS_HTTP2_CANCEL_CODE,
@@ -27,6 +28,7 @@ import {
   type DirectApnsRegistration,
   type RelayApnsRegistration,
 } from "./push-apns-store.js";
+import { buildApnsPqcWake } from "./push-apns-wake.js";
 import {
   type ApnsRelayConfig,
   type ApnsRelayPushResponse,
@@ -363,6 +365,7 @@ function toPushResult(params: {
 }
 
 async function sendDirectApnsPush(params: {
+  nodeId: string;
   auth: ApnsAuthConfig;
   registration: DirectApnsRegistration;
   payload: object;
@@ -379,18 +382,26 @@ async function sendDirectApnsPush(params: {
   });
   await requireCurrentApnsSend(params);
   const sender = params.requestSender ?? sendApnsRequest;
+  const store = new SqlitePushReferenceStore();
+  const wake = buildApnsPqcWake(params.payload, params.nodeId, store);
   const response = await sender({
     token,
     topic,
     environment,
     bearerToken,
-    payload: params.payload,
+    payload: wake,
     timeoutMs: resolveApnsTimeoutMs(params.timeoutMs),
     pushType: params.pushType,
     priority: params.priority,
     ...(params.signal ? { signal: params.signal } : {}),
     ...(params.isCurrent ? { isCurrent: params.isCurrent } : {}),
+  }).catch((error: unknown) => {
+    store.discard(wake.pqc_ref);
+    throw error;
   });
+  if (response.status < 200 || response.status >= 300) {
+    store.discard(wake.pqc_ref);
+  }
   return toPushResult({
     registration: params.registration,
     response,
@@ -399,6 +410,7 @@ async function sendDirectApnsPush(params: {
 }
 
 async function sendRelayApnsPush(params: {
+  nodeId: string;
   relayConfig: ApnsRelayConfig;
   registration: RelayApnsRegistration;
   payload: object;
@@ -409,18 +421,26 @@ async function sendRelayApnsPush(params: {
   signal?: AbortSignal;
   isCurrent?: () => Promise<boolean>;
 }): Promise<ApnsPushResult> {
+  const store = new SqlitePushReferenceStore();
+  const wake = buildApnsPqcWake(params.payload, params.nodeId, store);
   const response = await sendApnsRelayPush({
     relayConfig: params.relayConfig,
     sendGrant: params.registration.sendGrant,
     relayHandle: params.registration.relayHandle,
-    payload: params.payload,
+    payload: wake,
     pushType: params.pushType,
     priority: params.priority,
     gatewayIdentity: params.gatewayIdentity,
     requestSender: params.requestSender,
     ...(params.signal ? { signal: params.signal } : {}),
     ...(params.isCurrent ? { isCurrent: params.isCurrent } : {}),
+  }).catch((error: unknown) => {
+    store.discard(wake.pqc_ref);
+    throw error;
   });
+  if (!response.ok) {
+    store.discard(wake.pqc_ref);
+  }
   return toPushResult({ registration: params.registration, response });
 }
 
@@ -519,6 +539,7 @@ export async function sendApnsAlert(
   if (params.registration.transport === "relay") {
     const relayParams = params as RelayApnsAlertParams;
     return await sendRelayApnsPush({
+      nodeId: params.nodeId,
       relayConfig: relayParams.relayConfig,
       registration: relayParams.registration,
       payload,
@@ -532,6 +553,7 @@ export async function sendApnsAlert(
   }
   const directParams = params as DirectApnsAlertParams;
   return await sendDirectApnsPush({
+    nodeId: params.nodeId,
     auth: directParams.auth,
     registration: directParams.registration,
     payload,
@@ -556,6 +578,7 @@ export async function sendApnsBackgroundWake(
   if (params.registration.transport === "relay") {
     const relayParams = params as RelayApnsBackgroundWakeParams;
     return await sendRelayApnsPush({
+      nodeId: params.nodeId,
       relayConfig: relayParams.relayConfig,
       registration: relayParams.registration,
       payload,
@@ -569,6 +592,7 @@ export async function sendApnsBackgroundWake(
   }
   const directParams = params as DirectApnsBackgroundWakeParams;
   return await sendDirectApnsPush({
+    nodeId: params.nodeId,
     auth: directParams.auth,
     registration: directParams.registration,
     payload,
@@ -591,6 +615,7 @@ async function sendApnsApprovalPush(params: {
   if (transport.registration.transport === "relay") {
     const relayParams = transport as RelayApnsApprovalParams;
     return await sendRelayApnsPush({
+      nodeId: transport.nodeId,
       relayConfig: relayParams.relayConfig,
       registration: relayParams.registration,
       payload: params.payload,
@@ -602,6 +627,7 @@ async function sendApnsApprovalPush(params: {
   }
   const directParams = transport as DirectApnsApprovalParams;
   return await sendDirectApnsPush({
+    nodeId: transport.nodeId,
     auth: directParams.auth,
     registration: directParams.registration,
     payload: params.payload,

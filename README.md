@@ -14,7 +14,7 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg?style=for-the-badge" alt="MIT License"></a>
 </p>
 
-**OpenClaw PQC（抗量子龙虾）** 是 OpenClaw 的抗量子密码迁移分支。当前生产保证覆盖 Node/CLI 的 ML-DSA-65 设备身份、兼容客户端的强制签名设备证明、静态密钥封装和结构化 PQC 审计。KEM、Nostr 和第三方推送的端到端 PQC 状态及限制见 [PQC 白皮书](docs/security/pqc-whitepaper.md)，不要把库函数存在误解为所有消息通道都已抗量子化。
+**OpenClaw PQC（抗量子龙虾）** 是 OpenClaw 的抗量子密码迁移分支。当前源码包含 Node/CLI、Apple、Android、Linux 和网页端的 ML-DSA-65 身份路径、明确的 Ed25519 兼容验证、静态密钥封装及结构化 PQC 审计。本轮改动还接入 Push V2 通用唤醒、认证后一次性取件与网页双验签，以及绑定通信上下文的实验性 Nostr `pqc3`。源码实现、针对性测试和真实设备验收是不同证据；下载版本的能力以其提交与测试记录为准。保证边界见 [PQC 白皮书](docs/security/pqc-whitepaper.md) 和 [八组产品验收标准](https://github.com/Ben-Jianming/openclaw-pqc/blob/main/docs/security/pqc-production-v2.md)。
 
 面向普通用户的下载、ZIP 解压、安装、首次配置和验证步骤见 **[中文安装说明](INSTALL.zh-CN.md)**；English instructions: **[INSTALL.md](INSTALL.md)**.
 
@@ -116,7 +116,9 @@ node openclaw.mjs onboard --install-daemon
 
 4. 使用 `start.bat` / `./start.sh` 启动，使用 `verify.bat` / `./verify.sh` 验证安装。
 
-首次创建 Node/CLI 设备身份时，程序会在状态目录的 `credentials/device-identity-wrap.key` 自动生成仅当前用户可读取的包裹密钥，并用它加密存储 ML-DSA 私钥。请将该密钥与状态数据库一起离线备份；丢失密钥无法恢复已加密的设备身份。Windows 会核验文件 ACL，无法安全设置权限时会停止身份创建。
+安装验证只证明脚本实际执行的启动与契约检查。它不代表真实 Apple/Android 设备配对、APNs 或飞书收发、密钥丢失恢复及全部端到端验收已通过；这些结果须按上面的验收标准另行记录。飞书官方客户端目前不能验证自定义 PQC envelope，不能标为接收端已验签。
+
+首次创建 Node/CLI 设备身份时，程序会在状态目录的 `credentials/device-identity-wrap.key` 自动生成受权限保护的包裹密钥，并用它加密存储 ML-DSA 私钥。请将该密钥与状态数据库一起离线备份；丢失密钥无法恢复已加密的设备身份。Windows 会限制并核验当前用户与 SYSTEM 的文件 ACL，无法安全设置权限时会停止身份创建。旧安装包是否包含此修复，应核对其来源提交。
 
 > `npm install -g openclaw@latest` 安装的是上游版本，不包含本仓库的 PQC 修改。请使用本仓库自带的安装脚本。
 

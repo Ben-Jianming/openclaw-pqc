@@ -1,12 +1,12 @@
 ---
-summary: "Nostr DMs with optional ML-KEM-768/PQC encryption and NIP-04 compatibility"
+summary: "Nostr DMs with experimental context-bound ML-KEM-768 encryption and explicit legacy compatibility"
 read_when:
   - You want OpenClaw to receive DMs via Nostr
   - You're setting up decentralized messaging
 title: "Nostr"
 ---
 
-Nostr is a downloadable channel plugin (`@openclaw/nostr`) that lets OpenClaw receive and answer encrypted direct messages over Nostr relays. It supports ML-KEM-768 hybrid envelopes for configured peers and NIP-04 compatibility. One account per gateway; DMs only.
+Nostr is a downloadable channel plugin (`@openclaw/nostr`) that lets OpenClaw receive and answer encrypted direct messages over Nostr relays. This fork supports experimental `pqc3` ML-KEM-768 envelopes for configured peers and explicit NIP-04 compatibility. One account per gateway; DMs only. `pqc3` is an OpenClaw format, not standard NIP-44 or a standardized HPKE suite.
 
 ## Install
 
@@ -15,6 +15,8 @@ openclaw plugins install @openclaw/nostr
 ```
 
 Use the bare package spec to follow the current official release tag. Pin an exact version only when you need a reproducible install.
+
+The official package tag does not establish that this fork's PQC changes are included. For `pqc3` testing, use a matching fork build and the local plugin from the same source revision.
 
 From a local checkout (dev workflows):
 
@@ -103,7 +105,17 @@ Store the private value in a secret provider or environment variable. Exchange t
 }
 ```
 
-`preferred` encrypts with ML-KEM-768 when a trusted peer key is present and accepts legacy NIP-04 messages. `required` rejects legacy inbound messages and refuses outbound delivery when the peer has no trusted ML-KEM key. During rotation, put the old private key in `pqcPreviousPrivateKeys`, distribute the new public key, and remove the old key after queued messages have drained.
+The production PQC path emits `pqc3`. Its authenticated context contains the protocol version, suite, sender Nostr public key, recipient Nostr public key, the fixed purpose `nostr-dm`, and the recipient ML-KEM public-key digest. The context is included in key derivation and the message authentication check, so transplanting a ciphertext to another sender, recipient, purpose, or KEM key fails. Core and the channel plugin use one shared implementation through `openclaw/plugin-sdk/pqc-message`.
+
+| Mode        | Outbound                                                            | Inbound                                                         |
+| ----------- | ------------------------------------------------------------------- | --------------------------------------------------------------- |
+| `disabled`  | Legacy NIP-04.                                                      | Legacy path; no PQC confidentiality claim.                      |
+| `preferred` | `pqc3` when a trusted peer KEM key is configured; otherwise NIP-04. | Context-bound `pqc3`, legacy `pqc2`, and NIP-04.                |
+| `required`  | `pqc3`; missing trusted peer KEM keys cause failure.                | Only context-bound `pqc3`; both `pqc2` and NIP-04 are rejected. |
+
+An invalid `pqc3` message is an error; it is not retried as legacy ciphertext. These are configured policies, not automatic negotiation. Both peers need matching support and authenticated KEM key provisioning. During rotation, put the old private key in `pqcPreviousPrivateKeys`, distribute the new public key, and remove the old key after queued messages have drained. Retaining a key does not constitute a verified recovery or forward-secrecy guarantee.
+
+The outer Nostr event still authenticates the sender with the classical Nostr signature. ML-KEM protects the configured ciphertext path; it does not make sender authentication post-quantum or make ordinary Nostr clients understand `pqc3`. Production interoperability, replay, rotation, and downgrade checks belong in the [PQC acceptance matrix](/security/pqc-production-v2#eight-acceptance-groups).
 
 ## Profile metadata
 
@@ -147,7 +159,7 @@ Notes:
 
 Enforcement notes:
 
-- Inbound event signatures are verified before sender policy and NIP-04 decryption, so forged events are rejected early.
+- Inbound event signatures are verified before sender policy and either legacy or PQC decryption, so forged events are rejected early.
 - Pairing replies are sent without decrypting or processing the original DM body.
 - Inbound DMs are rate-limited (globally and per sender) and oversized payloads are dropped before decrypt.
 
@@ -196,12 +208,13 @@ Tips:
 
 ## Protocol support
 
-| NIP    | Status    | Description                           |
-| ------ | --------- | ------------------------------------- |
-| NIP-01 | Supported | Basic event format + profile metadata |
-| NIP-04 | Supported | Compatibility encryption for DMs      |
-| NIP-17 | Planned   | Gift-wrapped DMs                      |
-| NIP-44 | Supported | `pqc2` ML-KEM-768 hybrid DM envelopes |
+| NIP             | Status                                 | Description                                                             |
+| --------------- | -------------------------------------- | ----------------------------------------------------------------------- |
+| NIP-01          | Supported                              | Basic event format + profile metadata                                   |
+| NIP-04          | Supported                              | Compatibility encryption for DMs                                        |
+| NIP-17          | Planned                                | Gift-wrapped DMs                                                        |
+| NIP-44          | Not implemented as a standard protocol | Experimental `pqc3` is a different wire format.                         |
+| OpenClaw `pqc3` | Experimental                           | Context-bound ML-KEM-768 + ChaCha20 + HMAC-SHA256 for configured peers. |
 
 ## Testing
 
@@ -229,6 +242,8 @@ docker run -p 7777:7777 ghcr.io/hoytech/strfry
 2. Open a Nostr client (Amethyst, Damus, etc.).
 3. DM the bot pubkey.
 4. Verify the response.
+
+This ordinary-client exercise checks NIP-04 compatibility in `disabled` or `preferred` mode. Testing `required` needs a controlled `pqc3` peer with authenticated KEM keys. Record the actual protocol used; a successful ordinary-client DM does not validate the PQC path.
 
 ## Troubleshooting
 

@@ -2130,3 +2130,31 @@ CREATE TABLE IF NOT EXISTS model_catalog_remote (
   last_modified TEXT,
   checked_at INTEGER NOT NULL
 ) STRICT;
+
+-- PQC push V2 durable state (additive after v6).
+
+CREATE TABLE IF NOT EXISTS pqc_push_sequences (
+  sender_id TEXT NOT NULL, recipient_id TEXT NOT NULL, sequence INTEGER NOT NULL,
+  PRIMARY KEY (sender_id, recipient_id)
+) STRICT;
+CREATE TABLE IF NOT EXISTS pqc_push_replay (
+  sender_id TEXT NOT NULL, recipient_id TEXT NOT NULL, sequence INTEGER NOT NULL,
+  PRIMARY KEY (sender_id, recipient_id)
+) STRICT;
+CREATE TABLE IF NOT EXISTS pqc_push_nonces (
+  sender_id TEXT NOT NULL, recipient_id TEXT NOT NULL, nonce TEXT NOT NULL, expires_at_ms INTEGER NOT NULL,
+  PRIMARY KEY (sender_id, recipient_id, nonce)
+) STRICT;
+CREATE TABLE IF NOT EXISTS pqc_push_objects (
+  object_id TEXT PRIMARY KEY, token_hash TEXT NOT NULL, recipient_id TEXT NOT NULL,
+  payload TEXT NOT NULL, envelope_json TEXT NOT NULL, expires_at_ms INTEGER NOT NULL
+) STRICT;
+CREATE TABLE IF NOT EXISTS pqc_push_bindings (
+  subscription_id TEXT PRIMARY KEY, device_id TEXT NOT NULL
+) STRICT;
+CREATE TABLE IF NOT EXISTS pqc_push_attempts (
+  device_id TEXT PRIMARY KEY, window_start_ms INTEGER NOT NULL, attempts INTEGER NOT NULL
+) STRICT;
+CREATE TABLE IF NOT EXISTS pqc_push_wakes (
+  reference_json TEXT NOT NULL PRIMARY KEY, expires_at_ms INTEGER NOT NULL
+) STRICT;

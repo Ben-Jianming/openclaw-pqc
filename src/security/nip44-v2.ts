@@ -11,10 +11,48 @@
 //
 // The on-disk / on-wire envelope format is:
 //   pqc2:<base64url(ml-kem ciphertext)>.<base64url(chacha ciphertext)>.<base64url(hmac)>
-import { createCipheriv, createDecipheriv, createHmac, hkdfSync } from "node:crypto";
+import {
+  createCipheriv,
+  createDecipheriv,
+  createHmac,
+  createHash,
+  hkdfSync,
+  timingSafeEqual,
+} from "node:crypto";
 import { ml_kem768 } from "@noble/post-quantum/ml-kem.js";
 
 const PREFIX = "pqc2:";
+const CONTEXT_PREFIX = "pqc3:";
+export interface PqcMessageContext {
+  senderPubkey: string;
+  recipientPubkey: string;
+  purpose: "nostr-dm";
+}
+function contextDigest(context: PqcMessageContext, kemPublicKey: Uint8Array): Buffer {
+  if (
+    !/^[0-9a-f]{64}$/.test(context.senderPubkey) ||
+    !/^[0-9a-f]{64}$/.test(context.recipientPubkey) ||
+    context.purpose !== "nostr-dm"
+  ) {
+    throw new Nip44V2Error("invalid authenticated message context");
+  }
+  // Context is reconstructed locally from the authenticated outer event, never
+  // copied from attacker-controlled envelope metadata. This is experimental
+  // OpenClaw framing, not standard NIP-44 or an RFC 9180 HPKE suite.
+  return createHash("sha256")
+    .update(
+      JSON.stringify([
+        "OpenClaw-PQC/Message",
+        3,
+        "ML-KEM-768+ChaCha20+HMAC-SHA256",
+        context.senderPubkey,
+        context.recipientPubkey,
+        context.purpose,
+        createHash("sha256").update(kemPublicKey).digest("hex"),
+      ]),
+    )
+    .digest();
+}
 const HKDF_INFO = new TextEncoder().encode("nip44-v2");
 const HKDF_SALT = new Uint8Array(0);
 const HMAC_KEY_LEN = 32;
@@ -60,7 +98,14 @@ function toBase64Url(buf: Uint8Array): string {
 
 function fromBase64Url(s: string, label: string): Buffer {
   try {
-    return Buffer.from(s, "base64url");
+    if (!/^[A-Za-z0-9_-]+$/.test(s)) {
+      throw new Error("invalid alphabet");
+    }
+    const bytes = Buffer.from(s, "base64url");
+    if (bytes.toString("base64url") !== s) {
+      throw new Error("noncanonical encoding");
+    }
+    return bytes;
   } catch (error) {
     throw new Nip44V2Error(`${label} is not valid base64url`, { cause: error });
   }
@@ -70,7 +115,7 @@ function fromBase64Url(s: string, label: string): Buffer {
  * Derive the 32-byte conversation key from a 32-byte shared secret using
  * HKDF-SHA256. Matches the NIP-44 v2 reference ("hkdf_sha256(shared_x, salt, info)").
  */
-export function deriveConversationKey(sharedSecret: Uint8Array): Uint8Array {
+export function deriveConversationKey(sharedSecret: Uint8Array, context?: Uint8Array): Uint8Array {
   if (!(sharedSecret instanceof Uint8Array) || sharedSecret.length !== 32) {
     throw new Nip44V2Error("sharedSecret must be a 32-byte Uint8Array");
   }
@@ -78,18 +123,23 @@ export function deriveConversationKey(sharedSecret: Uint8Array): Uint8Array {
     "sha256",
     Buffer.from(sharedSecret),
     HKDF_SALT,
-    HKDF_INFO,
+    context
+      ? Buffer.concat([Buffer.from("OpenClaw-PQC/Message/V3\0"), Buffer.from(context)])
+      : HKDF_INFO,
     HMAC_KEY_LEN + CHACHA_KEY_LEN + CHACHA_IV_LEN,
   );
   return new Uint8Array(okm);
 }
 
-function conversationKeys(sharedSecret: Uint8Array): {
+function conversationKeys(
+  sharedSecret: Uint8Array,
+  context?: Uint8Array,
+): {
   chachaKey: Buffer;
   chachaNonce: Buffer;
   hmacKey: Buffer;
 } {
-  const okm = deriveConversationKey(sharedSecret);
+  const okm = deriveConversationKey(sharedSecret, context);
   return {
     hmacKey: Buffer.from(okm.subarray(0, HMAC_KEY_LEN)),
     chachaKey: Buffer.from(okm.subarray(HMAC_KEY_LEN, HMAC_KEY_LEN + CHACHA_KEY_LEN)),
@@ -210,16 +260,12 @@ function constantTimeEqual(a: Buffer, b: Buffer): boolean {
   if (a.length !== b.length) {
     return false;
   }
-  let diff = 0;
-  for (let i = 0; i < a.length; i++) {
-    diff |= a[i]! ^ b[i]!;
-  }
-  return diff === 0;
+  return timingSafeEqual(a, b);
 }
 
 /** Auto-detect a "pqc2:" envelope by prefix. */
 export function isPqcNip44Envelope(s: string): boolean {
-  return typeof s === "string" && s.startsWith(PREFIX);
+  return typeof s === "string" && (s.startsWith(PREFIX) || s.startsWith(CONTEXT_PREFIX));
 }
 
 /** Validate a length-prefix byte string is well-formed. */
@@ -252,7 +298,11 @@ function assertMlKemSecretKey(blob: Buffer): void {
  * `pqc2:` envelope. The ML-KEM-768 encapsulation produces a 32-byte
  * shared secret that feeds the HKDF conversation-key derivation.
  */
-export function encryptNip44V2(recipientPubMlKem: Uint8Array, plaintext: Uint8Array): string {
+export function encryptNip44V2(
+  recipientPubMlKem: Uint8Array,
+  plaintext: Uint8Array,
+  context?: PqcMessageContext,
+): string {
   if (!(plaintext instanceof Uint8Array)) {
     throw new Nip44V2Error("plaintext must be a Uint8Array");
   }
@@ -266,27 +316,61 @@ export function encryptNip44V2(recipientPubMlKem: Uint8Array, plaintext: Uint8Ar
     );
   }
   assertMlKemCiphertext(Buffer.from(kemCt));
-  const keys = conversationKeys(sharedSecret);
+  const digest = context ? contextDigest(context, recipientPubMlKem) : undefined;
+  const keys = conversationKeys(sharedSecret, digest);
   const padded = pad(plaintext);
   const chachaCt = chacha20Encrypt(keys.chachaKey, keys.chachaNonce, padded);
-  const mac = hmacSha256(keys.hmacKey, Buffer.concat([Buffer.from(kemCt), Buffer.from(chachaCt)]));
-  return PREFIX + toBase64Url(kemCt) + "." + toBase64Url(chachaCt) + "." + toBase64Url(mac);
+  const mac = hmacSha256(
+    keys.hmacKey,
+    Buffer.concat([...(digest ? [digest] : []), Buffer.from(kemCt), Buffer.from(chachaCt)]),
+  );
+  return (
+    (digest ? CONTEXT_PREFIX + toBase64Url(digest) + "." : PREFIX) +
+    toBase64Url(kemCt) +
+    "." +
+    toBase64Url(chachaCt) +
+    "." +
+    toBase64Url(mac)
+  );
 }
 
 /** Decrypt a `pqc2:` envelope using the recipient's ML-KEM-768 secret key. */
-export function decryptNip44V2(recipientPrivMlKem: Uint8Array, envelope: string): Uint8Array {
+export function decryptNip44V2(
+  recipientPrivMlKem: Uint8Array,
+  envelope: string,
+  context?: PqcMessageContext,
+): Uint8Array {
   if (typeof envelope !== "string" || !isPqcNip44Envelope(envelope)) {
     throw new Nip44V2Error("envelope must be a pqc2: NIP-44 v2 hybrid envelope");
   }
   assertMlKemSecretKey(Buffer.from(recipientPrivMlKem));
+  if (envelope.length > 100_000) {
+    throw new Nip44V2Error("message envelope is oversized");
+  }
+  const bound = envelope.startsWith(CONTEXT_PREFIX);
+  if (bound !== Boolean(context)) {
+    throw new Nip44V2Error("message protocol context required or unexpected");
+  }
   const body = envelope.slice(PREFIX.length);
   const parts = body.split(".");
+  const digest = context
+    ? contextDigest(context, ml_kem768.getPublicKey(recipientPrivMlKem))
+    : undefined;
+  if (digest) {
+    const received = fromBase64Url(parts.shift() ?? "", "context");
+    if (!constantTimeEqual(digest, received)) {
+      throw new Nip44V2Error("message context binding failed");
+    }
+  }
   if (parts.length !== 3) {
     throw new Nip44V2Error("envelope must have exactly 3 dot-separated parts");
   }
   const [kemCtB64, chachaCtB64, macB64] = parts as [string, string, string];
   const kemCt = fromBase64Url(kemCtB64, "kemCt");
   const chachaCt = fromBase64Url(chachaCtB64, "chachaCt");
+  if (chachaCt.length < 32 || chachaCt.length > 65_568 || chachaCt.length % 32 !== 0) {
+    throw new Nip44V2Error("invalid ciphertext size");
+  }
   const mac = fromBase64Url(macB64, "mac");
   assertMlKemCiphertext(kemCt);
   if (mac.length !== HMAC_TAG_LEN) {
@@ -301,8 +385,11 @@ export function decryptNip44V2(recipientPrivMlKem: Uint8Array, envelope: string)
       `ML-KEM-768 shared secret must be ${ML_KEM_768_SS_BYTES} bytes; got ${sharedSecret.length}`,
     );
   }
-  const keys = conversationKeys(sharedSecret);
-  const expectedMac = hmacSha256(keys.hmacKey, Buffer.concat([kemCt, chachaCt]));
+  const keys = conversationKeys(sharedSecret, digest);
+  const expectedMac = hmacSha256(
+    keys.hmacKey,
+    Buffer.concat([...(digest ? [digest] : []), kemCt, chachaCt]),
+  );
   if (!constantTimeEqual(mac, expectedMac)) {
     throw new Nip44V2Error(
       "HMAC-SHA256 authentication failed — wrong key, tampered ciphertext, or wrong ML-KEM ciphertext",
@@ -310,4 +397,15 @@ export function decryptNip44V2(recipientPrivMlKem: Uint8Array, envelope: string)
   }
   const padded = chacha20Decrypt(keys.chachaKey, keys.chachaNonce, chachaCt);
   return unpad(padded);
+}
+
+export function decodeMlKemPublicKey(value: string): Uint8Array {
+  const decoded = fromBase64Url(value.trim(), "ML-KEM-768 public key");
+  assertMlKemPublicKey(decoded);
+  return new Uint8Array(decoded);
+}
+export function decodeMlKemSecretKey(value: string): Uint8Array {
+  const decoded = fromBase64Url(value.trim(), "ML-KEM-768 secret key");
+  assertMlKemSecretKey(decoded);
+  return new Uint8Array(decoded);
 }

@@ -12,6 +12,7 @@ import {
   executeSqliteQueryTakeFirstSync,
   getNodeSqliteKysely,
 } from "./kysely-sync.js";
+import { bindPushSubscriptionInTransaction, PQC_PUSH_SCHEMA_SQL } from "./pqc-push-state.js";
 
 export const WEB_PUSH_VAPID_KEY_ID = "default";
 export const DEFAULT_WEB_PUSH_VAPID_SUBJECT = "https://openclaw.ai";
@@ -144,6 +145,7 @@ export function upsertWebPushSubscription(params: {
   endpoint: string;
   keys: { p256dh: string; auth: string };
   candidateSubscriptionId: string;
+  deviceId?: string;
   nowMs: number;
   stateDir?: string;
 }): WebPushSubscription {
@@ -166,6 +168,9 @@ export function upsertWebPushSubscription(params: {
       createdAtMs: existingRow?.created_at_ms ?? params.nowMs,
       updatedAtMs: params.nowMs,
     };
+    if (params.deviceId) {
+      bindPushSubscriptionInTransaction(db, subscription.subscriptionId, params.deviceId);
+    }
     const row = webPushSubscriptionToRow({
       endpointHash: params.endpointHash,
       subscription,
@@ -193,8 +198,26 @@ export function deleteWebPushSubscriptionByEndpoint(params: {
   endpointHash: string;
   endpoint: string;
   stateDir?: string;
+  deviceId?: string;
 }): boolean {
   return runOpenClawStateWriteTransaction(({ db }) => {
+    db.exec(PQC_PUSH_SCHEMA_SQL);
+    const stateDb = getNodeSqliteKysely<OpenClawStateKyselyDatabase>(db);
+    const row = executeSqliteQueryTakeFirstSync(
+      db,
+      stateDb
+        .selectFrom("web_push_subscriptions")
+        .select("subscription_id")
+        .where("endpoint_hash", "=", params.endpointHash)
+        .where("endpoint", "=", params.endpoint),
+    );
+    if (!row) {
+      return false;
+    }
+    // Ensures lazy tables and checks immutable ownership in this same transaction.
+    if (params.deviceId) {
+      bindPushSubscriptionInTransaction(db, row.subscription_id, params.deviceId);
+    }
     const result = executeSqliteQuerySync(
       db,
       getNodeSqliteKysely<WebPushDatabase>(db)
@@ -202,7 +225,14 @@ export function deleteWebPushSubscriptionByEndpoint(params: {
         .where("endpoint_hash", "=", params.endpointHash)
         .where("endpoint", "=", params.endpoint),
     );
-    return Number(result.numAffectedRows ?? 0) > 0;
+    const removed = Number(result.numAffectedRows ?? 0) > 0;
+    if (removed) {
+      executeSqliteQuerySync(
+        db,
+        stateDb.deleteFrom("pqc_push_bindings").where("subscription_id", "=", row.subscription_id),
+      );
+    }
+    return removed;
   }, webPushStateDatabaseOptions(params.stateDir));
 }
 
@@ -214,6 +244,7 @@ export function deleteWebPushSubscriptionIfCurrent(params: {
 }): boolean {
   const subscription = params.subscription;
   return runOpenClawStateWriteTransaction(({ db }) => {
+    db.exec(PQC_PUSH_SCHEMA_SQL);
     const result = executeSqliteQuerySync(
       db,
       getNodeSqliteKysely<WebPushDatabase>(db)
@@ -225,7 +256,17 @@ export function deleteWebPushSubscriptionIfCurrent(params: {
         .where("auth", "=", subscription.keys.auth)
         .where("updated_at_ms", "=", subscription.updatedAtMs),
     );
-    return Number(result.numAffectedRows ?? 0) > 0;
+    const removed = Number(result.numAffectedRows ?? 0) > 0;
+    if (removed) {
+      // This path follows a bound send, so the lazy binding table is already present.
+      executeSqliteQuerySync(
+        db,
+        getNodeSqliteKysely<OpenClawStateKyselyDatabase>(db)
+          .deleteFrom("pqc_push_bindings")
+          .where("subscription_id", "=", subscription.subscriptionId),
+      );
+    }
+    return removed;
   }, webPushStateDatabaseOptions(params.stateDir));
 }
 

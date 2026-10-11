@@ -9,6 +9,12 @@ on:
       - "apps/shared/OpenClawKit/**"
       - "packages/gateway-client/**"
       - "test/fixtures/pqc/**"
+      - "scripts/verify-native-push-v2.ts"
+      - "src/security/push-dual-signature.ts"
+      - "src/infra/ed25519-signature.ts"
+      - "src/infra/mldsa65-key-storage.ts"
+      - "package.json"
+      - "pnpm-lock.yaml"
       - ".github/workflows/pqc-native-interoperability.yml"
   pull_request:
     paths:
@@ -17,6 +23,12 @@ on:
       - "apps/shared/OpenClawKit/**"
       - "packages/gateway-client/**"
       - "test/fixtures/pqc/**"
+      - "scripts/verify-native-push-v2.ts"
+      - "src/security/push-dual-signature.ts"
+      - "src/infra/ed25519-signature.ts"
+      - "src/infra/mldsa65-key-storage.ts"
+      - "package.json"
+      - "pnpm-lock.yaml"
       - ".github/workflows/pqc-native-interoperability.yml"
   workflow_dispatch:
 
@@ -31,13 +43,23 @@ jobs:
   apple:
     name: Apple ML-DSA-65 vectors and identity migration
     runs-on: macos-26
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           persist-credentials: false
       - name: Run OpenClawKit identity tests
         run: swift test --package-path apps/shared/OpenClawKit --filter DeviceIdentityStoreTests
+      - name: Run strict push acceptance and durable replay vectors
+        env:
+          PQC_PUSH_INTEROP_OUTPUT: ${{ runner.temp }}/swift-push-v2.json
+        run: swift test --package-path apps/shared/OpenClawKit --filter PushV2VerifierTests
+      - uses: ./.github/actions/setup-node-env
+        with:
+          node-version: "24.x"
+          install-bun: "false"
+      - name: Verify native-generated push signatures in Node
+        run: node --import tsx scripts/verify-native-push-v2.ts "${{ runner.temp }}/swift-push-v2.json"
 
   android:
     name: Android ML-DSA-65 vectors and identity migration

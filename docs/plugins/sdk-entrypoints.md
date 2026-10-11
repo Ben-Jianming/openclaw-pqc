@@ -406,6 +406,17 @@ OpenClaw classifies loaded plugins by their registration behavior:
 
 Use `openclaw plugins inspect <id>` to see a plugin's shape.
 
+## PQC channel entry points
+
+For a controlled plugin or receiver in this fork, use the narrow SDK subpaths rather than importing host source files:
+
+- `openclaw/plugin-sdk/push-envelope` exports the canonical gateway key lookup, signing, and strict verification helpers. `verifySignedPushEnvelope` requires trusted gateway keys, an independently established `expectedRecipientId`, and a replay guard retained across messages. `createPushReplayGuard` uses the selected profile's shared SQLite state and preserves decisions after restart. A receiver must verify before displaying or routing content. `trySignPushEnvelope` is an audit-only helper; its failure result must not become an unsigned sensitive push fallback.
+- `openclaw/plugin-sdk/pqc-message` exports the experimental ML-KEM message implementation shared with the Nostr plugin. Supply `PqcMessageContext` for `pqc3`: sender and recipient Nostr public keys and the purpose `nostr-dm`. Omitting context uses legacy `pqc2` and does not provide context binding. These helper names do not assert standard NIP-44 compliance or PQC sender authentication.
+
+Discovery and CLI metadata modes must still avoid top-level key reads, database opens, and signing. Load these helpers only when the corresponding runtime operation is needed. Package exports in source are not proof that an older installed package includes the generated build artifacts; check the matching revision and build.
+
+See [PQC production acceptance](/security/pqc-production-v2) for the transcript, authenticated wake redemption, durable state, protocol limits, and required product tests. A plugin audit record is not receiver acceptance evidence.
+
 ## Related
 
 - [SDK Overview](/plugins/sdk-overview) - registration API and subpath reference

@@ -97,6 +97,8 @@ import {
   WebPushUnsubscribeParamsSchema,
   type WebPushTestParams,
   WebPushTestParamsSchema,
+  PushPqcKeysParamsSchema,
+  PushPqcRedeemParamsSchema,
   SecretsResolveParamsSchema,
   SecretsResolveResultSchema,
   SessionsListParamsSchema,
@@ -445,6 +447,8 @@ export const validateNodePresenceActivityPayload = lazyCompile(NodePresenceActiv
 export const validateNodePendingDrainParams = lazyCompile(NodePendingDrainParamsSchema);
 export const validateNodePendingEnqueueParams = lazyCompile(NodePendingEnqueueParamsSchema);
 export const validatePushTestParams = lazyCompile(PushTestParamsSchema);
+export const validatePushPqcKeysParams = lazyCompile(PushPqcKeysParamsSchema);
+export const validatePushPqcRedeemParams = lazyCompile(PushPqcRedeemParamsSchema);
 export const validateWebPushVapidPublicKeyParams = lazyCompile<WebPushVapidPublicKeyParams>(
   WebPushVapidPublicKeyParamsSchema,
 );

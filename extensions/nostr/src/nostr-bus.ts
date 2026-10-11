@@ -768,7 +768,7 @@ async function sendEncryptedDm(
   // NIP-04 uses an e tag to keep a reply attached to its verified inbound event.
   const tags = [["p", toPubkey]];
   if (encrypted.pqc) {
-    tags.push(["openclaw-pqc", "ml-kem-768+nip44-v2"]);
+    tags.push(["openclaw-pqc", "openclaw-pqc3:ml-kem-768+chacha20+hmac-sha256"]);
   }
   if (replyToEventId) {
     tags.push(["e", replyToEventId]);

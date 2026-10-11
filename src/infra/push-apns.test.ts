@@ -1,11 +1,18 @@
 // Tests APNS push signing and request construction.
 import { generateKeyPairSync } from "node:crypto";
 import { EventEmitter } from "node:events";
+import { mkdtempSync, rmSync } from "node:fs";
 import { createServer, type Server as HttpServer } from "node:http";
 import http2 from "node:http2";
 import net from "node:net";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { MAX_TIMER_TIMEOUT_MS } from "@openclaw/normalization-core/number-coercion";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  openOpenClawStateDatabase,
+  closeOpenClawStateDatabase,
+} from "../state/openclaw-state-db.js";
 import { createDeferred } from "../test-utils/deferred.js";
 import { encodeMlDsa65SecretKey, generateMlDsa65Keypair } from "./mldsa65-key-storage.js";
 import { startProxy, stopProxy, type ProxyHandle } from "./net/proxy/proxy-lifecycle.js";
@@ -89,13 +96,33 @@ type DestroyableConnection = {
   destroy: () => void;
 };
 
+let stateDir: string;
+let capturedPayloads = new WeakMap<object, Record<string, unknown>>();
+function captureCanonicalPayload(request: Record<string, unknown>): void {
+  const wake = requireRecord(request.payload, "APNs opaque wake");
+  expect(wake.kind).toBe("openclaw.pqc.wake.v2");
+  expect(wake.openclaw).toBeUndefined();
+  expect(Buffer.byteLength(JSON.stringify(wake))).toBeLessThanOrEqual(4096);
+  const ref = requireRecord(wake.pqc_ref, "APNs reference");
+  // Observe the stored original at the transport boundary, including failed sends;
+  // the sender discards failed references after the mocked provider returns.
+  const row = openOpenClawStateDatabase()
+    .db.prepare("SELECT payload FROM pqc_push_objects WHERE object_id = ?")
+    .get(ref.object_id as string);
+  expect(row).toBeDefined();
+  capturedPayloads.set(request, JSON.parse(row!.payload as string));
+}
+
 function createDirectApnsSendFixture(params: {
   nodeId: string;
   environment: "sandbox" | "production";
   sendResult: { status: number; apnsId: string; body: string };
 }) {
   return {
-    send: vi.fn().mockResolvedValue(params.sendResult),
+    send: vi.fn().mockImplementation(async (request: Record<string, unknown>) => {
+      captureCanonicalPayload(request);
+      return params.sendResult;
+    }),
     registration: {
       nodeId: params.nodeId,
       transport: "direct" as const,
@@ -128,7 +155,10 @@ function createRelayApnsSendFixture(params: {
 }) {
   const environment = params.environment ?? "production";
   return {
-    send: vi.fn().mockResolvedValue(params.sendResult),
+    send: vi.fn().mockImplementation(async (request: Record<string, unknown>) => {
+      captureCanonicalPayload(request);
+      return params.sendResult;
+    }),
     registration: {
       nodeId: params.nodeId,
       transport: "relay" as const,
@@ -208,7 +238,7 @@ function requireSendRequest(send: ReturnType<typeof vi.fn>, label = "APNs send r
 }
 
 function requirePayload(sendRequest: Record<string, unknown>) {
-  return requireRecord(sendRequest.payload, "APNs payload");
+  return capturedPayloads.get(sendRequest) ?? requireRecord(sendRequest.payload, "APNs payload");
 }
 
 async function startFakeApnsServer(params?: { responseBody?: string; status?: number }): Promise<{
@@ -289,8 +319,16 @@ async function startConnectProxy(upstreamPort: number): Promise<{
   };
 }
 
+beforeEach(() => {
+  stateDir = mkdtempSync(join(tmpdir(), "pqc-apns-test-"));
+  vi.stubEnv("OPENCLAW_STATE_DIR", stateDir);
+  capturedPayloads = new WeakMap();
+});
 afterEach(async () => {
+  closeOpenClawStateDatabase();
+  vi.unstubAllEnvs();
   vi.unstubAllGlobals();
+  rmSync(stateDir, { recursive: true, force: true });
 });
 
 describe("push APNs send semantics", () => {
@@ -409,7 +447,8 @@ describe("push APNs send semantics", () => {
       expect(request?.headers[":path"]).toBe("/3/device/abcd1234abcd1234abcd1234abcd1234");
       expect(request?.headers["apns-topic"]).toBe("ai.openclaw.ios");
       expect(request?.headers["apns-push-type"]).toBe("alert");
-      expect(request?.body).toContain('"nodeId":"ios-node-proxied-alert"');
+      expect(request?.body).not.toContain('"nodeId":"ios-node-proxied-alert"');
+      expect(JSON.parse(request!.body).kind).toBe("openclaw.pqc.wake.v2");
     } finally {
       if (previousTlsRejectUnauthorized === undefined) {
         delete process.env.NODE_TLS_REJECT_UNAUTHORIZED;

@@ -25,28 +25,33 @@ function freshStatePath(rootDir: string): string {
 describe("device_identities schema additive (M3, whitepaper 2.1.3)", () => {
   it("adds the 4 ML-DSA-65 columns to a fresh database", async () => {
     await withTempDir("openclaw-m3-additive-", async (rootDir) => {
-      const databasePath = freshStatePath(rootDir);
-      fs.mkdirSync(path.dirname(databasePath), { recursive: true });
-      openOpenClawStateDatabase({ path: databasePath });
-      // Force the canonical schema to land first; the additive columns are
-      // injected by the migration pass.
-      const sqlite = await import("node:sqlite");
-      const db = new sqlite.DatabaseSync(databasePath);
-      ensureAdditiveStateColumns(db);
-      db.close();
+      try {
+        const databasePath = freshStatePath(rootDir);
+        fs.mkdirSync(path.dirname(databasePath), { recursive: true });
+        openOpenClawStateDatabase({ path: databasePath });
+        // Force the canonical schema to land first; the additive columns are
+        // injected by the migration pass.
+        const sqlite = await import("node:sqlite");
+        const db = new sqlite.DatabaseSync(databasePath);
+        ensureAdditiveStateColumns(db);
+        db.close();
 
-      const probe = new sqlite.DatabaseSync(databasePath, { readOnly: true });
-      const columns = (
-        probe.prepare("PRAGMA table_info(device_identities)").all() as Array<{ name: string }>
-      ).map((row) => row.name);
-      expect(columns).toContain("mldsa_public_key_pem");
-      expect(columns).toContain("mldsa_private_key_pem");
-      expect(columns).toContain("mldsa_private_key_wrapped");
-      expect(columns).toContain("mldsa_private_key_wrap_key_id");
-      // Legacy columns are untouched.
-      expect(columns).toContain("public_key_pem");
-      expect(columns).toContain("private_key_pem");
-      probe.close();
+        const probe = new sqlite.DatabaseSync(databasePath, { readOnly: true });
+        const columns = (
+          probe.prepare("PRAGMA table_info(device_identities)").all() as Array<{ name: string }>
+        ).map((row) => row.name);
+        expect(columns).toContain("mldsa_public_key_pem");
+        expect(columns).toContain("mldsa_private_key_pem");
+        expect(columns).toContain("mldsa_private_key_wrapped");
+        expect(columns).toContain("mldsa_private_key_wrap_key_id");
+        // Legacy columns are untouched.
+        expect(columns).toContain("public_key_pem");
+        expect(columns).toContain("private_key_pem");
+        probe.close();
+      } finally {
+        // Release the shared handle before withTempDir removes the database on Windows.
+        closeOpenClawStateDatabaseForTest();
+      }
     });
   });
 

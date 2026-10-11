@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import webPush from "web-push";
 import { closeOpenClawStateDatabase } from "../state/openclaw-state-db.js";
 import { captureEnv, setTestEnvValue } from "../test-utils/env.js";
+import { SqlitePushReferenceStore } from "./pqc-push-state.js";
 import {
   createWebPushVapidKeyPair,
   listWebPushSubscriptions,
@@ -26,10 +27,6 @@ const generatedVapidKeys = vi.hoisted(
       ["privateKey", "test-private-key-base64url"],
     ]) as { publicKey: string; privateKey: string },
 );
-vi.mock("../config/paths.js", () => ({
-  resolveStateDir: () => tmpDir,
-}));
-
 vi.mock("web-push", () => ({
   default: {
     generateVAPIDKeys: vi.fn(() => generatedVapidKeys),
@@ -40,12 +37,14 @@ vi.mock("web-push", () => ({
 
 beforeEach(async () => {
   tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "push-web-test-"));
+  vi.stubEnv("OPENCLAW_STATE_DIR", tmpDir);
   vi.clearAllMocks();
   vi.mocked(webPush.sendNotification).mockResolvedValue({ statusCode: 201 } as never);
 });
 
 afterEach(async () => {
   closeOpenClawStateDatabase();
+  vi.unstubAllEnvs();
   await fs.rm(tmpDir, { recursive: true, force: true });
 });
 
@@ -84,7 +83,11 @@ describe("resolveVapidKeys", () => {
     expect(vi.mocked(webPush.generateVAPIDKeys)).not.toHaveBeenCalled();
 
     await fs.rm(`${legacyPath}.doctor-importing`);
-    await fs.symlink(path.join(tmpDir, "missing-vapid-keys.json"), legacyPath);
+    await fs.symlink(
+      path.join(tmpDir, "missing-vapid-keys.json"),
+      legacyPath,
+      process.platform === "win32" ? "junction" : "file",
+    );
     await expect(resolveVapidKeys(tmpDir)).rejects.toThrow("openclaw doctor --fix");
     expect(vi.mocked(webPush.generateVAPIDKeys)).not.toHaveBeenCalled();
   });
@@ -281,16 +284,39 @@ describe("subscription CRUD", () => {
 describe("sending", () => {
   const keys = { p256dh: "p256dh-key", auth: "auth-key" };
 
+  it("keeps notification content off the transport and redeems it only for its owner", async () => {
+    await registerWebPushSubscription({
+      endpoint: "https://push.example.com/secure",
+      keys,
+      deviceId: "alice",
+      baseDir: tmpDir,
+    });
+    await expect(
+      broadcastWebPush({ title: "Secret", body: "private body" }, tmpDir),
+    ).resolves.toEqual([expect.objectContaining({ ok: true })]);
+    const wire = JSON.parse(vi.mocked(webPush.sendNotification).mock.calls[0]![1] as string);
+    expect(JSON.stringify(wire)).not.toContain("Secret");
+    expect(JSON.stringify(wire)).not.toContain("private body");
+    const store = new SqlitePushReferenceStore({
+      env: { ...process.env, OPENCLAW_STATE_DIR: tmpDir },
+    });
+    expect(() => store.redeem(wire.pqc_ref, "bob")).toThrow("unavailable");
+    expect(JSON.parse(store.redeem(wire.pqc_ref, "alice").payload).body).toBe("private body");
+    expect(() => store.redeem(wire.pqc_ref, "alice")).toThrow("unavailable");
+  });
+
   it("configures VAPID details once before broadcasting", async () => {
     await registerWebPushSubscription({
       endpoint: "https://push.example.com/a",
       keys,
       baseDir: tmpDir,
+      deviceId: "alice",
     });
     await registerWebPushSubscription({
       endpoint: "https://push.example.com/b",
       keys,
       baseDir: tmpDir,
+      deviceId: "alice",
     });
 
     const results = await broadcastWebPush({ title: "Broadcast" }, tmpDir);
@@ -303,7 +329,7 @@ describe("sending", () => {
 
   it("does not delete a subscription re-registered during an expired send", async () => {
     const endpoint = "https://push.example.com/reregistered";
-    await registerWebPushSubscription({ endpoint, keys, baseDir: tmpDir });
+    await registerWebPushSubscription({ endpoint, keys, baseDir: tmpDir, deviceId: "alice" });
     let rejectSend: ((error: unknown) => void) | undefined;
     vi.mocked(webPush.sendNotification).mockImplementationOnce(
       () =>
@@ -318,6 +344,7 @@ describe("sending", () => {
       endpoint,
       keys: { p256dh: "replacement-p256dh", auth: "replacement-auth" },
       baseDir: tmpDir,
+      deviceId: "alice",
     });
     rejectSend?.(Object.assign(new Error("gone"), { statusCode: 410 }));
     await broadcast;
@@ -327,7 +354,12 @@ describe("sending", () => {
 
   it("does not delete an expired subscription after a legacy claim appears", async () => {
     const endpoint = "https://push.example.com/pending-claim";
-    const subscription = await registerWebPushSubscription({ endpoint, keys, baseDir: tmpDir });
+    const subscription = await registerWebPushSubscription({
+      endpoint,
+      keys,
+      baseDir: tmpDir,
+      deviceId: "alice",
+    });
     let rejectSend: ((error: unknown) => void) | undefined;
     vi.mocked(webPush.sendNotification).mockImplementationOnce(
       () =>
@@ -355,7 +387,7 @@ describe("sending", () => {
 
   it("keeps completed delivery results when expired-subscription cleanup fails", async () => {
     const endpoint = "https://push.example.com/expired";
-    await registerWebPushSubscription({ endpoint, keys, baseDir: tmpDir });
+    await registerWebPushSubscription({ endpoint, keys, baseDir: tmpDir, deviceId: "alice" });
     await resolveVapidKeys(tmpDir);
     let rejectSend: ((error: unknown) => void) | undefined;
     vi.mocked(webPush.sendNotification).mockImplementationOnce(

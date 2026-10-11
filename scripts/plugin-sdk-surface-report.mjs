@@ -155,7 +155,9 @@ export function readPluginSdkSurfaceBudgets(env = process.env) {
       // +1: account-aware channel DM policy setup descriptors.
       // +1: dependency-light CLI argv parsing for machine-output metadata.
       // +1: focused PQC audit logging contract.
-      147,
+      // +1: canonical PQC push-envelope signing and verification boundary.
+      // +1: shared experimental context-bound PQC message implementation.
+      149,
       env,
     ),
     publicExports: readPluginSdkSurfaceBudgetEnv(
@@ -192,7 +194,9 @@ export function readPluginSdkSurfaceBudgets(env = process.env) {
       // +1: process-local sessions.changed plugin notification payload.
       // +2: structured PQC log event and level contracts.
       // +9: canonical PQC push-envelope verification and receiver key contracts.
-      4853,
+      // +6: shared experimental context-bound PQC message contract.
+      // +2: durable push replay factory and receiver guard contract.
+      4861,
       env,
     ),
     publicFunctionExports: readPluginSdkSurfaceBudgetEnv(
@@ -222,7 +226,9 @@ export function readPluginSdkSurfaceBudgets(env = process.env) {
       // +1: authoritative model-picker session-apply operation.
       // +1: logger file-transport flush for graceful shutdown drains.
       // +4: canonical PQC push-envelope verification helpers.
-      2945,
+      // +5: canonical PQC message codecs and key decoders.
+      // +1: durable push replay factory.
+      2951,
       env,
     ),
     publicDeprecatedExports: readPluginSdkSurfaceBudgetEnv(

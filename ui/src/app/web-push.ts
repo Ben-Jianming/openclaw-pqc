@@ -45,6 +45,7 @@ export function createWebPushCapability(gateway: ApplicationGateway): WebPushCap
   let disposed = false;
   let wasConnected = false;
   let operation: Promise<void> | null = null;
+  let securePushRetry: ReturnType<typeof setTimeout> | undefined;
   const listeners = new Set<(snapshot: WebPushSnapshot) => void>();
 
   const publish = (patch: Partial<WebPushSnapshot>) => {
@@ -103,6 +104,27 @@ export function createWebPushCapability(gateway: ApplicationGateway): WebPushCap
     return operation;
   };
 
+  const receiveSecurePushes = (client: GatewayBrowserClient) => {
+    clearTimeout(securePushRetry);
+    securePushRetry = undefined;
+    void import("./pqc-push.ts")
+      .then((m) => m.receivePendingPqcPushes(client))
+      .catch((error: unknown) => {
+        publish({ error: webPushError(error) });
+        if (disposed || securePushRetry !== undefined) {
+          return;
+        }
+        // The server permits 60 attempts per minute; retry retained references after that window.
+        securePushRetry = setTimeout(() => {
+          securePushRetry = undefined;
+          const current = gateway.snapshot.client;
+          if (!disposed && current && gateway.snapshot.phase === "connected") {
+            receiveSecurePushes(current);
+          }
+        }, 60_000);
+      });
+  };
+
   void readExistingSubscription().catch(() => {});
   const stopGateway = gateway.subscribe((gatewaySnapshot) => {
     const client = gatewaySnapshot.client;
@@ -110,8 +132,25 @@ export function createWebPushCapability(gateway: ApplicationGateway): WebPushCap
     if (connected && !wasConnected && client) {
       void reconcile(client);
     }
+    if (connected && !wasConnected && client) {
+      receiveSecurePushes(client);
+    }
     wasConnected = connected;
   });
+
+  const onWake = (event: MessageEvent) => {
+    const client = gateway.snapshot.client;
+    if (
+      event.data?.type === "pqc-push-reference" &&
+      client &&
+      gateway.snapshot.phase === "connected"
+    ) {
+      receiveSecurePushes(client);
+    }
+  };
+  if (supported) {
+    navigator.serviceWorker.addEventListener("message", onWake);
+  }
 
   return {
     get snapshot() {
@@ -140,7 +179,12 @@ export function createWebPushCapability(gateway: ApplicationGateway): WebPushCap
       }),
     dispose() {
       disposed = true;
+      clearTimeout(securePushRetry);
+      securePushRetry = undefined;
       stopGateway();
+      if (supported) {
+        navigator.serviceWorker.removeEventListener("message", onWake);
+      }
       listeners.clear();
     },
   };

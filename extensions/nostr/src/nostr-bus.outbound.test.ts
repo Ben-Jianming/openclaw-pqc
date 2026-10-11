@@ -152,8 +152,11 @@ describe("Nostr outbound relay failover", () => {
       content: string;
       tags: string[][];
     };
-    expect(event.content).toMatch(/^pqc2:/);
-    expect(event.tags).toContainEqual(["openclaw-pqc", "ml-kem-768+nip44-v2"]);
+    expect(event.content).toMatch(/^pqc3:/);
+    expect(event.tags).toContainEqual([
+      "openclaw-pqc",
+      "openclaw-pqc3:ml-kem-768+chacha20+hmac-sha256",
+    ]);
     await bus.close();
   });
 

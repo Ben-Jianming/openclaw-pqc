@@ -57,7 +57,7 @@ export function assertPrivateKeyFile(filePath: string): void {
   }
 }
 
-function writeWindowsPrivateKeyFile(filePath: string, contents: string): void {
+function writeWindowsPrivateKeyFile(filePath: string, contents: string | Uint8Array): void {
   // The FileStream overload passes this descriptor to CreateFile. The file is
   // never visible with the parent directory's inherited ACL, even briefly.
   const pathBase64 = Buffer.from(filePath, "utf8").toString("base64");
@@ -92,7 +92,7 @@ function writeWindowsPrivateKeyFile(filePath: string, contents: string): void {
       Buffer.from(script, "utf16le").toString("base64"),
     ],
     {
-      input: Buffer.from(contents, "utf8"),
+      input: typeof contents === "string" ? Buffer.from(contents, "utf8") : Buffer.from(contents),
       encoding: "utf8",
       timeout: 10_000,
       windowsHide: true,
@@ -109,7 +109,7 @@ function syncDirectory(directoryPath: string): void {
   }
 }
 
-export function writePrivateKeyFile(filePath: string, contents: string): string {
+export function writePrivateKeyFile(filePath: string, contents: string | Uint8Array): string {
   const absolute = path.resolve(filePath);
   const parent = path.dirname(absolute);
   const firstCreatedDirectory = fs.mkdirSync(parent, { recursive: true, mode: 0o700 });

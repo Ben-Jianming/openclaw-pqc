@@ -13,10 +13,13 @@ public struct OpenClawNativeStateError: Error, LocalizedError, Sendable {
     }
 }
 
-public enum OpenClawNativeStateCanonicalTable: Sendable {
+public enum OpenClawNativeStateCanonicalTable: Equatable, Sendable {
     case deviceIdentities
     case execApprovalsConfig
     case macosPortGuardianRecords
+    case pqcPushReplay
+    case pqcPushNonces
+    case pqcPushWakes
 }
 
 public enum OpenClawNativeStateSQLiteStep: Equatable, Sendable {
@@ -162,10 +165,59 @@ public final class OpenClawNativeStateSQLite: @unchecked Sendable {
         ],
         indexColumns: [])
 
+    private static let pqcPushReplay = CanonicalTable(
+        name: "pqc_push_replay", indexName: nil,
+        createSQL: """
+        CREATE TABLE IF NOT EXISTS pqc_push_replay (
+          sender_id TEXT NOT NULL,
+          recipient_id TEXT NOT NULL,
+          sequence INTEGER NOT NULL,
+          PRIMARY KEY (sender_id, recipient_id)
+        ) STRICT;
+        """,
+        columns: [
+            Column(name: "sender_id", type: "TEXT", notNull: true, primaryKeyPosition: 1, hidden: 0),
+            Column(name: "recipient_id", type: "TEXT", notNull: true, primaryKeyPosition: 2, hidden: 0),
+            Column(name: "sequence", type: "INTEGER", notNull: true, primaryKeyPosition: 0, hidden: 0),
+        ], indexColumns: [])
+
+    private static let pqcPushNonces = CanonicalTable(
+        name: "pqc_push_nonces", indexName: nil,
+        createSQL: """
+        CREATE TABLE IF NOT EXISTS pqc_push_nonces (
+          sender_id TEXT NOT NULL,
+          recipient_id TEXT NOT NULL,
+          nonce TEXT NOT NULL,
+          expires_at_ms INTEGER NOT NULL,
+          PRIMARY KEY (sender_id, recipient_id, nonce)
+        ) STRICT;
+        """,
+        columns: [
+            Column(name: "sender_id", type: "TEXT", notNull: true, primaryKeyPosition: 1, hidden: 0),
+            Column(name: "recipient_id", type: "TEXT", notNull: true, primaryKeyPosition: 2, hidden: 0),
+            Column(name: "nonce", type: "TEXT", notNull: true, primaryKeyPosition: 3, hidden: 0),
+            Column(name: "expires_at_ms", type: "INTEGER", notNull: true, primaryKeyPosition: 0, hidden: 0),
+        ], indexColumns: [])
+
+    private static let pqcPushWakes = CanonicalTable(
+        name: "pqc_push_wakes", indexName: nil,
+        createSQL: """
+        CREATE TABLE IF NOT EXISTS pqc_push_wakes (
+          reference_json TEXT NOT NULL PRIMARY KEY, expires_at_ms INTEGER NOT NULL
+        ) STRICT;
+        """,
+        columns: [
+            Column(name: "reference_json", type: "TEXT", notNull: true, primaryKeyPosition: 1, hidden: 0),
+            Column(name: "expires_at_ms", type: "INTEGER", notNull: true, primaryKeyPosition: 0, hidden: 0),
+        ], indexColumns: [])
+
     private static let canonicalTables = [
         OpenClawNativeStateSQLite.deviceIdentities,
         OpenClawNativeStateSQLite.execApprovalsConfig,
         OpenClawNativeStateSQLite.macosPortGuardianRecords,
+        OpenClawNativeStateSQLite.pqcPushReplay,
+        OpenClawNativeStateSQLite.pqcPushNonces,
+        OpenClawNativeStateSQLite.pqcPushWakes,
     ]
 
     private let databaseURL: URL
@@ -249,6 +301,12 @@ public final class OpenClawNativeStateSQLite: @unchecked Sendable {
                 try self.validateVersionZeroOwnership()
             } else {
                 try self.validateSharedDatabaseMetadata(userVersion: userVersion)
+                if try !self.schemaObjectExists(type: "table", name: descriptor.name),
+                   table == .pqcPushReplay || table == .pqcPushNonces || table == .pqcPushWakes
+                {
+                    // Additive security tables follow the gateway v6 lazy-ensure contract.
+                    try self.execute(descriptor.createSQL)
+                }
                 guard try self.schemaObjectExists(type: "table", name: descriptor.name) else {
                     throw OpenClawNativeStateError(
                         "Versioned OpenClaw state database is missing \(descriptor.name)")
@@ -349,6 +407,9 @@ public final class OpenClawNativeStateSQLite: @unchecked Sendable {
         case .deviceIdentities: self.deviceIdentities
         case .execApprovalsConfig: self.execApprovalsConfig
         case .macosPortGuardianRecords: self.macosPortGuardianRecords
+        case .pqcPushReplay: self.pqcPushReplay
+        case .pqcPushNonces: self.pqcPushNonces
+        case .pqcPushWakes: self.pqcPushWakes
         }
     }
 

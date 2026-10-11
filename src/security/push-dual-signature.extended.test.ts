@@ -1,17 +1,4 @@
-// M11 push dual signature — edge case tests (supplements push-dual-signature.test.ts).
-//
-// Coverage not in the original 13 tests:
-//   - Unicode/emoji payload (UTF-8 multibyte)
-//   - Empty payload (boundary)
-//   - Large payload near APNs 4 KiB limit
-//   - Mismatched keyId in envelope vs signing key
-//   - Base64url padding tolerance (with and without padding)
-//   - Algorithm list mutation defense (e.g. add fake algorithm)
-//   - Determinism: same payload + keys → same signature bytes (ML-DSA-65 should
-//     be deterministic per FIPS 204; verify this invariant)
-//   - Sign without keyId (omit keyId fields)
-//   - Verify with swapped keys (cross-verify rejection)
-//   - Corrupted envelope JSON serialization round-trip
+// Protocol v2 payload, algorithm, deterministic transcript, and cross-key regressions.
 import { generateKeyPairSync } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { generateMlDsa65Keypair } from "../infra/mldsa65-key-storage.js";
@@ -20,6 +7,7 @@ import {
   signPushPayloadDual,
   verifyPushPayloadDual,
   type PushDualEnvelope,
+  type PushTrustedKeyRegistry,
 } from "./push-dual-signature.js";
 
 function ed25519KeygenRaw(): { secret: Uint8Array; public: Uint8Array } {
@@ -32,12 +20,42 @@ function ed25519KeygenRaw(): { secret: Uint8Array; public: Uint8Array } {
   };
 }
 
-describe("push-dual-signature M11 — payload edge cases", () => {
+const metadata = {
+  senderId: "gateway-a",
+  recipientId: "device-b",
+  createdAtMs: 2_000_000,
+  sequence: 1,
+  nonce: Buffer.alloc(24, 1).toString("base64url"),
+};
+
+function trustedKeys(ed25519: Uint8Array, mldsa65: Uint8Array): PushTrustedKeyRegistry {
+  const keys = [
+    {
+      algorithm: "ed25519" as const,
+      keyId: "ed1",
+      senderId: metadata.senderId,
+      publicKeyRaw: ed25519,
+    },
+    {
+      algorithm: "ml-dsa-65" as const,
+      keyId: "ml1",
+      senderId: metadata.senderId,
+      publicKeyRaw: mldsa65,
+    },
+  ];
+  return {
+    resolve: (algorithm, keyId) =>
+      keys.find((key) => key.algorithm === algorithm && key.keyId === keyId),
+  };
+}
+
+describe("push-dual-signature v2 — payload edge cases", () => {
   it("sign + verify round-trips a Unicode/emoji payload", () => {
     const ed = ed25519KeygenRaw();
     const ml = generateMlDsa65Keypair();
     const payload = JSON.stringify({ title: "🐉 龍的測試", subtitle: "Привет мир", emoji: "✨🔐" });
     const { envelope } = signPushPayloadDual({
+      ...metadata,
       payload,
       ed25519SecretKeyRaw: ed.secret,
       mldsa65SecretKeyRaw: ml.secretKey,
@@ -47,8 +65,9 @@ describe("push-dual-signature M11 — payload edge cases", () => {
     expect(
       verifyPushPayloadDual({
         payload,
-        ed25519PublicKeyRaw: ed.public,
-        mldsa65PublicKeyRaw: ml.publicKey,
+        registry: trustedKeys(ed.public, ml.publicKey),
+        expectedRecipientId: metadata.recipientId,
+        nowMs: metadata.createdAtMs,
         envelope,
       }),
     ).toBe(true);
@@ -58,6 +77,7 @@ describe("push-dual-signature M11 — payload edge cases", () => {
     const ed = ed25519KeygenRaw();
     const ml = generateMlDsa65Keypair();
     const { envelope } = signPushPayloadDual({
+      ...metadata,
       payload: "",
       ed25519SecretKeyRaw: ed.secret,
       mldsa65SecretKeyRaw: ml.secretKey,
@@ -67,8 +87,9 @@ describe("push-dual-signature M11 — payload edge cases", () => {
     expect(
       verifyPushPayloadDual({
         payload: "",
-        ed25519PublicKeyRaw: ed.public,
-        mldsa65PublicKeyRaw: ml.publicKey,
+        registry: trustedKeys(ed.public, ml.publicKey),
+        expectedRecipientId: metadata.recipientId,
+        nowMs: metadata.createdAtMs,
         envelope,
       }),
     ).toBe(true);
@@ -79,6 +100,7 @@ describe("push-dual-signature M11 — payload edge cases", () => {
     const ml = generateMlDsa65Keypair();
     const payload = "x".repeat(3990);
     const { envelope } = signPushPayloadDual({
+      ...metadata,
       payload,
       ed25519SecretKeyRaw: ed.secret,
       mldsa65SecretKeyRaw: ml.secretKey,
@@ -88,20 +110,22 @@ describe("push-dual-signature M11 — payload edge cases", () => {
     expect(
       verifyPushPayloadDual({
         payload,
-        ed25519PublicKeyRaw: ed.public,
-        mldsa65PublicKeyRaw: ml.publicKey,
+        registry: trustedKeys(ed.public, ml.publicKey),
+        expectedRecipientId: metadata.recipientId,
+        nowMs: metadata.createdAtMs,
         envelope,
       }),
     ).toBe(true);
   });
 });
 
-describe("push-dual-signature M11 — envelope tamper defenses", () => {
+describe("push-dual-signature v2 — envelope tamper defenses", () => {
   it("verify throws when an unknown extra algorithm is added to the algorithms array", () => {
     const ed = ed25519KeygenRaw();
     const ml = generateMlDsa65Keypair();
     const payload = "alg-mutation-test";
     const { envelope } = signPushPayloadDual({
+      ...metadata,
       payload,
       ed25519SecretKeyRaw: ed.secret,
       mldsa65SecretKeyRaw: ml.secretKey,
@@ -115,8 +139,9 @@ describe("push-dual-signature M11 — envelope tamper defenses", () => {
     expect(() =>
       verifyPushPayloadDual({
         payload,
-        ed25519PublicKeyRaw: ed.public,
-        mldsa65PublicKeyRaw: ml.publicKey,
+        registry: trustedKeys(ed.public, ml.publicKey),
+        expectedRecipientId: metadata.recipientId,
+        nowMs: metadata.createdAtMs,
         envelope: tampered as PushDualEnvelope,
       }),
     ).toThrow(/algorithms must be exactly/);
@@ -127,6 +152,7 @@ describe("push-dual-signature M11 — envelope tamper defenses", () => {
     const ml = generateMlDsa65Keypair();
     const payload = "alg-removed-test";
     const { envelope } = signPushPayloadDual({
+      ...metadata,
       payload,
       ed25519SecretKeyRaw: ed.secret,
       mldsa65SecretKeyRaw: ml.secretKey,
@@ -140,8 +166,9 @@ describe("push-dual-signature M11 — envelope tamper defenses", () => {
     expect(() =>
       verifyPushPayloadDual({
         payload,
-        ed25519PublicKeyRaw: ed.public,
-        mldsa65PublicKeyRaw: ml.publicKey,
+        registry: trustedKeys(ed.public, ml.publicKey),
+        expectedRecipientId: metadata.recipientId,
+        nowMs: metadata.createdAtMs,
         envelope: tampered as PushDualEnvelope,
       }),
     ).toThrow(/algorithms must be exactly/);
@@ -152,6 +179,7 @@ describe("push-dual-signature M11 — envelope tamper defenses", () => {
     const ml = generateMlDsa65Keypair();
     const payload = "alg-order-test";
     const { envelope } = signPushPayloadDual({
+      ...metadata,
       payload,
       ed25519SecretKeyRaw: ed.secret,
       mldsa65SecretKeyRaw: ml.secretKey,
@@ -165,20 +193,22 @@ describe("push-dual-signature M11 — envelope tamper defenses", () => {
     expect(() =>
       verifyPushPayloadDual({
         payload,
-        ed25519PublicKeyRaw: ed.public,
-        mldsa65PublicKeyRaw: ml.publicKey,
+        registry: trustedKeys(ed.public, ml.publicKey),
+        expectedRecipientId: metadata.recipientId,
+        nowMs: metadata.createdAtMs,
         envelope: tampered as PushDualEnvelope,
       }),
     ).toThrow(/algorithms must be exactly/);
   });
 });
 
-describe("push-dual-signature M11 — Ed25519 determinism (RFC 8032)", () => {
+describe("push-dual-signature v2 — Ed25519 determinism (RFC 8032)", () => {
   it("Ed25519 signature is deterministic (same key + same payload → same sig bytes per RFC 8032)", () => {
     const ml = generateMlDsa65Keypair();
     const ed = ed25519KeygenRaw();
     const payload = "determinism-check-payload";
     const { envelope: env1 } = signPushPayloadDual({
+      ...metadata,
       payload,
       ed25519SecretKeyRaw: ed.secret,
       mldsa65SecretKeyRaw: ml.secretKey,
@@ -186,6 +216,7 @@ describe("push-dual-signature M11 — Ed25519 determinism (RFC 8032)", () => {
       keyIdMldsa65: "ml1",
     });
     const { envelope: env2 } = signPushPayloadDual({
+      ...metadata,
       payload,
       ed25519SecretKeyRaw: ed.secret,
       mldsa65SecretKeyRaw: ml.secretKey,
@@ -196,6 +227,7 @@ describe("push-dual-signature M11 — Ed25519 determinism (RFC 8032)", () => {
     expect(env1.ed25519_sig).toBe(env2.ed25519_sig);
     // Different payload → different ed25519 sig
     const { envelope: env3 } = signPushPayloadDual({
+      ...metadata,
       payload: "determinism-check-payload-DIFFERENT",
       ed25519SecretKeyRaw: ed.secret,
       mldsa65SecretKeyRaw: ml.secretKey,
@@ -206,12 +238,13 @@ describe("push-dual-signature M11 — Ed25519 determinism (RFC 8032)", () => {
   });
 });
 
-describe("push-dual-signature M11 — base64url serialization", () => {
+describe("push-dual-signature v2 — base64url serialization", () => {
   it("envelope survives JSON round-trip via stable base64url encoding (no padding added)", () => {
     const ed = ed25519KeygenRaw();
     const ml = generateMlDsa65Keypair();
     const payload = "json-roundtrip";
     const { envelope } = signPushPayloadDual({
+      ...metadata,
       payload,
       ed25519SecretKeyRaw: ed.secret,
       mldsa65SecretKeyRaw: ml.secretKey,
@@ -223,8 +256,9 @@ describe("push-dual-signature M11 — base64url serialization", () => {
     expect(
       verifyPushPayloadDual({
         payload,
-        ed25519PublicKeyRaw: ed.public,
-        mldsa65PublicKeyRaw: ml.publicKey,
+        registry: trustedKeys(ed.public, ml.publicKey),
+        expectedRecipientId: metadata.recipientId,
+        nowMs: metadata.createdAtMs,
         envelope: restored,
       }),
     ).toBe(true);
@@ -234,6 +268,7 @@ describe("push-dual-signature M11 — base64url serialization", () => {
     const ed = ed25519KeygenRaw();
     const ml = generateMlDsa65Keypair();
     const { envelope } = signPushPayloadDual({
+      ...metadata,
       payload: "padding-test",
       ed25519SecretKeyRaw: ed.secret,
       mldsa65SecretKeyRaw: ml.secretKey,
@@ -246,13 +281,14 @@ describe("push-dual-signature M11 — base64url serialization", () => {
   });
 });
 
-describe("push-dual-signature M11 — cross-key rejection (throws)", () => {
+describe("push-dual-signature v2 — cross-key rejection (throws)", () => {
   it("verify throws PushDualSignatureError when ed25519 sig is verified with the WRONG ed25519 public key", () => {
     const ed1 = ed25519KeygenRaw();
     const ed2 = ed25519KeygenRaw(); // different keypair
     const ml = generateMlDsa65Keypair();
     const payload = "cross-key-test";
     const { envelope } = signPushPayloadDual({
+      ...metadata,
       payload,
       ed25519SecretKeyRaw: ed1.secret,
       mldsa65SecretKeyRaw: ml.secretKey,
@@ -262,15 +298,16 @@ describe("push-dual-signature M11 — cross-key rejection (throws)", () => {
     expect(() =>
       verifyPushPayloadDual({
         payload,
-        ed25519PublicKeyRaw: ed2.public, // wrong ed25519 key
-        mldsa65PublicKeyRaw: ml.publicKey,
+        registry: trustedKeys(ed2.public, ml.publicKey),
+        expectedRecipientId: metadata.recipientId,
+        nowMs: metadata.createdAtMs,
         envelope,
       }),
     ).toThrow(/Ed25519 signature verification failed/);
   });
 });
 
-describe("push-dual-signature M11 — algorithm constants stay PQC-spec", () => {
+describe("push-dual-signature v2 — algorithm constants stay PQC-spec", () => {
   it("ML-DSA-65 sig size matches FIPS 204 (3309 bytes raw)", () => {
     expect(PUSH_DUAL_SIG_CONSTANTS.MLDSA65_SIGNATURE_BYTES).toBe(3309);
   });

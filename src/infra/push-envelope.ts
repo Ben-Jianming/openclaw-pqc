@@ -4,10 +4,7 @@
 // 1. Lazy resolution of the Ed25519 push-signing key (Step 1 infra)
 // 2. Lazy resolution of the device identity's ML-DSA-65 secret
 // 3. pqcLog emit on success (matching the M17 wire-up pattern)
-// 4. Fail-soft fallback: if M11 signing fails for any reason, the
-//    caller can choose to send the payload unsigned rather than
-//    drop the message (per danteng prompt §M11.3 — never lose a
-//    push because of a PQC signing error)
+// 4. V2 recipient binding, durable sender sequences and strict acceptance.
 //
 // The same helper is used by push transports and the Feishu audit boundary so
 // they all sign with one canonical pair of gateway-owned identities.
@@ -15,11 +12,13 @@
 import { pqcLog } from "../logging/pqc-log.js";
 import {
   type PushDualEnvelope,
+  type PushReplayGuard,
   signPushPayloadDual,
-  verifyPushPayloadDual,
+  verifyPushPayloadDualStrict,
 } from "../security/push-dual-signature.js";
 import { loadOrCreateProcessDeviceIdentity } from "./device-identity.js";
 import { decodeMlDsa65PublicKey, decodeMlDsa65SecretKey } from "./mldsa65-key-storage.js";
+import { nextPushSequence, SqlitePushReplayGuard } from "./pqc-push-state.js";
 import { getOrCreatePushSigningKey } from "./push-signing-key.js";
 
 const ENVELOPE_KEY_ID_MLDSA65 = "primary";
@@ -27,6 +26,8 @@ const ENVELOPE_KEY_ID_MLDSA65 = "primary";
 export interface SignPushEnvelopeOptions {
   /** UTF-8 string body to sign (typically JSON.stringify(payload)). */
   payload: string;
+  /** Authenticated recipient device id. Audit-only callers use their own id. */
+  recipientId?: string;
   /** Optional override for the ML-DSA-65 key id (default "primary"). */
   keyIdMldsa65?: string;
   /** Optional environment override for isolated profiles and tests. */
@@ -45,6 +46,7 @@ export interface SignPushEnvelopeResult {
 }
 
 export interface PushEnvelopeVerificationKeys {
+  senderId: string;
   ed25519PublicKeyBase64Url: string;
   mldsa65PublicKeyBase64Url: string;
   keyIdEd25519: string;
@@ -55,6 +57,14 @@ export interface VerifySignedPushEnvelopeOptions {
   payload: string;
   envelope: PushDualEnvelope | string;
   trustedKeys: PushEnvelopeVerificationKeys;
+  expectedRecipientId: string;
+  replayGuard: PushReplayGuard;
+  nowMs?: number;
+}
+
+/** Create the durable replay guard for controlled receivers in the selected profile. */
+export function createPushReplayGuard(env: NodeJS.ProcessEnv = process.env): PushReplayGuard {
+  return new SqlitePushReplayGuard({ env });
 }
 
 function decodeCanonicalBase64Url(value: string, label: string): Uint8Array {
@@ -95,6 +105,7 @@ export function signPushEnvelope(options: SignPushEnvelopeOptions): SignPushEnve
   const identity = loadOrCreateProcessDeviceIdentity({ env: options.env });
   const mldsaSecretRaw = decodeMlDsa65SecretKey(identity.privateKeyPem);
   const keyIdMldsa65 = options.keyIdMldsa65 ?? ENVELOPE_KEY_ID_MLDSA65;
+  const recipientId = options.recipientId ?? identity.deviceId;
 
   const signed = signPushPayloadDual({
     payload: options.payload,
@@ -102,15 +113,18 @@ export function signPushEnvelope(options: SignPushEnvelopeOptions): SignPushEnve
     mldsa65SecretKeyRaw: mldsaSecretRaw,
     keyIdEd25519: pushKey.keyId,
     keyIdMldsa65,
+    senderId: identity.deviceId,
+    recipientId,
+    sequence: nextPushSequence(identity.deviceId, recipientId, { env: options.env }),
   });
 
   pqcLog.info({
     event: "push-signature",
     status: "ok",
-    detail: "signed M11 dual signature envelope (Ed25519 + ML-DSA-65)",
+    detail: "signed V2 dual signature envelope (Ed25519 + ML-DSA-65)",
     keyId: pushKey.keyId,
     identityKey: keyIdMldsa65,
-    payloadBytes: options.payload.length,
+    payloadBytes: Buffer.byteLength(options.payload, "utf8"),
   });
 
   return {
@@ -128,6 +142,7 @@ export function getPushEnvelopeVerificationKeys(
   const pushKey = getOrCreatePushSigningKey(env);
   const identity = loadOrCreateProcessDeviceIdentity({ env });
   return {
+    senderId: identity.deviceId,
     ed25519PublicKeyBase64Url: Buffer.from(pushKey.publicKeyRaw).toString("base64url"),
     mldsa65PublicKeyBase64Url: Buffer.from(decodeMlDsa65PublicKey(identity.publicKeyPem)).toString(
       "base64url",
@@ -146,17 +161,26 @@ export function verifySignedPushEnvelope(options: VerifySignedPushEnvelopeOption
   if (envelope.key_id_mldsa65 !== options.trustedKeys.keyIdMldsa65) {
     throw new Error("push envelope ML-DSA-65 key id does not match the pinned key");
   }
-  verifyPushPayloadDual({
+  const trustedKeys = options.trustedKeys;
+  verifyPushPayloadDualStrict({
     payload: options.payload,
     envelope,
-    ed25519PublicKeyRaw: decodeCanonicalBase64Url(
-      options.trustedKeys.ed25519PublicKeyBase64Url,
-      "trusted Ed25519 public key",
-    ),
-    mldsa65PublicKeyRaw: decodeCanonicalBase64Url(
-      options.trustedKeys.mldsa65PublicKeyBase64Url,
-      "trusted ML-DSA-65 public key",
-    ),
+    expectedRecipientId: options.expectedRecipientId,
+    replayGuard: options.replayGuard,
+    nowMs: options.nowMs,
+    registry: {
+      resolve: (algorithm, keyId) => ({
+        algorithm,
+        keyId,
+        senderId: trustedKeys.senderId,
+        publicKeyRaw: decodeCanonicalBase64Url(
+          algorithm === "ed25519"
+            ? trustedKeys.ed25519PublicKeyBase64Url
+            : trustedKeys.mldsa65PublicKeyBase64Url,
+          "trusted push public key",
+        ),
+      }),
+    },
   });
   return true;
 }
@@ -164,10 +188,8 @@ export function verifySignedPushEnvelope(options: VerifySignedPushEnvelopeOption
 /**
  * Fail-soft variant: try to sign, return null on any error.
  *
- * Use this in code paths where dropping the push is worse than
- * sending it without the M11 envelope (e.g., real-time chat,
- * approval alerts). Callers should log the failure so the
- * degraded mode is visible.
+ * Audit-only integrations may record failure without blocking chat. Push
+ * transports must use signPushEnvelope and stop before emitting on failure.
  */
 export function trySignPushEnvelope(
   options: SignPushEnvelopeOptions,
@@ -179,7 +201,7 @@ export function trySignPushEnvelope(
     pqcLog.warn({
       event: "push-signature",
       status: "fail",
-      detail: "M11 envelope signing failed; caller should fall back to unsigned",
+      detail: "PQC audit signing failed; no authenticated-content guarantee",
       error: message,
     });
     return null;

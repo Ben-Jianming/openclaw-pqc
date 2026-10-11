@@ -3,6 +3,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { ml_kem768 } from "@noble/post-quantum/ml-kem.js";
+import { getPublicKey } from "nostr-tools/pure";
 import {
   closeOpenClawStateDatabaseForTest,
   createChannelIngressQueueForTests,
@@ -14,7 +15,7 @@ import { encryptNip44V2 } from "./pqc-nip44.js";
 import { setNostrRuntime } from "./runtime.js";
 import { buildResolvedNostrAccount, TEST_HEX_PRIVATE_KEY } from "./test-fixtures.js";
 
-const BOT_PUBKEY = "b".repeat(64);
+const BOT_PUBKEY = getPublicKey(Buffer.from(TEST_HEX_PRIVATE_KEY, "hex"));
 
 type TestNostrBusState = {
   version: 2;
@@ -220,7 +221,11 @@ describe("startNostrBus inbound guards", () => {
       onMessage,
       onMetric: () => {},
     });
-    const content = encryptNip44V2(keyPair.publicKey, new TextEncoder().encode("pqc plaintext"));
+    const content = encryptNip44V2(keyPair.publicKey, new TextEncoder().encode("pqc plaintext"), {
+      senderPubkey: "a".repeat(64),
+      recipientPubkey: BOT_PUBKEY,
+      purpose: "nostr-dm",
+    });
 
     await emitEvent(createEvent({ content }));
 

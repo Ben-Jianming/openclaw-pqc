@@ -1,0 +1,69 @@
+name: PQC Production Acceptance
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "src/security/**"
+      - "src/infra/**"
+      - "src/state/**"
+      - "src/plugin-sdk/**"
+      - "src/gateway/**"
+      - "packages/gateway-protocol/**"
+      - "extensions/nostr/**"
+      - "ui/**"
+      - "scripts/verify*"
+      - "scripts/bench-pqc-production.ts"
+      - "test/fixtures/pqc/**"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - ".github/workflows/pqc-production-acceptance.yml"
+  pull_request:
+    paths:
+      - "src/security/**"
+      - "src/infra/**"
+      - "src/state/**"
+      - "src/plugin-sdk/**"
+      - "src/gateway/**"
+      - "packages/gateway-protocol/**"
+      - "extensions/nostr/**"
+      - "ui/**"
+      - "scripts/verify*"
+      - "test/fixtures/pqc/**"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - ".github/workflows/pqc-production-acceptance.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pqc-production-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  installed-behavior:
+    name: Built PQC behavior (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2025]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-node-env
+        with:
+          node-version: "24.x"
+          install-bun: "false"
+      - name: Run strict production path and negative tests
+        run: pnpm test:pqc:production
+      - name: Build the matching source revision
+        env:
+          NODE_OPTIONS: --max-old-space-size=8192
+        run: node scripts/build-all.mjs ciArtifacts
+      - name: Verify the installed build and key recovery in isolated state
+        run: node scripts/verify-source-install.mjs

@@ -1005,6 +1005,50 @@ export interface PluginStateEntries {
   value_json: string;
 }
 
+export interface PqcPushAttempts {
+  attempts: number;
+  device_id: string;
+  window_start_ms: number;
+}
+
+export interface PqcPushBindings {
+  device_id: string;
+  subscription_id: string;
+}
+
+export interface PqcPushNonces {
+  expires_at_ms: number;
+  nonce: string;
+  recipient_id: string;
+  sender_id: string;
+}
+
+export interface PqcPushObjects {
+  envelope_json: string;
+  expires_at_ms: number;
+  object_id: string;
+  payload: string;
+  recipient_id: string;
+  token_hash: string;
+}
+
+export interface PqcPushReplay {
+  recipient_id: string;
+  sender_id: string;
+  sequence: number;
+}
+
+export interface PqcPushSequences {
+  recipient_id: string;
+  sender_id: string;
+  sequence: number;
+}
+
+export interface PqcPushWakes {
+  expires_at_ms: number;
+  reference_json: string;
+}
+
 export interface SandboxRegistryEntries {
   backend_id: string | null;
   cdp_port: number | null;
@@ -1568,6 +1612,13 @@ export interface DB {
   plugin_binding_approvals: PluginBindingApprovals;
   plugin_blob_entries: PluginBlobEntries;
   plugin_state_entries: PluginStateEntries;
+  pqc_push_attempts: PqcPushAttempts;
+  pqc_push_bindings: PqcPushBindings;
+  pqc_push_nonces: PqcPushNonces;
+  pqc_push_objects: PqcPushObjects;
+  pqc_push_replay: PqcPushReplay;
+  pqc_push_sequences: PqcPushSequences;
+  pqc_push_wakes: PqcPushWakes;
   sandbox_registry_entries: SandboxRegistryEntries;
   schema_meta: SchemaMeta;
   session_groups: SessionGroups;

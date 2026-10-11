@@ -338,6 +338,7 @@
           - ".semgrepignore"
           - "docs/cli/security.md"
           - "docs/gateway/security/**"
+          - "docs/security/**"
           - "security/**"
 
 "extensions: admin-http-rpc":

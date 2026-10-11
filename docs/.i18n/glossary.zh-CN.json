@@ -1666,5 +1666,9 @@
   {
     "source": "TOOLS.md retired",
     "target": "TOOLS.md 已弃用"
+  },
+  {
+    "source": "PQC production acceptance",
+    "target": "PQC 生产验收"
   }
 ]

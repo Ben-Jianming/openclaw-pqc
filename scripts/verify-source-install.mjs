@@ -46,21 +46,17 @@ function verifyCli(argument) {
 verifyCli("--version");
 verifyCli("--help");
 
-const vitestEntry = path.join(repoRoot, "node_modules", "vitest", "vitest.mjs");
-if (!existsSync(vitestEntry)) {
-  throw new Error("Runtime verification dependency is missing. Re-run the repository installer.");
-}
 const contract = spawnSync(
   process.execPath,
-  [vitestEntry, "run", "src/infra/pqc-production-contract.test.ts"],
-  { cwd: repoRoot, encoding: "utf8", timeout: 120_000, windowsHide: true },
+  [path.join(repoRoot, "scripts/verify-installed-pqc.mjs")],
+  { cwd: repoRoot, encoding: "utf8", timeout: 240_000, windowsHide: true },
 );
 if (contract.error) {
   throw contract.error;
 }
 if (contract.status !== 0) {
-  throw new Error(`PQC production contract failed:\n${contract.stderr || contract.stdout}`);
+  throw new Error(`Installed PQC behavior failed:\n${contract.stderr || contract.stdout}`);
 }
 process.stdout.write(
-  "OpenClaw PQC installation verified: build, CLI, device-proof algorithms, and production wiring are ready.\n",
+  "OpenClaw PQC local installation checks passed: built CLI, encrypted identity, strict push verification and key recovery. Native devices and live delivery still require separate acceptance.\n",
 );

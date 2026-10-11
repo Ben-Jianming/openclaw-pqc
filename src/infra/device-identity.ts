@@ -281,14 +281,14 @@ function loadOrCreateDeviceIdentityOwned(options: DeviceIdentityStoreOptions): D
       }
     }
     const rowIsWrapped = existing.mldsaPrivateKeyWrapped != null;
-    const detail = rowIsWrapped
-      ? "loaded existing wrapped identity (M2+M4 active)"
-      : "loaded plaintext identity while wrap migration was unavailable";
+    if (!rowIsWrapped) {
+      throw new Error("Device identity plaintext migration did not commit; startup refused");
+    }
     pqcLog.info({
       event: "device-identity",
-      status: rowIsWrapped ? "ok" : "fail",
+      status: "ok",
       identityKey: PRIMARY_DEVICE_IDENTITY_KEY,
-      detail,
+      detail: "loaded existing wrapped identity (M2+M4 active)",
     });
     return toDeviceIdentity(existing);
   }

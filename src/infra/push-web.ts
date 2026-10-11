@@ -4,7 +4,9 @@ import fs from "node:fs";
 import path from "node:path";
 import { expectDefined, normalizeOptionalString } from "@openclaw/normalization-core";
 import { resolveStateDir } from "../config/paths.js";
+import type { PushReferenceDescriptor } from "../security/push-reference.js";
 import { createLazyRuntimeModule } from "../shared/lazy-runtime.js";
+import { SqlitePushReferenceStore, pushSubscriptionRecipient } from "./pqc-push-state.js";
 import { buildWebPushPayloadWithEnvelope } from "./push-web-m11.js";
 import {
   createWebPushVapidKeyPair,
@@ -126,6 +128,7 @@ function resolveVapidPrivateKeyFromEnv(): string | undefined {
 // --- Subscription CRUD ---
 
 type RegisterWebPushParams = {
+  deviceId?: string;
   endpoint: string;
   keys: { p256dh: string; auth: string };
   baseDir?: string;
@@ -149,6 +152,7 @@ export async function registerWebPushSubscription(
     endpoint,
     keys: { p256dh: keys.p256dh, auth: keys.auth },
     candidateSubscriptionId: randomUUID(),
+    deviceId: params.deviceId,
     nowMs: Date.now(),
     stateDir: baseDir,
   });
@@ -157,12 +161,14 @@ export async function registerWebPushSubscription(
 export async function clearWebPushSubscriptionByEndpoint(
   endpoint: string,
   baseDir?: string,
+  deviceId?: string,
 ): Promise<boolean> {
   assertLegacyWebPushMigrationComplete(baseDir);
   return deleteWebPushSubscriptionByEndpoint({
     endpointHash: hashWebPushEndpoint(endpoint),
     endpoint,
     stateDir: baseDir,
+    deviceId,
   });
 }
 
@@ -183,6 +189,7 @@ async function sendPreparedWebPushNotification(
   webPush: WebPushRuntime,
   subscription: WebPushSubscription,
   payload: WebPushPayload,
+  baseDir?: string,
 ): Promise<WebPushSendResult> {
   const pushSubscription = {
     endpoint: subscription.endpoint,
@@ -192,8 +199,16 @@ async function sendPreparedWebPushNotification(
     },
   };
 
+  const env = baseDir ? { ...process.env, OPENCLAW_STATE_DIR: baseDir } : process.env;
+  const store = new SqlitePushReferenceStore({ env });
+  let reference: PushReferenceDescriptor | undefined;
   try {
-    const payloadWithEnvelope = buildWebPushPayloadWithEnvelope(payload);
+    const recipientId = pushSubscriptionRecipient(subscription.subscriptionId, { env });
+    const payloadWithEnvelope = buildWebPushPayloadWithEnvelope(payload, recipientId, {
+      env,
+      store,
+    });
+    reference = payloadWithEnvelope.pqc_ref;
     const result = await webPush.sendNotification(
       pushSubscription,
       JSON.stringify(payloadWithEnvelope),
@@ -204,6 +219,13 @@ async function sendPreparedWebPushNotification(
       statusCode: result.statusCode,
     };
   } catch (err: unknown) {
+    if (reference) {
+      try {
+        store.discard(reference);
+      } catch {
+        // Preserve the transport result; bounded objects also expire automatically.
+      }
+    }
     const statusCode =
       typeof err === "object" && err !== null && "statusCode" in err
         ? (err as { statusCode: number }).statusCode
@@ -238,7 +260,7 @@ export async function broadcastWebPush(
   applyVapidDetails(webPush, vapidKeys);
 
   const results = await Promise.allSettled(
-    subscriptions.map((sub) => sendPreparedWebPushNotification(webPush, sub, payload)),
+    subscriptions.map((sub) => sendPreparedWebPushNotification(webPush, sub, payload, baseDir)),
   );
 
   const mapped = results.map((r, i) =>

@@ -1,4 +1,5 @@
 export {
+  createPushReplayGuard,
   getPushEnvelopeVerificationKeys,
   signPushEnvelope,
   trySignPushEnvelope,
@@ -9,4 +10,4 @@ export {
   type VerifySignedPushEnvelopeOptions,
 } from "../infra/push-envelope.js";
 
-export type { PushDualEnvelope } from "../security/push-dual-signature.js";
+export type { PushDualEnvelope, PushReplayGuard } from "../security/push-dual-signature.js";

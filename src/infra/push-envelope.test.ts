@@ -15,6 +15,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { InMemoryPushReplayGuard } from "../security/push-dual-signature.js";
 import { encodeMlDsa65PublicKey, encodeMlDsa65SecretKey } from "./mldsa65-key-storage.js";
 
 let tmpDir: string;
@@ -63,7 +64,7 @@ beforeEach(async () => {
   }));
 });
 
-afterEach(() => {
+afterEach(async () => {
   if (savedEnv.OPENCLAW_PUSH_SIGNING_KEY_FILE === undefined) {
     delete process.env.OPENCLAW_PUSH_SIGNING_KEY_FILE;
   } else {
@@ -74,6 +75,7 @@ afterEach(() => {
   } else {
     process.env.OPENCLAW_STATE_DIR = savedEnv.OPENCLAW_STATE_DIR;
   }
+  (await import("../state/openclaw-state-db.js")).closeOpenClawStateDatabase();
   rmSync(tmpDir, { recursive: true, force: true });
   vi.doUnmock("../logging/pqc-log.js");
   vi.doUnmock("./device-identity.js");
@@ -104,11 +106,13 @@ describe("push-envelope M11 step 2 — signPushEnvelope", () => {
     expect(pqcLogCalls[0]!.payload.payloadBytes).toBe(4);
   });
 
-  it("Ed25519 signature is deterministic for the same payload (RFC 8032)", async () => {
+  it("fresh pushes bind a new nonce and a monotonically increasing sequence", async () => {
     const { signPushEnvelope } = await import("./push-envelope.js");
     const a = signPushEnvelope({ payload: "deterministic-test" });
     const b = signPushEnvelope({ payload: "deterministic-test" });
-    expect(a.envelope.ed25519_sig).toBe(b.envelope.ed25519_sig);
+    expect(a.envelope.ed25519_sig).not.toBe(b.envelope.ed25519_sig);
+    expect(b.envelope.sequence).toBe(a.envelope.sequence + 1);
+    expect(b.envelope.nonce).not.toBe(a.envelope.nonce);
   });
 
   it("accepts custom keyIdMldsa65 override", async () => {
@@ -135,6 +139,8 @@ describe("push-envelope M11 step 2 — signPushEnvelope", () => {
         payload: signed.payload,
         envelope: signed.envelope,
         trustedKeys,
+        expectedRecipientId: "primary",
+        replayGuard: new InMemoryPushReplayGuard(),
       }),
     ).toBe(true);
     expect(() =>
@@ -142,8 +148,10 @@ describe("push-envelope M11 step 2 — signPushEnvelope", () => {
         payload: `${signed.payload} tampered`,
         envelope: signed.envelope,
         trustedKeys,
+        expectedRecipientId: "primary",
+        replayGuard: new InMemoryPushReplayGuard(),
       }),
-    ).toThrow(/signature verification failed/);
+    ).toThrow(/payload hash mismatch/);
   });
 
   it("rejects an envelope whose key id is not pinned", async () => {
@@ -154,7 +162,13 @@ describe("push-envelope M11 step 2 — signPushEnvelope", () => {
     const envelope = { ...signed.envelope, key_id_ed25519: "attacker-key" };
 
     expect(() =>
-      verifySignedPushEnvelope({ payload: signed.payload, envelope, trustedKeys }),
+      verifySignedPushEnvelope({
+        payload: signed.payload,
+        envelope,
+        trustedKeys,
+        expectedRecipientId: "primary",
+        replayGuard: new InMemoryPushReplayGuard(),
+      }),
     ).toThrow(/does not match the pinned key/);
   });
 });
@@ -170,6 +184,7 @@ describe("push-envelope M11 step 2 — trySignPushEnvelope", () => {
 
   it("returns null and emits pqcLog.warn with status=fail on error", async () => {
     // Force signPushPayloadDual to throw by mocking it
+    vi.resetModules();
     vi.doMock("../security/push-dual-signature.js", () => ({
       signPushPayloadDual: () => {
         throw new Error("forced signing failure");

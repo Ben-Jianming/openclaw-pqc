@@ -1725,6 +1725,8 @@
               {
                 "group": "Security",
                 "pages": [
+                  "security/pqc-whitepaper",
+                  "security/pqc-production-v2",
                   "security/network-proxy",
                   "security/formal-verification",
                   "security/THREAT-MODEL-ATLAS",

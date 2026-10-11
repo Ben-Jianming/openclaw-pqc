@@ -5,11 +5,14 @@ import {
   ErrorCodes,
   errorShape,
   validatePushTestParams,
+  validatePushPqcKeysParams,
+  validatePushPqcRedeemParams,
   validateWebPushSubscribeParams,
   validateWebPushTestParams,
   validateWebPushUnsubscribeParams,
   validateWebPushVapidPublicKeyParams,
 } from "../../../packages/gateway-protocol/src/index.js";
+import { allowPushRedemption, SqlitePushReferenceStore } from "../../infra/pqc-push-state.js";
 import {
   clearApnsRegistrationIfCurrent,
   loadApnsRegistration,
@@ -19,6 +22,7 @@ import {
   sendApnsAlert,
   shouldClearStoredApnsRegistration,
 } from "../../infra/push-apns.js";
+import { getPushEnvelopeVerificationKeys } from "../../infra/push-envelope.js";
 import {
   broadcastWebPush,
   clearWebPushSubscriptionByEndpoint,
@@ -26,10 +30,52 @@ import {
   resolveVapidKeys,
 } from "../../infra/push-web.js";
 import { respondInvalidParams, respondUnavailableOnThrow } from "./nodes.helpers.js";
+import { resolveDispatchableNodeSession } from "./nodes.shared.js";
 import { normalizeTrimmedString } from "./record-shared.js";
 import type { GatewayRequestHandlers } from "./types.js";
 
 export const pushHandlers: GatewayRequestHandlers = {
+  "push.pqc.keys": ({ params, client, respond }) => {
+    const recipientId = client?.connect.device?.id;
+    if (!recipientId || !validatePushPqcKeysParams(params)) {
+      respond(
+        false,
+        undefined,
+        errorShape(ErrorCodes.INVALID_REQUEST, "authenticated device and empty params required"),
+      );
+      return;
+    }
+    try {
+      respond(true, { ...getPushEnvelopeVerificationKeys(), recipientId }, undefined);
+    } catch {
+      respond(
+        false,
+        undefined,
+        errorShape(ErrorCodes.UNAVAILABLE, "push verification keys unavailable"),
+      );
+    }
+  },
+  "push.pqc.redeem": ({ params, client, respond }) => {
+    const recipientId = client?.connect.device?.id;
+    if (!recipientId || !validatePushPqcRedeemParams(params)) {
+      respond(
+        false,
+        undefined,
+        errorShape(ErrorCodes.INVALID_REQUEST, "authenticated device and valid reference required"),
+      );
+      return;
+    }
+    try {
+      if (!allowPushRedemption(recipientId)) {
+        throw new Error("rate limit");
+      }
+      const value = new SqlitePushReferenceStore().redeem(params, recipientId);
+      respond(true, value, undefined);
+    } catch {
+      // Never log the capability, payload or a distinguishable binding failure.
+      respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, "push reference unavailable"));
+    }
+  },
   "push.test": async ({ params, respond, context }) => {
     if (!validatePushTestParams(params)) {
       respondInvalidParams({
@@ -142,7 +188,7 @@ export const pushHandlers: GatewayRequestHandlers = {
     });
   },
 
-  "push.web.subscribe": async ({ params, respond }) => {
+  "push.web.subscribe": async ({ params, client, respond }) => {
     if (!validateWebPushSubscribeParams(params)) {
       respondInvalidParams({
         respond,
@@ -152,16 +198,27 @@ export const pushHandlers: GatewayRequestHandlers = {
       return;
     }
 
+    const deviceId = client?.connect.device?.id;
+    if (!deviceId) {
+      respond(
+        false,
+        undefined,
+        errorShape(ErrorCodes.INVALID_REQUEST, "authenticated device required"),
+      );
+      return;
+    }
+
     await respondUnavailableOnThrow(respond, async () => {
       const subscription = await registerWebPushSubscription({
         endpoint: params.endpoint,
         keys: params.keys,
+        deviceId,
       });
       respond(true, { subscriptionId: subscription.subscriptionId }, undefined);
     });
   },
 
-  "push.web.unsubscribe": async ({ params, respond }) => {
+  "push.web.unsubscribe": async ({ params, client, respond }) => {
     if (!validateWebPushUnsubscribeParams(params)) {
       respondInvalidParams({
         respond,
@@ -171,8 +228,21 @@ export const pushHandlers: GatewayRequestHandlers = {
       return;
     }
 
+    const deviceId = client?.connect.device?.id;
+    if (!deviceId) {
+      respond(
+        false,
+        undefined,
+        errorShape(ErrorCodes.INVALID_REQUEST, "authenticated device required"),
+      );
+      return;
+    }
     await respondUnavailableOnThrow(respond, async () => {
-      const removed = await clearWebPushSubscriptionByEndpoint(params.endpoint);
+      const removed = await clearWebPushSubscriptionByEndpoint(
+        params.endpoint,
+        undefined,
+        deviceId,
+      );
       respond(true, { removed }, undefined);
     });
   },
@@ -204,3 +274,29 @@ export const pushHandlers: GatewayRequestHandlers = {
     });
   },
 };
+
+// Preserve separate node/operator role policies while sharing the same recipient checks.
+for (const method of ["keys", "redeem"] as const) {
+  pushHandlers[`node.push.pqc.${method}`] = async (options) => {
+    const { client, context, respond } = options;
+    const nodeId = client?.connect.device?.id;
+    const connId = client?.connId;
+    const generation = nodeId ? context.nodeRegistry.get(nodeId)?.pairingGeneration : undefined;
+    const current = () =>
+      nodeId && generation
+        ? resolveDispatchableNodeSession(
+            context.nodeRegistry.getForPairingGeneration(nodeId, generation),
+          )
+        : undefined;
+    if (
+      !connId ||
+      current()?.connId !== connId ||
+      !(await context.nodeRegistry.isConnectionCurrentPairingState(connId)) ||
+      current()?.connId !== connId
+    ) {
+      respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, "push session unavailable"));
+      return;
+    }
+    await pushHandlers[`push.pqc.${method}`]!(options);
+  };
+}

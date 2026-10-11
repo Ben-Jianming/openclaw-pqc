@@ -1383,9 +1383,6 @@ importers:
 
   extensions/nostr:
     dependencies:
-      '@noble/post-quantum':
-        specifier: 0.5.4
-        version: 0.5.4
       nostr-tools:
         specifier: 2.23.12
         version: 2.23.12(typescript@6.0.3)

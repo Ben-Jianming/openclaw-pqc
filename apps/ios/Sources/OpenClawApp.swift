@@ -46,10 +46,14 @@ final class OpenClawAppDelegate: NSObject, UIApplicationDelegate, @preconcurrenc
     private var pendingExecApprovalRequestedPushes: [ExecApprovalNotificationPrompt] = []
     private var pendingExecApprovalResolvedPushes: [ExecApprovalNotificationPrompt] = []
     private var pendingOpenURLs: [URL] = []
+    private var pendingPqcPushWakes: PushV2WakeQueue?
+    private var pqcPushDrainTask: Task<Bool, Never>?
+    private var pqcPushRetryTask: Task<Void, Never>?
 
     weak var appModel: NodeAppModel? {
         didSet {
             guard let model = resolvedAppModel() else { return }
+            Task { @MainActor in _ = await self.drainPendingPqcPushWakes() }
             if let token = pendingAPNsDeviceToken {
                 self.pendingAPNsDeviceToken = nil
                 Task { @MainActor in
@@ -113,6 +117,84 @@ final class OpenClawAppDelegate: NSObject, UIApplicationDelegate, @preconcurrenc
         self.appModel ?? OpenClawAppModelRegistry.appModel
     }
 
+    private func pqcWakeQueue() throws -> PushV2WakeQueue {
+        if let queue = self.pendingPqcPushWakes { return queue }
+        let queue = try PushV2WakeQueue.openDefault()
+        self.pendingPqcPushWakes = queue
+        return queue
+    }
+
+    private func handleOrQueuePqcPushWake(_ userInfo: [AnyHashable: Any]) async -> Bool {
+        let nowMs = Int64(Date().timeIntervalSince1970 * 1000)
+        guard let wake = PushV2Wake(userInfo: userInfo, nowMs: nowMs) else { return false }
+        do {
+            guard try self.pqcWakeQueue().enqueue(wake, nowMs: nowMs) else { return false }
+        } catch {
+            self.backgroundWakeLogger.error("Secure push queue unavailable; remote content rejected")
+            return false
+        }
+        // Persist before completing the APNs callback: iOS may suspend or kill this process.
+        self.scheduleBackgroundWakeRefresh(afterSeconds: 60, reason: "pqc_push_pending")
+        // Model readiness is not route readiness: failures stay queued until expiry.
+        _ = await self.drainPendingPqcPushWakes()
+        return true
+    }
+
+    private func drainPendingPqcPushWakes() async -> Bool {
+        if let task = self.pqcPushDrainTask { return await task.value }
+        let queue: PushV2WakeQueue
+        do {
+            queue = try self.pqcWakeQueue()
+            guard try !queue.ready(nowMs: Int64(Date().timeIntervalSince1970 * 1000)).isEmpty else { return false }
+        } catch {
+            self.backgroundWakeLogger.error("Secure push queue unavailable; no remote content displayed")
+            self.scheduleBackgroundWakeRefresh(afterSeconds: 60, reason: "pqc_push_storage_retry")
+            return false
+        }
+        guard let model = self.resolvedAppModel() else {
+            self.scheduleBackgroundWakeRefresh(afterSeconds: 60, reason: "pqc_push_model_pending")
+            return false
+        }
+        self.pqcPushRetryTask?.cancel()
+        self.pqcPushRetryTask = nil
+        let task = Task { @MainActor [weak self] in
+            guard let self else { return false }
+            var handled = false
+            do {
+                for wake in try queue.ready(nowMs: Int64(Date().timeIntervalSince1970 * 1000)) {
+                    if Task.isCancelled { break }
+                    switch await model.handlePqcPushWake(wake.userInfo) {
+                    case .handled:
+                        handled = true
+                        try queue.remove(wake)
+                    case .discard:
+                        try queue.remove(wake)
+                    case .retry:
+                        break
+                    }
+                }
+            } catch {
+                self.backgroundWakeLogger.error("Secure push queue update failed; references retained")
+            }
+            return handled
+        }
+        self.pqcPushDrainTask = task
+        let handled = await task.value
+        self.pqcPushDrainTask = nil
+        // BGTaskScheduler is discretionary; durable references also drain on relaunch/foreground.
+        if (try? queue.ready(nowMs: Int64(Date().timeIntervalSince1970 * 1000)).isEmpty) != true {
+            self.scheduleBackgroundWakeRefresh(afterSeconds: 60, reason: "pqc_push_retry")
+            if UIApplication.shared.applicationState == .active {
+                self.pqcPushRetryTask = Task { @MainActor [weak self] in
+                    do { try await Task.sleep(nanoseconds: 60_000_000_000) } catch { return }
+                    self?.pqcPushRetryTask = nil
+                    _ = await self?.drainPendingPqcPushWakes()
+                }
+            }
+        }
+        return handled
+    }
+
     #if DEBUG
     func _test_resolvedAppModel() -> NodeAppModel? {
         self.resolvedAppModel()
@@ -120,6 +202,19 @@ final class OpenClawAppDelegate: NSObject, UIApplicationDelegate, @preconcurrenc
 
     func _test_wakeRefreshTaskIdentifier() -> String {
         Self.wakeRefreshTaskIdentifier
+    }
+
+    func _test_usePqcWakeQueue(databaseURL: URL) throws {
+        self.pendingPqcPushWakes = try PushV2WakeQueue(databaseURL: databaseURL)
+    }
+
+    func _test_takeQueuedPqcPushWakes(nowMs: Int64) throws -> [PushV2Wake] {
+        let queue = try self.pqcWakeQueue()
+        let wakes = try queue.ready(nowMs: nowMs)
+        for wake in wakes {
+            try queue.remove(wake)
+        }
+        return wakes
     }
     #endif
 
@@ -211,36 +306,17 @@ final class OpenClawAppDelegate: NSObject, UIApplicationDelegate, @preconcurrenc
     {
         self.logger.info("APNs remote notification received keys=\(userInfo.keys.count, privacy: .public)")
         Task { @MainActor in
-            if let push = ApprovalNotificationBridge.parseResolvedPush(userInfo: userInfo) {
-                if let appModel = self.resolvedAppModel() {
-                    let handled = await appModel.handleExecApprovalResolvedRemotePush(push)
-                    completionHandler(handled ? .newData : .noData)
-                } else {
-                    self.pendingExecApprovalResolvedPushes.append(push)
-                    completionHandler(.newData)
-                }
-                return
-            }
-            guard let appModel = self.resolvedAppModel() else {
-                if let push = ApprovalNotificationBridge.parseRequestedPush(userInfo: userInfo) {
-                    self.pendingExecApprovalRequestedPushes.append(push)
-                }
-                self.logger.info("APNs wake skipped: appModel unavailable")
-                self.scheduleBackgroundWakeRefresh(afterSeconds: 90, reason: "silent_push_no_model")
-                completionHandler(.noData)
-                return
-            }
-            let handled = await appModel.handleSilentPushWake(userInfo)
-            self.logger.info("APNs wake handled=\(handled, privacy: .public)")
-            if !handled {
-                self.scheduleBackgroundWakeRefresh(afterSeconds: 90, reason: "silent_push_not_applied")
-            }
+            // Never route remote approval IDs or text before strict V2 acceptance.
+            let handled = await self.handleOrQueuePqcPushWake(userInfo)
             completionHandler(handled ? .newData : .noData)
         }
     }
 
     func scenePhaseChanged(_ phase: ScenePhase) {
         GatewayDiagnostics.log("app delegate: scene phase changed=\(String(describing: phase))")
+        if phase == .active {
+            Task { @MainActor in _ = await self.drainPendingPqcPushWakes() }
+        }
         if phase == .background {
             self.scheduleBackgroundWakeRefresh(afterSeconds: 120, reason: "scene_background")
         }
@@ -283,12 +359,19 @@ final class OpenClawAppDelegate: NSObject, UIApplicationDelegate, @preconcurrenc
         self.backgroundWakeTask?.cancel()
 
         let wakeTask = Task { @MainActor [weak self] in
-            guard let self, let appModel = self.resolvedAppModel() else { return false }
-            return await appModel.handleBackgroundRefreshWake(trigger: "bg_app_refresh")
+            guard let self else { return false }
+            var refreshed = false
+            if let appModel = self.resolvedAppModel() {
+                refreshed = await appModel.handleBackgroundRefreshWake(trigger: "bg_app_refresh")
+            }
+            guard !Task.isCancelled else { return false }
+            let drained = await self.drainPendingPqcPushWakes()
+            return refreshed || drained
         }
         self.backgroundWakeTask = wakeTask
         task.expirationHandler = {
             wakeTask.cancel()
+            Task { @MainActor [weak self] in self?.pqcPushDrainTask?.cancel() }
         }
         Task {
             let applied = await wakeTask.value
@@ -401,7 +484,15 @@ final class OpenClawAppDelegate: NSObject, UIApplicationDelegate, @preconcurrenc
         withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void)
     {
         let userInfo = notification.request.content.userInfo
+        if notification.request.trigger is UNPushNotificationTrigger {
+            completionHandler([])
+            Task { @MainActor in
+                _ = await self.handleOrQueuePqcPushWake(userInfo)
+            }
+            return
+        }
         if Self.isWatchPromptNotification(userInfo)
+            || userInfo["openclaw_pqc_verified"] as? Bool == true
             || ExecApprovalNotificationBridge.shouldPresentNotification(userInfo: userInfo)
             || PluginApprovalNotificationBridge.shouldPresentNotification(userInfo: userInfo)
         {
@@ -416,6 +507,13 @@ final class OpenClawAppDelegate: NSObject, UIApplicationDelegate, @preconcurrenc
         didReceive response: UNNotificationResponse,
         withCompletionHandler completionHandler: @escaping () -> Void)
     {
+        if response.notification.request.trigger is UNPushNotificationTrigger {
+            Task { @MainActor in
+                _ = await self.handleOrQueuePqcPushWake(response.notification.request.content.userInfo)
+                completionHandler()
+            }
+            return
+        }
         if let action = Self.parseWatchPromptAction(from: response) {
             Task { @MainActor [weak self] in
                 guard let self else {

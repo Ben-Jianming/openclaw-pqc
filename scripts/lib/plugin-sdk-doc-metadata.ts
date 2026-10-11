@@ -12,6 +12,7 @@ type PluginSdkDocMetadata = {
 };
 
 export const pluginSdkDocMetadata = {
+  "pqc-message": { category: "utilities" },
   core: {
     category: "core",
   },

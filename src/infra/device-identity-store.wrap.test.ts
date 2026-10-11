@@ -9,7 +9,7 @@ import { randomBytes } from "node:crypto";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { closeOpenClawStateDatabaseForTest } from "../state/openclaw-state-db.js";
-import { withTempDir } from "../test-utils/temp-dir.js";
+import { withTempDir as withBaseTempDir } from "../test-utils/temp-dir.js";
 import {
   generateStoredDeviceIdentity,
   insertStoredDeviceIdentityIfAbsent,
@@ -20,6 +20,17 @@ import {
   type DeviceIdentityStoreOptions,
   type SyncWrappingKeyProvider,
 } from "./device-identity-store.js";
+
+// Windows cannot unlink a live SQLite database. Close before the temp helper cleans up.
+async function withTempDir<T>(prefix: string, run: (dir: string) => Promise<T>): Promise<T> {
+  return withBaseTempDir(prefix, async (dir) => {
+    try {
+      return await run(dir);
+    } finally {
+      closeOpenClawStateDatabaseForTest();
+    }
+  });
+}
 
 afterEach(() => {
   closeOpenClawStateDatabaseForTest();

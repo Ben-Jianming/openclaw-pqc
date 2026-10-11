@@ -1,101 +1,41 @@
-// Tests for push-web-m11.ts (M11 step 4 — web-push envelope).
-//
-// Covers:
-// - buildWebPushPayloadWithEnvelope: returns payload + pqcenvelope on success
-// - envelope has all 5 M11 fields
-// - on signing failure, returns the original payload unchanged
-//
-// Mocks trySignPushEnvelope via vi.doMock.
-
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-
-let tmpDir: string;
-let savedEnv: Record<string, string | undefined>;
-
-beforeEach(async () => {
-  tmpDir = mkdtempSync(join(tmpdir(), "pqc-webpush-m11-test-"));
-  savedEnv = {
-    OPENCLAW_PUSH_SIGNING_KEY_FILE: process.env.OPENCLAW_PUSH_SIGNING_KEY_FILE,
-    OPENCLAW_STATE_DIR: process.env.OPENCLAW_STATE_DIR,
-  };
-  process.env.OPENCLAW_STATE_DIR = tmpDir;
-  delete process.env.OPENCLAW_PUSH_SIGNING_KEY_FILE;
-
-  vi.doMock("../logging/pqc-log.js", () => ({
-    pqcLog: {
-      info: () => {},
-      warn: () => {},
-      error: () => {},
-      debug: () => {},
-    },
-  }));
-
-  // Mock device-identity
-  const { generateMlDsa65Keypair, encodeMlDsa65PublicKey, encodeMlDsa65SecretKey } =
-    await import("./mldsa65-key-storage.js");
-  const kp = generateMlDsa65Keypair();
-  const pemPriv = encodeMlDsa65SecretKey(kp.secretKey);
-  const pemPub = encodeMlDsa65PublicKey(kp.publicKey);
-  vi.doMock("./device-identity.js", () => ({
-    loadOrCreateProcessDeviceIdentity: () => ({
-      deviceId: "primary",
-      publicKeyPem: pemPub,
-      privateKeyPem: pemPriv,
-    }),
-  }));
-});
-
-afterEach(() => {
-  if (savedEnv.OPENCLAW_PUSH_SIGNING_KEY_FILE === undefined) {
-    delete process.env.OPENCLAW_PUSH_SIGNING_KEY_FILE;
-  } else {
-    process.env.OPENCLAW_PUSH_SIGNING_KEY_FILE = savedEnv.OPENCLAW_PUSH_SIGNING_KEY_FILE;
-  }
-  if (savedEnv.OPENCLAW_STATE_DIR === undefined) {
-    delete process.env.OPENCLAW_STATE_DIR;
-  } else {
-    process.env.OPENCLAW_STATE_DIR = savedEnv.OPENCLAW_STATE_DIR;
-  }
-  rmSync(tmpDir, { recursive: true, force: true });
-  vi.doUnmock("../logging/pqc-log.js");
-  vi.doUnmock("./device-identity.js");
-  vi.resetModules();
-});
-
-describe("push-web-m11 step 4 — buildWebPushPayloadWithEnvelope", () => {
-  it("returns payload + pqcenvelope on signing success", async () => {
-    const { buildWebPushPayloadWithEnvelope } = await import("./push-web-m11.js");
-    const input = { title: "hi", body: "world", nodeId: "test" };
-    const result = buildWebPushPayloadWithEnvelope(input);
-    expect(result.title).toBe("hi");
-    expect(result.body).toBe("world");
-    expect(result.nodeId).toBe("test");
-    expect(result.pqcenvelope).toBeDefined();
-    const env = result.pqcenvelope as Record<string, unknown>;
-    expect(env.algorithms).toEqual(["ed25519", "ml-dsa-65"]);
-    expect(env.ed25519_sig).toMatch(/^[A-Za-z0-9_-]+$/);
-    expect(env.mldsa65_sig).toMatch(/^[A-Za-z0-9_-]+$/);
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { InMemoryPushReferenceStore } from "../security/push-reference.test-support.js";
+const mocks = vi.hoisted(() => ({ sign: vi.fn() }));
+vi.mock("./push-envelope.js", () => ({ signPushEnvelope: mocks.sign }));
+import { buildApnsPqcWake } from "./push-apns-wake.js";
+import { buildWebPushPayloadWithEnvelope } from "./push-web-m11.js";
+afterEach(() => vi.resetAllMocks());
+describe("fail-closed opaque push transport", () => {
+  it("never sends sensitive fields or a full signature through the relay", () => {
+    const input = {
+      title: "secret title",
+      body: "secret body",
+      url: "https://evil.example/",
+      aps: { alert: "sensitive" },
+    };
+    mocks.sign.mockReturnValue({
+      payload: JSON.stringify(input),
+      envelope: { recipient_id: "alice" },
+    });
+    const store = new InMemoryPushReferenceStore();
+    const wake = buildWebPushPayloadWithEnvelope(input, "alice", { store });
+    expect(JSON.stringify(wake)).not.toMatch(/secret|sensitive|evil|mldsa65_sig/);
+    expect(Buffer.byteLength(JSON.stringify(wake))).toBeLessThan(3993);
+    expect(JSON.parse(store.redeem(wake.pqc_ref, "alice").payload)).toEqual(input);
+    const apns = buildApnsPqcWake(input, "alice", store);
+    expect(JSON.stringify(apns)).not.toMatch(/secret|sensitive|evil/);
+    expect(apns.aps.alert?.title).toBe("OpenClaw");
+    expect(Buffer.byteLength(JSON.stringify(apns))).toBeLessThan(4096);
   });
-
-  it("does not mutate the input payload", async () => {
-    const { buildWebPushPayloadWithEnvelope } = await import("./push-web-m11.js");
-    const input = { title: "hi" };
-    const result = buildWebPushPayloadWithEnvelope(input);
-    expect(input).not.toHaveProperty("pqcenvelope");
-    expect(result).toHaveProperty("pqcenvelope");
-  });
-
-  it("returns the original payload on signing failure", async () => {
-    vi.doMock("./push-envelope.js", () => ({
-      trySignPushEnvelope: () => null,
-    }));
-    const { buildWebPushPayloadWithEnvelope } = await import("./push-web-m11.js");
-    const input = { title: "hi" };
-    const result = buildWebPushPayloadWithEnvelope(input);
-    expect(result).toEqual({ title: "hi" });
-    expect(result).not.toHaveProperty("pqcenvelope");
+  it("stops before storing or emitting when signing fails", () => {
+    mocks.sign.mockImplementation(() => {
+      throw new Error("signing failed");
+    });
+    const store = new InMemoryPushReferenceStore();
+    expect(() => buildWebPushPayloadWithEnvelope({ body: "secret" }, "alice", { store })).toThrow(
+      "signing failed",
+    );
+    expect(store.size).toBe(0);
+    expect(() => buildWebPushPayloadWithEnvelope({}, "", { store })).toThrow("authenticated");
   });
 });

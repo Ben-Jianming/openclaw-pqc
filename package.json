@@ -777,6 +777,10 @@
       "types": "./dist/plugin-sdk/push-envelope.d.ts",
       "default": "./dist/plugin-sdk/push-envelope.js"
     },
+    "./plugin-sdk/pqc-message": {
+      "types": "./dist/plugin-sdk/pqc-message.d.ts",
+      "default": "./dist/plugin-sdk/pqc-message.js"
+    },
     "./plugin-sdk/migration": {
       "default": "./dist/plugin-sdk/migration.js"
     },
@@ -1911,7 +1915,10 @@
     "apple:i18n:check": "node --import tsx scripts/apple-app-i18n.ts check",
     "ui:install": "node scripts/ui.js install",
     "verify": "node scripts/verify.mjs",
-    "deps:npm-lock:check:changed": "node scripts/generate-npm-package-lock.mjs --changed"
+    "deps:npm-lock:check:changed": "node scripts/generate-npm-package-lock.mjs --changed",
+    "test:pqc:production": "node scripts/run-vitest.mjs src/security/push-dual-signature.test.ts src/security/push-reference.test.ts src/security/pqc-message-context.test.ts src/infra/pqc-push-state.test.ts src/infra/push-envelope.test.ts src/infra/push-web-m11.test.ts src/infra/push-web.test.ts src/infra/push-apns.test.ts src/infra/push-browser-interop.test.ts src/gateway/server-methods/push-pqc.test.ts src/infra/device-identity-wrap-file.test.ts src/infra/device-identity-wrap-env.test.ts src/infra/device-identity-store.wrap.test.ts src/security/wrap-key-rotation.test.ts src/security/wrap-key-rotation.extended.test.ts extensions/nostr/src/nostr-bus.outbound.test.ts extensions/nostr/src/nostr-bus.inbound.test.ts --maxWorkers=1",
+    "test:pqc:installed": "node scripts/verify-installed-pqc.mjs",
+    "bench:pqc:production": "node --import tsx scripts/bench-pqc-production.ts"
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "1.2.1",

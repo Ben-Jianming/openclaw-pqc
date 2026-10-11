@@ -1,0 +1,290 @@
+---
+summary: "Push V2 protocol, release acceptance criteria, and verified security boundaries"
+read_when:
+  - You are implementing or reviewing the OpenClaw PQC Push V2 protocol
+  - You need evidence for a PQC installation or release claim
+title: "PQC production acceptance"
+---
+
+# PQC production acceptance
+
+Use this reference to decide which PQC guarantees a particular installation can claim. It defines the Push V2 signed transcript and the eight acceptance groups needed to connect the paper components to installed clients. A signature helper, a source inspection, and a green job with skipped tests establish different facts. Record the exact build and the checks that ran before making a product claim.
+
+## Implementation and release status
+
+The implementation baseline reviewed for this work is commit `c86174b5002e77ed33ca0da5118c497797043ecf`. The key safety changes in local commit `6bea43974092e82caa035c192fd96e35f0882c77` add automatic wrapping, restricted key files, redacted errors, and bounded recovery inputs. At the start of this acceptance work, that local commit had not been published to `main` or included in a verified release. A local implementation is not evidence that a GitHub download or an older installation contains the fix.
+
+The current change set connects Push V2 primitives to gateway methods, provider sends, and controlled receivers. Initial focused tests have passed for the envelope and reference components, SQLite push state, high-level signing, independent browser transcript verification, Web Push wake construction, and experimental message context binding. Those results cover their named test cases. Changes made after a test run need a final rerun; a fresh build, full relevant type checks, review, candidate CI, installed-product tests, and physical-channel acceptance are still **pending verification**. No complete R1–R8 release pass is asserted here.
+
+Native clients already have ML-DSA migration code, including a portable Apple provider for systems without the native API. Nostr already has ML-KEM message paths and a `required` mode. These facts do not establish Push V2 receiver verification, a standardized NIP-44 protocol, or physical-device acceptance.
+
+| Source path                                                                           | Implemented boundary                                                                                                                  | Evidence still needed                                                                                                                                                                  |
+| ------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/security/push-dual-signature.ts`, `src/infra/push-envelope.ts`                   | Versioned dual signatures, recipient binding, strict verification, and persistent sender sequence allocation.                         | Final focused rerun and tested key lifecycle policy.                                                                                                                                   |
+| `src/infra/pqc-push-state.ts`                                                         | Shared SQLite reference consumption, sender/replay state, recipient bindings, and redemption counters.                                | Multi-process/crash tests and installed profile lifecycle checks.                                                                                                                      |
+| `src/gateway/server-methods/push.ts`                                                  | Authenticated key retrieval and one-time redemption; separate operator and current paired-node methods.                               | Built real-handshake authorization and session-change tests.                                                                                                                           |
+| `src/infra/push-web-m11.ts`, `src/infra/push-apns-wake.ts`                            | Sensitive content replaced by a bounded generic wake reference.                                                                       | Final provider failure and payload-boundary tests, then real providers.                                                                                                                |
+| `ui/public/sw.js`, `ui/src/app/pqc-push.ts`                                           | Fixed generic wake display, authenticated fetch, independent dual verification, durable browser replay gate before canonical display. | Browser lifecycle, storage reset, reconnect, and real Web Push acceptance.                                                                                                             |
+| `apps/shared/OpenClawKit/Sources/OpenClawKit/PushV2Verifier.swift`, iOS wake receiver | Independent Swift transcript, portable ML-DSA verification, local replay state, and fetch over the authenticated node route.          | Native build, Node-to-Swift vectors and Swift-generated dual signatures accepted by Node, physical-device and OS-display policy tests. The new CI gate has not run for this candidate. |
+| `src/security/nip44-v2.ts`, `extensions/nostr/src/nostr-pqc-runtime.ts`               | One shared experimental `pqc3` implementation with authenticated outer-event context and explicit required mode.                      | Full channel interoperability, replay, rotation, and downgrade behavior.                                                                                                               |
+| `scripts/bench-pqc-production.ts`                                                     | New raw-sample runner with source/runtime provenance and rotated schedules.                                                           | Clean committed execution, complete balanced run set, archive, and separate persistent-state timing.                                                                                   |
+
+## Trust and capability boundaries
+
+- Local state writers, installed plugins, and the host account remain trusted operator boundaries. Key wrapping reduces exposure of device-key database rows; it does not protect against a compromised process that can use the active wrapping key.
+- Both Ed25519 and ML-DSA-65 signatures must verify for Push V2 acceptance. The classical signature does not serve as a fallback for a failed PQC signature.
+- Obtain trusted gateway keys through the authenticated pairing or configuration path. A notification, relay response, or self-declared public key cannot establish trust.
+- Push providers and relays carry an opaque wake reference. They must not supply actionable approval content, trusted navigation, or the canonical notification body.
+- A compromised delivery service can still send generic wakeups or suppress delivery. Authentication of fetched content does not remove that availability risk.
+- Approval actions still require an authenticated gateway read of current approval state. Neither a wake reference nor a verified notification alone grants approval.
+- Feishu's official client cannot verify a custom PQC envelope. Sending-side audit records are the available guarantee unless a controlled receiver implements and passes the acceptance checks. Do not label the official-client channel as end-to-end PQC authenticated.
+- The experimental `pqc3` construction is an OpenClaw protocol; `pqc2` is its unbound legacy format. Using ML-KEM does not make either [standard NIP-44](https://github.com/nostr-protocol/nips/blob/master/44.md) or a standardized PQC HPKE suite. State confidentiality, sender authentication, replay protection, and downgrade behavior separately.
+- Local push objects hold the canonical payload in the trusted state database. The limits below do not imply encryption of notification bodies at rest. Clearing or restoring a receiver database changes its replay history and requires a documented lifecycle policy.
+
+## Push V2 signed envelope
+
+`src/security/push-dual-signature.ts` owns the envelope and transcript. This reference describes version 2; a change to signed-field interpretation requires a new, coordinated protocol version and fixed vectors.
+
+| Field            | Required meaning                                                                            |
+| ---------------- | ------------------------------------------------------------------------------------------- |
+| `version`        | The integer `2`.                                                                            |
+| `algorithms`     | Exactly `["ed25519", "ml-dsa-65"]`, in that order.                                          |
+| `sender_id`      | The authenticated sender identity bound to both trusted keys.                               |
+| `recipient_id`   | The intended local receiver identity, checked independently of the message.                 |
+| `key_id_ed25519` | The Ed25519 registry entry identifier.                                                      |
+| `key_id_mldsa65` | The ML-DSA-65 registry entry identifier.                                                    |
+| `created_at_ms`  | A nonnegative safe integer representing Unix time in milliseconds.                          |
+| `sequence`       | A nonnegative safe integer, monotonically increasing in the sender and recipient namespace. |
+| `nonce`          | Canonical, unpadded base64url encoding of 24 random bytes.                                  |
+| `payload_type`   | A signed application content type.                                                          |
+| `payload_sha256` | Canonical, unpadded base64url encoding of SHA-256 over the exact UTF-8 payload string.      |
+| `ed25519_sig`    | Canonical, unpadded base64url encoding of a 64-byte signature.                              |
+| `mldsa65_sig`    | Canonical, unpadded base64url encoding of a 3309-byte ML-DSA-65 signature.                  |
+
+Identity and content-type strings must be nonempty, Unicode NFC, and free of unpaired surrogates. Measure limits in UTF-8 bytes: identity strings have a 256-byte limit, key identifiers have a 128-byte limit, and the signing content type has a 128-byte limit. Reject integers outside the interoperable safe range `0` through `9007199254740991`. Noncanonical base64url, including padding or alternate encodings, is invalid.
+
+### Encode the transcript
+
+Begin the binary transcript with ASCII `OpenClaw-PQC/Push/V2` followed by a zero byte. Append the following twelve fields in order. A tag is one byte. Integer fields contain the tag followed by an unsigned 64-bit big-endian integer. Text and byte fields contain the tag, a four-byte unsigned big-endian length, then exactly that many bytes.
+
+| Tag | Value                    | Encoding after the tag    |
+| --- | ------------------------ | ------------------------- |
+| 1   | `version`                | Unsigned 64-bit integer.  |
+| 2   | `algorithms[0]`          | Length-prefixed UTF-8.    |
+| 3   | `algorithms[1]`          | Length-prefixed UTF-8.    |
+| 4   | `sender_id`              | Length-prefixed UTF-8.    |
+| 5   | `recipient_id`           | Length-prefixed UTF-8.    |
+| 6   | `key_id_ed25519`         | Length-prefixed UTF-8.    |
+| 7   | `key_id_mldsa65`         | Length-prefixed UTF-8.    |
+| 8   | `created_at_ms`          | Unsigned 64-bit integer.  |
+| 9   | `sequence`               | Unsigned 64-bit integer.  |
+| 10  | Decoded `nonce`          | Length-prefixed 24 bytes. |
+| 11  | `payload_type`           | Length-prefixed UTF-8.    |
+| 12  | Decoded `payload_sha256` | Length-prefixed 32 bytes. |
+
+Both signatures cover the UTF-8 bytes of this ASCII string:
+
+```text
+openclaw-push-v2-binary:BASE64URL_UNPADDED(binary_transcript)
+```
+
+They do not sign JSON serialization or the raw binary transcript directly. JSON member ordering is therefore irrelevant, but changing any of the twelve signed values changes the transcript. Do not reinterpret unknown fields as signed application actions. The payload hash covers the exact payload bytes, without receiver-side JSON reserialization or Unicode normalization.
+
+### Apply the Accept gate
+
+The production receiver must use strict verification with both `expectedRecipientId` and a replay guard reused across messages. Passing the low-level cryptographic verifier without these checks is not product acceptance.
+
+1. Parse and bound the envelope, then require the exact version, algorithms, canonical encodings, and integer ranges.
+2. Compare `recipient_id` with the local identity established by pairing and the authenticated device binding.
+3. Check the signed timestamp. The component default maximum age is five minutes, with at most thirty seconds of future clock skew. A product policy must preserve its documented bounds.
+4. Recompute the payload hash over the received UTF-8 bytes.
+5. Resolve both key IDs from the trusted registry. Require matching algorithms, identifiers, sender identity, validity intervals, and revocation policy.
+6. Verify both signatures over the same transcript.
+7. Atomically reject a repeated nonce or a sequence not greater than the stored high-water mark, then persist the accepted state.
+8. Only after acceptance, decode and display the canonical content or perform its permitted route. Approval still performs the gateway read described above.
+
+Failed recipient, key, time, hash, or signature checks must not consume replay state. The initial sequence policy rejects lower sequence numbers even when delivery is merely out of order. Supporting reordering requires a separately specified bounded window and new tests; it must not silently reset the high-water mark.
+
+## Deliver and redeem a wake reference
+
+The notification carries a reference descriptor, not the signed sensitive body. The component reference format has `version: 1`, an `object_id`, a canonical 32-byte random bearer token encoded as 43 base64url characters, and `expires_at_ms`. The reference version is separate from signed-envelope version 2.
+
+The gateway stores the canonical payload and envelope, recipient binding, token digest, and authoritative expiry. Redemption uses the existing authenticated gateway connection. Derive the authorized recipient from the session's verified device and its subscription or APNs binding; a caller-supplied recipient string and possession of the token are insufficient.
+
+Before consuming the object, validate descriptor format and size, authoritative expiry, device ownership, and token digest. Compare fixed-length digests with a constant-time primitive. Commit consumption atomically so two concurrent requests cannot both succeed. A wrong device, token, descriptor version, or expiry must not consume a valid object. Never record the token in diagnostics, telemetry, URLs, or audit payloads.
+
+Consumption commits before returning the response. If the response is lost, the same reference may no longer be redeemable. Document how the receiver obtains canonical current state through an authenticated read; do not describe at-most-once consumption as guaranteed delivery.
+
+Size the complete transport payload, including its wrapper and provider encryption overhead. [APNs' ordinary payload limit](https://developer.apple.com/library/archive/documentation/NetworkingInternet/Conceptual/RemoteNotificationsPG/CreatingtheNotificationPayload.html) is 4096 bytes. Web Push services need not support encrypted message bodies above 4096 octets; the single-record format described by [RFC 8291](https://www.rfc-editor.org/rfc/rfc8291.html) leaves approximately 3993 octets for plaintext at that boundary. A particular service may impose additional limits. A fixed experimental envelope size is not a general transport budget.
+
+Sign before committing a provider send. If either signature, storage, payload budget, or provider submission fails, stop that delivery and remove any newly created unreachable reference. Never send the original sensitive payload as a fallback. For subscriptions using this security protocol, a missing or malformed marker must still result only in a fixed generic wakeup, not provider-supplied title, body, URL, or approval routing.
+
+### Gateway methods and receiver flow
+
+| Method                 | Authorized caller                                                         | Result                                                                       |
+| ---------------------- | ------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| `push.pqc.keys`        | Authorized operator connection with a verified device identity.           | Active gateway public keys and key IDs, sender ID, and session recipient ID. |
+| `push.pqc.redeem`      | Authorized operator connection with the bound verified device.            | Canonical payload and V2 envelope after one-time consumption.                |
+| `node.push.pqc.keys`   | Current paired node connection with its pairing generation still current. | Same key result, through the separate node role policy.                      |
+| `node.push.pqc.redeem` | Current paired node connection with the bound verified device.            | Same one-time redemption result.                                             |
+
+The recipient comes from `connect.device.id`. The wake descriptor cannot select a different recipient. APNs registration uses the authenticated node identity; Web Push subscription creation and recipient binding occur together in the shared transaction. A reference is not an anonymous HTTP download URL.
+
+The service worker stores bounded wake descriptors and displays fixed generic text. After the browser gateway handshake, the application retrieves the active keys and confirms that the returned recipient matches its local device identity. It fetches objects, verifies their signatures before sorting by sequence, then applies the durable IndexedDB replay gate before displaying a canonical title or body. A forged sequence must not decide processing order before verification. Expired or failed references are cleared; one bad reference must not prevent unrelated valid ones from being processed.
+
+The iOS wake receiver uses `node.push.pqc.keys` and `node.push.pqc.redeem` on the captured authenticated gateway route. Swift verification precedes approval routing or local content rendering. This source path does not establish that the OS cannot display an arbitrary remote alert sent by a compromised relay outside the verified path. In particular, a foreground callback or an optional notification service extension is insufficient evidence for background or terminated-app behavior.
+
+The current key lookup returns the active pair. The low-level registry verifier can check validity and revocation metadata, but a complete receiving key-rotation/revocation workflow still needs its own acceptance evidence. Do not infer it solely from the active-key response.
+
+### State and resource limits
+
+The server uses additive `pqc_push_*` tables in the canonical state database. It does not create a separate JSON store or downgrade to an in-memory reference store on persistence failure.
+
+| State or input                   | Current bound                                                                             |
+| -------------------------------- | ----------------------------------------------------------------------------------------- |
+| Sender or replay identity pairs  | 10,000 per corresponding server table.                                                    |
+| Live server nonce records        | 50,000; expired records are pruned.                                                       |
+| Stored push objects              | 2,000 globally and 100 per recipient.                                                     |
+| Canonical payload and envelope   | 64 KiB payload and 16 KiB envelope per object.                                            |
+| Reference lifetime               | At most five minutes.                                                                     |
+| Valid-format redemption attempts | 60 per authenticated device per 60-second fixed window, persisted across gateway restart. |
+| Browser pending wake descriptors | 64 live references.                                                                       |
+| Browser replay nonces            | 1,000 unexpired nonces per sender/recipient pair.                                         |
+
+These per-object and state limits do not constitute a provider delivery SLA, a database disk quota, or a complete ingress/source rate policy. Failed authenticated redemption has a uniform unavailable response without logging its token or canonical body. Invalid schema requests are rejected before reference lookup.
+
+## Experimental message context
+
+The Nostr production PQC path sends `pqc3`, with four canonical base64url parts:
+
+```text
+pqc3:CONTEXT_DIGEST.KEM_CIPHERTEXT.SYMMETRIC_CIPHERTEXT.HMAC
+```
+
+The context digest is SHA-256 over the UTF-8 JSON array in this exact order:
+
+```text
+["OpenClaw-PQC/Message",3,"ML-KEM-768+ChaCha20+HMAC-SHA256",senderPubkey,recipientPubkey,"nostr-dm",SHA256(recipientKemPublicKey)_lowercase_hex]
+```
+
+Sender and recipient public keys are lowercase, 64-character Nostr hex keys. The receiver reconstructs context from the verified outer event and its configured local identity; it does not trust context copied from the ciphertext. Key derivation includes the `OpenClaw-PQC/Message/V3` domain followed by a zero byte and this digest. The HMAC covers context, KEM ciphertext, and symmetric ciphertext.
+
+`preferred` mode permits legacy `pqc2` and NIP-04 compatibility; outbound delivery uses `pqc3` when a trusted peer KEM key is configured. `required` rejects both legacy formats and missing outbound peer keys. Cryptographic failure does not trigger a legacy retry. The fixed `nostr-dm` purpose identifies this channel context; this is not a general authenticated-header protocol for arbitrary transports. Outer-event sender authentication remains classical, and full replay, rotation, and recovery acceptance must be recorded separately.
+
+## Eight acceptance groups
+
+The order below follows the paper-to-product review. Priorities describe implementation order, not a vulnerability severity score. Each group remains pending until its complete boundary is exercised and its evidence is attached to the candidate SHA.
+
+| Group                                    | Work and pass condition                                                                                                                                                                                                                                                                                                                               | Required proof                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| ---------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| R1: source and key safety                | Build one fixed source revision containing the V2 contract and key safety changes. New device-key rows are wrapped; losing an active wrapping key never regenerates a substitute. Restrict wrapping and dedicated push-key files, including existing files and Windows ACLs. Errors reveal no key fragments; recovery input has size and work limits. | Clean installation from the fixed revision, plaintext-row migration, lost-key failure, POSIX permissions, Windows ACL checks, redaction, and backup-input boundary tests.                                                                                                                                                                                                                                                                       |
+| R2: fail-closed delivery                 | Both signatures are mandatory. Providers receive only a generic wake reference. Missing or tampered markers cannot reveal an external body or trigger a route. Budget and delivery failures leave no unreachable stored objects.                                                                                                                      | A provider test double records zero send calls for either signing failure. Test exact payload limits, oversize cleanup, provider failure, and notification fields modified or removed.                                                                                                                                                                                                                                                          |
+| R3: receiver acceptance                  | Actual receivers apply the full Accept gate before displaying or routing canonical content. Registry keys come from an authenticated trust path; receiver identity and replay state cannot be omitted.                                                                                                                                                | Production receiver tests for wrong recipient, time window, each signed field, either signature, unknown or revoked keys, repeated nonce, and sequence order. Node-to-Swift fixed vectors plus actual Swift-generated Ed25519 and ML-DSA-65 signatures accepted by the Node strict verifier, with transcript equality, tampered-payload and wrong-recipient rejection, and replay rejection.                                                    |
+| R4: authenticated redemption             | Only the bound, authenticated device can redeem, even when another device possesses the correct token. A successful redemption consumes exactly once; invalid requests do not consume. Device and source quotas bound abuse.                                                                                                                          | Real gateway handshake and redemption tests for anonymous access, wrong device, wrong token, changed expiry or version, concurrency, rate limits, and redacted diagnostics.                                                                                                                                                                                                                                                                     |
+| R5: durable bounded state                | Server counters, nonce records, recipient bindings, and reference consumption survive restarts in shared SQLite transactions. Actual receivers persist their own replay gate in canonical native state or browser IndexedDB. Object, byte, peer, and per-device limits are explicit.                                                                  | Restart and multi-process tests; old messages stay rejected while a restarted sender's new sequence succeeds. Exercise concurrent acceptance, expiration, capacity limits, crash recovery, profiles, and key rotation.                                                                                                                                                                                                                          |
+| R6: authenticated experimental messaging | Both core and Nostr implementations bind the protocol version, suite, sender, recipient, purpose, channel, and authenticated headers. State which layer authenticates the sender. Required mode never silently falls back to a legacy format.                                                                                                         | Production send and receive tests for wrong keys, modified ciphertext, cross-context transplantation, replay, key rotation, and downgrade refusal. Protocol name and tags match the actual experimental format.                                                                                                                                                                                                                                 |
+| R7: installed-product and channel tests  | Execute behavior through the installed build, not only source-string checks. Separate protocol interoperability, platform unit tests, simulator tests, physical-device tests, and real delivery tests.                                                                                                                                                | An isolated installed-build test covers identity loading, strict push verification, and wrapping export/restore. Also launch the built gateway on loopback in isolated state, complete a valid ML-DSA device-proof handshake, and prove an invalid device proof is refused. Include the Swift-to-Node signature artifact check, real client pairing and upgrade checks, and separately recorded APNs, Web Push, and controlled Feishu delivery. |
+| R8: performance and provenance           | Benchmark full strict acceptance using fresh valid sequence numbers and nonces. Label cryptographic, state-transaction, redemption, network, and display costs separately. Archive reproducible source and build identities.                                                                                                                          | Balanced operation and payload schedules, raw samples, analysis scripts, environment and dependency records, exact commands, full source at a fixed SHA, lockfile and artifact hashes. Preserve historical results with their original scope.                                                                                                                                                                                                   |
+
+iOS persists only the canonical opaque capability in `pqc_push_wakes`, bounded to 64 live records with expiration and duplicate suppression in SQLite transactions. A completed remote-notification callback does not require the current process to remain alive. Pending references are retried through the existing background-refresh handler and on foreground/relaunch; the 60-second in-process timer is only a foreground optimization. `BGTaskScheduler` scheduling and silent APNs delivery remain discretionary: a request does not guarantee execution before the five-minute capability expires. Storage failure rejects the unverified remote content; no memory-only fallback is used.
+
+For R5, use the existing shared state database and synchronous write transaction helpers. Additive tables do not require a schema-version bump when older readers can safely ignore them. Do not create parallel JSON state or fall back to an in-memory store after persistence fails. Receiver nonce pruning must not allow an unexpired signed message to be accepted again; sender counters and receiver high-water marks need a coordinated lifecycle.
+
+For R6, outer Nostr event verification already supplies classical authentication. Preserve that check, but do not describe it as ML-DSA sender authentication. If an interim design only permits experimental ciphertext inside an authenticated outer protocol, state that narrower guarantee until a reviewed PQC-authenticated profile passes interoperability tests.
+
+## Record product evidence
+
+Create an evidence record for each release candidate before running the acceptance gates. The record must contain:
+
+- Full source SHA, clean or dirty state, lockfile hash, build command, and artifact hash.
+- Operating system, architecture, Node version, package manager version, and loaded cryptographic library versions.
+- Actual command, test suite or device workflow, execution time, result, and output artifact.
+- The group and assertion proved, plus skipped cases and blocked checks.
+- Client build and OS version, delivery channel, and whether the receiver was a unit fixture, simulator, or physical device.
+
+Keep secret values, push tokens, wrapping keys, private keys, and private notification bodies out of these records. A successful overall workflow with skipped jobs does not satisfy the skipped assertions.
+
+### Check installation behavior
+
+Use a separate state directory and test credentials. Do not run destructive migration, recovery, or rotation exercises against a user's active gateway. Follow the [Node installation requirements](/install/node) and use the repository's selected test route.
+
+These checks establish different scopes:
+
+| Check                                  | Establishes                                                                                                                               | Does not establish                                                            |
+| -------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
+| Built CLI `--version` and `--help`     | The built entry point starts and exits for those commands.                                                                                | Device authentication, signature verification, or recovery.                   |
+| Source contract inspection             | Selected source files contain an expected declaration or call.                                                                            | That the installed build executes the call correctly.                         |
+| Cryptographic component test           | The tested algorithms and input cases behave as recorded.                                                                                 | A wired receiver, authenticated redemption, or transport delivery.            |
+| Native identity interoperability test  | The named device-proof or identity vectors work on that platform.                                                                         | Push V2 transcript or physical-device delivery.                               |
+| Swift-to-Node Push V2 interoperability | Node verifies the public artifact's actual native-generated dual signatures, matching transcript, recipient binding, and replay behavior. | A physical-device handshake, APNs delivery, or iOS background display policy. |
+| Built loopback device-proof handshake  | The isolated built gateway accepts a valid ML-DSA proof and refuses an invalid proof over its actual connection path.                     | Physical clients, remote deployment, or real push providers.                  |
+| Installed gateway and receiver test    | The named built authentication, redemption, and Accept flow works.                                                                        | Unexercised platforms or real provider delivery.                              |
+| Physical-device and real-provider test | The recorded build, device, and channel completed that workflow.                                                                          | Other devices, configurations, channels, or later releases.                   |
+
+The installation verifier must print the checks it actually executes. Until the required installed-build behavior exists and passes, do not print that all production wiring or end-to-end PQC capability is ready.
+
+For Swift-to-Node acceptance, `PushV2VerifierTests.nativeSignaturesCanBeExportedForServerVerification` generates actual native signatures and writes public-only JSON when `PQC_PUSH_INTEROP_OUTPUT` is set. `scripts/verify-native-push-v2.ts` must consume that artifact and execute strict Node dual-signature verification; checking that the test name or source string exists is insufficient. The CI wiring is present, but this candidate's CI result remains pending.
+
+The additional installation gate must start the built gateway on loopback with temporary, isolated state and exercise both successful ML-DSA authentication and invalid-proof rejection. Existing installed SDK checks alone do not establish that handshake. Keep this gate pending until its actual built-process result is recorded; it does not replace the physical-device or live-provider checks below.
+
+Run focused source tests with the repository runner and the matching project configuration, for example:
+
+```bash
+node scripts/run-vitest.mjs run --config test/vitest/vitest.unit-security.config.ts src/security/push-dual-signature.test.ts src/security/push-reference.test.ts src/security/pqc-message-context.test.ts
+node scripts/run-vitest.mjs run --config test/vitest/vitest.infra.config.ts src/infra/pqc-push-state.test.ts src/infra/push-envelope.test.ts src/infra/push-browser-interop.test.ts
+```
+
+Inspect each report to confirm the requested files ran; the project configurations can permit an empty test selection. These commands do not build the product, run native clients, exercise a built gateway handshake, or validate a real provider.
+
+### Exercise recovery separately
+
+The local key safety implementation includes these CLI operations:
+
+```bash
+openclaw security wrap-key status --json
+openclaw security wrap-key export --output <new-backup-file> --passphrase-file <private-passphrase-file>
+openclaw security wrap-key import --input <backup-file> --output <new-key-file> --passphrase-file <private-passphrase-file>
+openclaw security wrap-key rotate --output <new-key-file> --key-id <new-key-id>
+```
+
+Output files must not already exist. Keep the passphrase file private and do not place the passphrase directly on the command line. Import creates a key file; it does not by itself prove an identity database can be restored. Test the backup together with the matching state database in an isolated profile, confirm the restored public identity, and record the actual configuration needed to select the restored key. After rotation, prove that the new key opens the rows and that the prior key cannot open the new wrapped rows. Preserve the prior backup until the recovery drill passes.
+
+An absent wrapping key for already wrapped rows is a recovery failure. Do not fix it by generating a fresh key, silently replacing the identity, or suppressing the error.
+
+### Complete physical and live-channel acceptance
+
+Record separate results for each supported client and channel:
+
+1. Pair a fresh client and verify that the negotiated device algorithm matches its actual proof.
+2. Upgrade an existing paired client and verify identity preservation or the documented migration and re-pairing behavior.
+3. Deliver a generic wakeup through the actual provider, redeem through the authenticated gateway, and verify canonical content before rendering.
+4. Tamper with each provider-visible field using a controlled relay or receiver test fixture. Confirm that the client never displays injected body text or takes an injected route.
+5. Repeat in background, terminated-app, reconnect, duplicate-delivery, and expired-reference conditions relevant to the platform.
+6. Confirm that approvals always re-read current gateway state and cannot be completed from notification content alone.
+
+Real APNs acceptance needs a signed app, physical Apple device, authorized APNs credentials, and the intended application environment. A simulator or mock HTTP/2 endpoint cannot supply that evidence. Feishu's official client remains sending-side audit only; live end-to-end custom verification requires a controlled receiver or official protocol support. If credentials, a receiver, or a physical device are unavailable, record the check as blocked or pending rather than passed.
+
+For iOS, include an adversarial relay test that replaces the whole APNs payload, removes its PQC marker or extension trigger, and sends an ordinary alert while the app is backgrounded or terminated. Until an enforceable OS/display policy and those device tests reject attacker-controlled visible content, retain the compromised-relay limitation. Passing the authenticated fetch verifier or foreground display test alone is insufficient.
+
+## Benchmark the strict path
+
+Cryptographic verification and full Accept are separate benchmark operations. Reusing one valid envelope with a persistent replay guard measures first acceptance followed by rejection, not repeated successful acceptance. For the strict benchmark, create a fresh legal nonce and increasing sequence for every accepted sample while reusing the real guard and persistence backend.
+
+Record operation order and payload order, and use an actually balanced schedule when comparing positions. Similar random seeds do not prove position balance. Include warmup policy, repetitions, failures, medians or distributions, and the precise timed boundary. Keep network and rendering measurements separate from local cryptographic and transaction measurements.
+
+Archive raw samples and analysis inputs with the exact source and dependency identity captured at execution. A later archive can freeze existing materials, but cannot retroactively prove which source or runtime generated historical measurements. Keep older microbenchmarks labeled with their original coverage instead of relabeling them as full Accept or field performance.
+
+The new runner rejects tracked dirty state and records the source SHA, selected source-file hashes, lockfile hash, Node version, OS, CPU, process ID, operation schedule, warmup policy, and raw samples. It measures 13 operations over 64-, 1024-, and 16384-byte inputs, with 10 warmups and 100 timed samples for each operation/input pair. Run each index `0` through `38` in a fresh process to complete the 13-operation by 3-payload balanced cycle. A single index is only part of that cycle.
+
+```bash
+node --import tsx scripts/bench-pqc-production.ts 0 .artifacts/pqc-benchmark
+```
+
+Replace `0` with each remaining index after committing the exact candidate source. This creates new measurements; it does not reproduce or relabel the paper's historical 15-process data. The runner's strict acceptance uses a process-local replay guard and fresh valid messages. It excludes SQLite, gateway RPC, network delivery, and device display latency. Measure and label those persistent/product boundaries separately before claiming full production acceptance performance. Retain the complete fixed source, dependencies, build artifacts, raw results, and analysis alongside their digests; selected source hashes alone are not a complete release archive.
+
+## Related guidance
+
+- [PQC security scope](/security/pqc-whitepaper)
+- [Gateway security](/gateway/security)
+- [Nostr channel](/channels/nostr)
+- [Node installation requirements](/install/node)

@@ -3180,7 +3180,7 @@ INSERT INTO macos_port_guardian_records VALUES (4242, 18789, '/usr/bin/ssh', 're
           agent_id: null,
           attachment_id: "legacy-attachment",
           cleanup_pending: 0,
-          original_media_root: "/legacy/media",
+          original_media_root: path.resolve("/legacy/media"),
         });
       }
     },
@@ -3966,6 +3966,8 @@ INSERT INTO macos_port_guardian_records VALUES (4242, 18789, '/usr/bin/ssh', 're
   });
 
   it("uses rollback journaling for shared state databases on NFS-backed volumes", () => {
+    // Exercise the POSIX statfs branch even when the test host is Windows (which uses UNC detection).
+    vi.spyOn(process, "platform", "get").mockReturnValue("linux");
     const stateDir = createTempStateDir();
     const statfs = vi.spyOn(fs, "statfsSync").mockReturnValue(statfsFixture(0x6969));
 
