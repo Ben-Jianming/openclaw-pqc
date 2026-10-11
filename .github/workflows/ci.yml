@@ -3296,6 +3296,7 @@ jobs:
             -resultBundlePath "$result_bundle" \
             -parallel-testing-enabled NO \
             -only-testing:OpenClawTests/NodeAppModelInvokeTests \
+            -only-testing:OpenClawTests/OpenClawAppDelegateTests \
             -only-testing:OpenClawTests/NotificationServingPreferenceTests \
             test
 
