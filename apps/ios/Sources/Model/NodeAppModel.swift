@@ -7952,12 +7952,16 @@ extension NodeAppModel {
         do {
             let decoder = JSONDecoder()
             let keyJSON = try await self.nodeGateway.request(
-                method: "node.push.pqc.keys", paramsJSON: "{}", timeoutSeconds: 8,
+                method: "node.push.pqc.keys",
+                paramsJSON: "{}",
+                timeoutSeconds: 8,
                 ifCurrentRoute: route)
             let keys = try decoder.decode(PushV2TrustedKeys.self, from: keyJSON)
             guard !Task.isCancelled else { return .retry }
             let objectJSON = try await self.nodeGateway.request(
-                method: "node.push.pqc.redeem", paramsJSON: referenceJSON, timeoutSeconds: 8,
+                method: "node.push.pqc.redeem",
+                paramsJSON: referenceJSON,
+                timeoutSeconds: 8,
                 ifCurrentRoute: route)
             redeemed = true
             guard !Task.isCancelled else { return .discard }
@@ -7967,7 +7971,9 @@ extension NodeAppModel {
             else { return .discard }
             let object = try decoder.decode(PushV2Object.self, from: objectJSON)
             let payload = try PushV2Verifier.accept(
-                object, keys: keys, expectedRecipientID: identity.deviceId,
+                object,
+                keys: keys,
+                expectedRecipientID: identity.deviceId,
                 nowMs: Int64(Date().timeIntervalSince1970 * 1000),
                 replayStore: PushV2ReplayStore.openDefault())
             guard let info = try JSONSerialization.jsonObject(with: Data(payload.utf8)) as? [String: Any]
@@ -7989,7 +7995,8 @@ extension NodeAppModel {
                 content.userInfo["openclaw_pqc_verified"] = true
                 let notification = UNNotificationRequest(
                     identifier: "pqc-\(object.envelope.sender_id)-\(object.envelope.sequence)",
-                    content: content, trigger: nil)
+                    content: content,
+                    trigger: nil)
                 try await UNUserNotificationCenter.current().add(notification)
             }
             return .handled

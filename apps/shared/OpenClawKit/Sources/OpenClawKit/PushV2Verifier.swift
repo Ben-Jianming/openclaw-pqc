@@ -248,7 +248,8 @@ public enum PushV2Verifier {
             rawRepresentation: self.decode(keys.ed25519PublicKeyBase64Url, count: 32))
         guard try edKey.isValidSignature(self.decode(e.ed25519_sig, count: 64), for: message),
               try MLDSA65Provider.portableVerify(
-                  signature: self.decode(e.mldsa65_sig, count: 3309), message: message,
+                  signature: self.decode(e.mldsa65_sig, count: 3309),
+                  message: message,
                   publicKey: self.decode(keys.mldsa65PublicKeyBase64Url, count: 1952))
         else { throw PushV2Error.signature }
         try replayStore.accept(e, nowMs: nowMs)

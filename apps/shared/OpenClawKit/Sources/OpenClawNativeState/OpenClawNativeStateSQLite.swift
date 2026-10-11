@@ -166,7 +166,8 @@ public final class OpenClawNativeStateSQLite: @unchecked Sendable {
         indexColumns: [])
 
     private static let pqcPushReplay = CanonicalTable(
-        name: "pqc_push_replay", indexName: nil,
+        name: "pqc_push_replay",
+        indexName: nil,
         createSQL: """
         CREATE TABLE IF NOT EXISTS pqc_push_replay (
           sender_id TEXT NOT NULL,
@@ -179,10 +180,12 @@ public final class OpenClawNativeStateSQLite: @unchecked Sendable {
             Column(name: "sender_id", type: "TEXT", notNull: true, primaryKeyPosition: 1, hidden: 0),
             Column(name: "recipient_id", type: "TEXT", notNull: true, primaryKeyPosition: 2, hidden: 0),
             Column(name: "sequence", type: "INTEGER", notNull: true, primaryKeyPosition: 0, hidden: 0),
-        ], indexColumns: [])
+        ],
+        indexColumns: [])
 
     private static let pqcPushNonces = CanonicalTable(
-        name: "pqc_push_nonces", indexName: nil,
+        name: "pqc_push_nonces",
+        indexName: nil,
         createSQL: """
         CREATE TABLE IF NOT EXISTS pqc_push_nonces (
           sender_id TEXT NOT NULL,
@@ -197,10 +200,12 @@ public final class OpenClawNativeStateSQLite: @unchecked Sendable {
             Column(name: "recipient_id", type: "TEXT", notNull: true, primaryKeyPosition: 2, hidden: 0),
             Column(name: "nonce", type: "TEXT", notNull: true, primaryKeyPosition: 3, hidden: 0),
             Column(name: "expires_at_ms", type: "INTEGER", notNull: true, primaryKeyPosition: 0, hidden: 0),
-        ], indexColumns: [])
+        ],
+        indexColumns: [])
 
     private static let pqcPushWakes = CanonicalTable(
-        name: "pqc_push_wakes", indexName: nil,
+        name: "pqc_push_wakes",
+        indexName: nil,
         createSQL: """
         CREATE TABLE IF NOT EXISTS pqc_push_wakes (
           reference_json TEXT NOT NULL PRIMARY KEY, expires_at_ms INTEGER NOT NULL
@@ -209,7 +214,8 @@ public final class OpenClawNativeStateSQLite: @unchecked Sendable {
         columns: [
             Column(name: "reference_json", type: "TEXT", notNull: true, primaryKeyPosition: 1, hidden: 0),
             Column(name: "expires_at_ms", type: "INTEGER", notNull: true, primaryKeyPosition: 0, hidden: 0),
-        ], indexColumns: [])
+        ],
+        indexColumns: [])
 
     private static let canonicalTables = [
         OpenClawNativeStateSQLite.deviceIdentities,
