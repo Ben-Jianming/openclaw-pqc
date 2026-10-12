@@ -51,6 +51,7 @@ async function writeListToolsMcpServer(params: {
   logPath: string;
   delayMs?: number;
   initializeDelayMs?: number;
+  listToolsReleasePath?: string;
   hang?: boolean;
   inputSchema?: unknown;
   tools?: Array<{
@@ -84,6 +85,7 @@ import fs from "node:fs/promises";
 const logPath = ${JSON.stringify(params.logPath)};
 const delayMs = ${params.delayMs ?? 0};
 const initializeDelayMs = ${params.initializeDelayMs ?? 0};
+const listToolsReleasePath = ${JSON.stringify(params.listToolsReleasePath)};
 const hang = ${params.hang === true};
 const capabilities = ${JSON.stringify(params.capabilities ?? { tools: {} })};
 const databasePath = ${JSON.stringify(params.databasePath)};
@@ -137,8 +139,11 @@ if (hangToolCallsUntilRestartMarkerPath) {
     await fs.writeFile(hangToolCallsUntilRestartMarkerPath, String(process.pid), "utf8");
   }
 }
+let logWrites = Promise.resolve();
 function log(line) {
-  void fs.appendFile(logPath, line + "\\n", "utf8").catch(() => {});
+  logWrites = logWrites
+    .then(() => fs.appendFile(logPath, line + "\\n", "utf8"))
+    .catch(() => {});
 }
 function send(message) {
   process.stdout.write(JSON.stringify(message) + "\\n");
@@ -176,7 +181,8 @@ function handle(message) {
     listCount += 1;
     if (listCount === exitOnListCall) {
       log("exit tools/list " + listCount);
-      process.exit(1);
+      void shutdown(1);
+      return;
     }
     if (listToolsMethodNotFound) {
       log("reject tools/list method not found");
@@ -203,7 +209,7 @@ function handle(message) {
     }
     const currentListCount = listCount;
     log("delay tools/list " + delayMs);
-    pendingTimer = setTimeout(() => {
+    const reply = () => {
       send({
         jsonrpc: "2.0",
         id: message.id,
@@ -215,7 +221,23 @@ function handle(message) {
         log("notify tools/list_changed");
         send({ jsonrpc: "2.0", method: "notifications/tools/list_changed" });
       }
-    }, delayMs);
+    };
+    if (listToolsReleasePath) {
+      void (async () => {
+        while (!shuttingDown) {
+          try {
+            await fs.access(listToolsReleasePath);
+            if (!shuttingDown) {
+              pendingTimer = setTimeout(reply, delayMs);
+            }
+            return;
+          } catch {}
+          await new Promise((resolve) => setTimeout(resolve, 10));
+        }
+      })();
+    } else {
+      pendingTimer = setTimeout(reply, delayMs);
+    }
   }
   if (message.method === "tools/call") {
     if (hangToolCallsUntilRestart) {
@@ -281,7 +303,12 @@ function handle(message) {
   }
 }
 process.stdin.setEncoding("utf8");
-function shutdown() {
+let shuttingDown = false;
+async function shutdown(code = 0) {
+  if (shuttingDown) {
+    return;
+  }
+  shuttingDown = true;
   if (pendingTimer) {
     clearTimeout(pendingTimer);
   }
@@ -292,7 +319,9 @@ function shutdown() {
     database?.exec("ROLLBACK");
   } catch {}
   database?.close();
-  process.exit(0);
+  // Retiring a failed transport must not discard its pending request records.
+  await logWrites;
+  process.exit(typeof code === "number" ? code : 0);
 }
 process.stdin.on("data", (chunk) => {
   buffer += chunk;
@@ -1176,10 +1205,12 @@ describe("session MCP runtime", () => {
         "slow_tool",
         "scoped_tool",
       ]);
-      expect((await fs.readFile(healthyLogPath, "utf8")).match(/recv tools\/list/g)).toHaveLength(
-        1,
-      );
-      expect((await fs.readFile(retryLogPath, "utf8")).match(/recv tools\/list/g)).toHaveLength(2);
+      await vi.waitFor(async () => {
+        expect((await fs.readFile(healthyLogPath, "utf8")).match(/recv tools\/list/g)).toHaveLength(
+          1,
+        );
+        expect((await fs.readFile(retryLogPath, "utf8")).match(/recv tools\/list/g)).toHaveLength(2);
+      });
     } finally {
       nowSpy.mockRestore();
       await runtime.dispose();
@@ -4576,6 +4607,7 @@ process.stdin.on("end", () => {
     { timeout: LIST_TOOLS_TEST_DEADLINE_MS },
     async () => {
       const tempDir = makeTempDir(tempDirs, "bundle-mcp-parallel-");
+      const listToolsReleasePath = path.join(tempDir, "release-list-tools");
       const delays = [200, 400, 600];
       const serverPaths = delays.map((delay, i) => {
         const serverPath = path.join(tempDir, `slow-server-${i}.mjs`);
@@ -4585,7 +4617,12 @@ process.stdin.on("end", () => {
 
       await Promise.all(
         serverPaths.map(({ serverPath, logPath, delay }) =>
-          writeListToolsMcpServer({ filePath: serverPath, logPath, delayMs: delay }),
+          writeListToolsMcpServer({
+            filePath: serverPath,
+            logPath,
+            delayMs: delay,
+            listToolsReleasePath,
+          }),
         ),
       );
 
@@ -4616,8 +4653,18 @@ process.stdin.on("end", () => {
         const maxDelay = Math.max(...delays);
         const parallelBudgetMs = maxDelay + 500;
 
+        const pendingCatalog = runtime.getCatalog();
+        // All requests must arrive before release: sequential loading cannot
+        // reach this barrier. Exclude platform-dependent process startup from
+        // the unchanged request-delay budget.
+        await Promise.all(
+          serverPaths.map(({ logPath }) =>
+            waitForFileText(logPath, "recv tools/list", LIST_TOOLS_SERVER_LOG_TIMEOUT_MS),
+          ),
+        );
         const t0 = performance.now();
-        const catalog = await runtime.getCatalog();
+        await fs.writeFile(listToolsReleasePath, "ready", "utf8");
+        const catalog = await pendingCatalog;
         const wallTime = performance.now() - t0;
 
         // Must have successfully connected to all servers
@@ -4629,7 +4676,7 @@ process.stdin.on("end", () => {
         ]);
 
         // Sequential listing would have to wait roughly sumDelays before overhead;
-        // parallel listing should stay near the slowest server plus launch overhead.
+        // parallel listing should stay near the slowest server plus request overhead.
         expect(wallTime).toBeLessThan(parallelBudgetMs);
         expect(parallelBudgetMs).toBeLessThan(sumDelays);
 
