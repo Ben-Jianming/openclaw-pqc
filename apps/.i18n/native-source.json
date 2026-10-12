@@ -25867,7 +25867,7 @@
     },
     {
       "kind": "conditional-branch",
-      "line": 8885,
+      "line": 8892,
       "path": "apps/ios/Sources/Model/NodeAppModel.swift",
       "source": "Approval",
       "surface": "apple",
@@ -25875,7 +25875,7 @@
     },
     {
       "kind": "conditional-branch",
-      "line": 8885,
+      "line": 8892,
       "path": "apps/ios/Sources/Model/NodeAppModel.swift",
       "source": "This approval was already",
       "surface": "apple",
@@ -25883,7 +25883,7 @@
     },
     {
       "kind": "conditional-branch",
-      "line": 8891,
+      "line": 8898,
       "path": "apps/ios/Sources/Model/NodeAppModel.swift",
       "source": "This approval was already set to Always Allow.",
       "surface": "apple",
@@ -25891,7 +25891,7 @@
     },
     {
       "kind": "conditional-branch",
-      "line": 8892,
+      "line": 8899,
       "path": "apps/ios/Sources/Model/NodeAppModel.swift",
       "source": "Approval set to Always Allow.",
       "surface": "apple",
@@ -25899,7 +25899,7 @@
     },
     {
       "kind": "conditional-branch",
-      "line": 10227,
+      "line": 10234,
       "path": "apps/ios/Sources/Model/NodeAppModel.swift",
       "source": "\\(urlText.prefix(500))…",
       "surface": "apple",
