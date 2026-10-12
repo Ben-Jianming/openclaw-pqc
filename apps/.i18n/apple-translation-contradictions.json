@@ -2603,35 +2603,175 @@
       ]
     },
     {
+      "locale": "ar",
+      "source": "Done",
+      "translations": [
+        "Done",
+        "تم"
+      ]
+    },
+    {
+      "locale": "de",
+      "source": "Done",
+      "translations": [
+        "Done",
+        "Fertig"
+      ]
+    },
+    {
       "locale": "es",
       "source": "Done",
       "translations": [
+        "Done",
         "Hecho",
         "Listo"
+      ]
+    },
+    {
+      "locale": "fa",
+      "source": "Done",
+      "translations": [
+        "Done",
+        "انجام شد"
+      ]
+    },
+    {
+      "locale": "fr",
+      "source": "Done",
+      "translations": [
+        "Done",
+        "Terminé"
       ]
     },
     {
       "locale": "hi",
       "source": "Done",
       "translations": [
+        "Done",
         "पूर्ण",
         "हो गया"
+      ]
+    },
+    {
+      "locale": "id",
+      "source": "Done",
+      "translations": [
+        "Done",
+        "Selesai"
       ]
     },
     {
       "locale": "it",
       "source": "Done",
       "translations": [
+        "Done",
         "Fatto",
         "Fine"
+      ]
+    },
+    {
+      "locale": "ja-JP",
+      "source": "Done",
+      "translations": [
+        "Done",
+        "完了"
+      ]
+    },
+    {
+      "locale": "ko",
+      "source": "Done",
+      "translations": [
+        "Done",
+        "완료"
+      ]
+    },
+    {
+      "locale": "nl",
+      "source": "Done",
+      "translations": [
+        "Done",
+        "Gereed"
+      ]
+    },
+    {
+      "locale": "pl",
+      "source": "Done",
+      "translations": [
+        "Done",
+        "Gotowe"
+      ]
+    },
+    {
+      "locale": "pt-BR",
+      "source": "Done",
+      "translations": [
+        "Concluído",
+        "Done"
+      ]
+    },
+    {
+      "locale": "ru",
+      "source": "Done",
+      "translations": [
+        "Done",
+        "Готово"
       ]
     },
     {
       "locale": "sv",
       "source": "Done",
       "translations": [
+        "Done",
         "Klar",
         "Klart"
+      ]
+    },
+    {
+      "locale": "th",
+      "source": "Done",
+      "translations": [
+        "Done",
+        "เสร็จสิ้น"
+      ]
+    },
+    {
+      "locale": "tr",
+      "source": "Done",
+      "translations": [
+        "Bitti",
+        "Done"
+      ]
+    },
+    {
+      "locale": "uk",
+      "source": "Done",
+      "translations": [
+        "Done",
+        "Готово"
+      ]
+    },
+    {
+      "locale": "vi",
+      "source": "Done",
+      "translations": [
+        "Done",
+        "Xong"
+      ]
+    },
+    {
+      "locale": "zh-CN",
+      "source": "Done",
+      "translations": [
+        "Done",
+        "完成"
+      ]
+    },
+    {
+      "locale": "zh-TW",
+      "source": "Done",
+      "translations": [
+        "Done",
+        "完成"
       ]
     },
     {
@@ -2993,6 +3133,174 @@
       "translations": [
         "匯出對話紀錄",
         "匯出逐字稿"
+      ]
+    },
+    {
+      "locale": "ar",
+      "source": "Failed",
+      "translations": [
+        "Failed",
+        "فشلت"
+      ]
+    },
+    {
+      "locale": "de",
+      "source": "Failed",
+      "translations": [
+        "Failed",
+        "Fehlgeschlagen"
+      ]
+    },
+    {
+      "locale": "es",
+      "source": "Failed",
+      "translations": [
+        "Failed",
+        "Fallida"
+      ]
+    },
+    {
+      "locale": "fa",
+      "source": "Failed",
+      "translations": [
+        "Failed",
+        "ناموفق"
+      ]
+    },
+    {
+      "locale": "fr",
+      "source": "Failed",
+      "translations": [
+        "Failed",
+        "Échec"
+      ]
+    },
+    {
+      "locale": "hi",
+      "source": "Failed",
+      "translations": [
+        "Failed",
+        "विफल"
+      ]
+    },
+    {
+      "locale": "id",
+      "source": "Failed",
+      "translations": [
+        "Failed",
+        "Gagal"
+      ]
+    },
+    {
+      "locale": "it",
+      "source": "Failed",
+      "translations": [
+        "Failed",
+        "Non riuscito"
+      ]
+    },
+    {
+      "locale": "ja-JP",
+      "source": "Failed",
+      "translations": [
+        "Failed",
+        "失敗"
+      ]
+    },
+    {
+      "locale": "ko",
+      "source": "Failed",
+      "translations": [
+        "Failed",
+        "실패함"
+      ]
+    },
+    {
+      "locale": "nl",
+      "source": "Failed",
+      "translations": [
+        "Failed",
+        "Mislukt"
+      ]
+    },
+    {
+      "locale": "pl",
+      "source": "Failed",
+      "translations": [
+        "Failed",
+        "Niepowodzenie"
+      ]
+    },
+    {
+      "locale": "pt-BR",
+      "source": "Failed",
+      "translations": [
+        "Failed",
+        "Falhou"
+      ]
+    },
+    {
+      "locale": "ru",
+      "source": "Failed",
+      "translations": [
+        "Failed",
+        "Не выполнено"
+      ]
+    },
+    {
+      "locale": "sv",
+      "source": "Failed",
+      "translations": [
+        "Failed",
+        "Misslyckades"
+      ]
+    },
+    {
+      "locale": "th",
+      "source": "Failed",
+      "translations": [
+        "Failed",
+        "ล้มเหลว"
+      ]
+    },
+    {
+      "locale": "tr",
+      "source": "Failed",
+      "translations": [
+        "Başarısız",
+        "Failed"
+      ]
+    },
+    {
+      "locale": "uk",
+      "source": "Failed",
+      "translations": [
+        "Failed",
+        "Не виконано"
+      ]
+    },
+    {
+      "locale": "vi",
+      "source": "Failed",
+      "translations": [
+        "Failed",
+        "Thất bại"
+      ]
+    },
+    {
+      "locale": "zh-CN",
+      "source": "Failed",
+      "translations": [
+        "Failed",
+        "失败"
+      ]
+    },
+    {
+      "locale": "zh-TW",
+      "source": "Failed",
+      "translations": [
+        "Failed",
+        "失敗"
       ]
     },
     {
@@ -7048,6 +7356,174 @@
       ]
     },
     {
+      "locale": "ar",
+      "source": "Queued",
+      "translations": [
+        "Queued",
+        "في قائمة الانتظار"
+      ]
+    },
+    {
+      "locale": "de",
+      "source": "Queued",
+      "translations": [
+        "In Warteschlange",
+        "Queued"
+      ]
+    },
+    {
+      "locale": "es",
+      "source": "Queued",
+      "translations": [
+        "En cola",
+        "Queued"
+      ]
+    },
+    {
+      "locale": "fa",
+      "source": "Queued",
+      "translations": [
+        "Queued",
+        "در صف"
+      ]
+    },
+    {
+      "locale": "fr",
+      "source": "Queued",
+      "translations": [
+        "En attente",
+        "Queued"
+      ]
+    },
+    {
+      "locale": "hi",
+      "source": "Queued",
+      "translations": [
+        "Queued",
+        "कतार में"
+      ]
+    },
+    {
+      "locale": "id",
+      "source": "Queued",
+      "translations": [
+        "Dalam antrean",
+        "Queued"
+      ]
+    },
+    {
+      "locale": "it",
+      "source": "Queued",
+      "translations": [
+        "In coda",
+        "Queued"
+      ]
+    },
+    {
+      "locale": "ja-JP",
+      "source": "Queued",
+      "translations": [
+        "Queued",
+        "待機中"
+      ]
+    },
+    {
+      "locale": "ko",
+      "source": "Queued",
+      "translations": [
+        "Queued",
+        "대기 중"
+      ]
+    },
+    {
+      "locale": "nl",
+      "source": "Queued",
+      "translations": [
+        "In wachtrij",
+        "Queued"
+      ]
+    },
+    {
+      "locale": "pl",
+      "source": "Queued",
+      "translations": [
+        "Queued",
+        "W kolejce"
+      ]
+    },
+    {
+      "locale": "pt-BR",
+      "source": "Queued",
+      "translations": [
+        "Na fila",
+        "Queued"
+      ]
+    },
+    {
+      "locale": "ru",
+      "source": "Queued",
+      "translations": [
+        "Queued",
+        "В очереди"
+      ]
+    },
+    {
+      "locale": "sv",
+      "source": "Queued",
+      "translations": [
+        "I kö",
+        "Queued"
+      ]
+    },
+    {
+      "locale": "th",
+      "source": "Queued",
+      "translations": [
+        "Queued",
+        "อยู่ในคิว"
+      ]
+    },
+    {
+      "locale": "tr",
+      "source": "Queued",
+      "translations": [
+        "Queued",
+        "Sıraya alındı"
+      ]
+    },
+    {
+      "locale": "uk",
+      "source": "Queued",
+      "translations": [
+        "Queued",
+        "У черзі"
+      ]
+    },
+    {
+      "locale": "vi",
+      "source": "Queued",
+      "translations": [
+        "Queued",
+        "Đang chờ"
+      ]
+    },
+    {
+      "locale": "zh-CN",
+      "source": "Queued",
+      "translations": [
+        "Queued",
+        "已排队"
+      ]
+    },
+    {
+      "locale": "zh-TW",
+      "source": "Queued",
+      "translations": [
+        "Queued",
+        "已排入佇列"
+      ]
+    },
+    {
       "locale": "it",
       "source": "Ready",
       "translations": [
@@ -8060,17 +8536,51 @@
       ]
     },
     {
+      "locale": "ar",
+      "source": "Running",
+      "translations": [
+        "Running",
+        "قيد التشغيل"
+      ]
+    },
+    {
+      "locale": "de",
+      "source": "Running",
+      "translations": [
+        "Running",
+        "Wird ausgeführt"
+      ]
+    },
+    {
+      "locale": "es",
+      "source": "Running",
+      "translations": [
+        "En ejecución",
+        "Running"
+      ]
+    },
+    {
+      "locale": "fa",
+      "source": "Running",
+      "translations": [
+        "Running",
+        "در حال اجرا"
+      ]
+    },
+    {
       "locale": "fr",
       "source": "Running",
       "translations": [
         "En cours",
-        "En cours d’exécution"
+        "En cours d’exécution",
+        "Running"
       ]
     },
     {
       "locale": "hi",
       "source": "Running",
       "translations": [
+        "Running",
         "चल रहा है",
         "जारी"
       ]
@@ -8080,8 +8590,33 @@
       "source": "Running",
       "translations": [
         "Berjalan",
+        "Running",
         "Sedang Berjalan",
         "Sedang berjalan"
+      ]
+    },
+    {
+      "locale": "it",
+      "source": "Running",
+      "translations": [
+        "In esecuzione",
+        "Running"
+      ]
+    },
+    {
+      "locale": "ja-JP",
+      "source": "Running",
+      "translations": [
+        "Running",
+        "実行中"
+      ]
+    },
+    {
+      "locale": "ko",
+      "source": "Running",
+      "translations": [
+        "Running",
+        "실행 중"
       ]
     },
     {
@@ -8090,6 +8625,7 @@
       "translations": [
         "Actief",
         "In uitvoering",
+        "Running",
         "Wordt uitgevoerd"
       ]
     },
@@ -8097,6 +8633,7 @@
       "locale": "pl",
       "source": "Running",
       "translations": [
+        "Running",
         "Uruchomiona",
         "Uruchomione",
         "Uruchomiono",
@@ -8104,19 +8641,77 @@
       ]
     },
     {
+      "locale": "pt-BR",
+      "source": "Running",
+      "translations": [
+        "Em execução",
+        "Running"
+      ]
+    },
+    {
+      "locale": "ru",
+      "source": "Running",
+      "translations": [
+        "Running",
+        "Выполняется"
+      ]
+    },
+    {
       "locale": "sv",
       "source": "Running",
       "translations": [
         "Körs",
-        "Pågår"
+        "Pågår",
+        "Running"
+      ]
+    },
+    {
+      "locale": "th",
+      "source": "Running",
+      "translations": [
+        "Running",
+        "กำลังทำงาน"
+      ]
+    },
+    {
+      "locale": "tr",
+      "source": "Running",
+      "translations": [
+        "Running",
+        "Çalışıyor"
+      ]
+    },
+    {
+      "locale": "uk",
+      "source": "Running",
+      "translations": [
+        "Running",
+        "Виконується"
+      ]
+    },
+    {
+      "locale": "vi",
+      "source": "Running",
+      "translations": [
+        "Running",
+        "Đang chạy"
       ]
     },
     {
       "locale": "zh-CN",
       "source": "Running",
       "translations": [
+        "Running",
         "正在运行",
         "运行中"
+      ]
+    },
+    {
+      "locale": "zh-TW",
+      "source": "Running",
+      "translations": [
+        "Running",
+        "執行中"
       ]
     },
     {
