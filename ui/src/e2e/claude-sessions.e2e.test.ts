@@ -238,7 +238,7 @@ suite("Claude native session catalog", () => {
   });
 
   it("groups Claude and Codex sessions by Gateway and paired-node host", async () => {
-    const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+    const page = await browser.newPage({ locale: "en-US", viewport: { width: 1440, height: 900 } });
     await installMockGateway(page, {
       featureMethods: ["chat.metadata", "chat.startup", "sessions.catalog.list"],
       methodResponses: { "sessions.catalog.list": hostGroupedNativeCatalogs() },
@@ -275,7 +275,10 @@ suite("Claude native session catalog", () => {
   });
 
   it("shows catalog connection progress until the first terminal output", async () => {
-    const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+    const context = await browser.newContext({
+      locale: "en-US",
+      viewport: { width: 1440, height: 900 },
+    });
     const page = await context.newPage();
     const gateway = await installMockGateway(page, {
       deferredMethods: ["terminal.open"],
@@ -340,7 +343,7 @@ suite("Claude native session catalog", () => {
   });
 
   it("closes a catalog terminal that produces no output before the deadline", async () => {
-    const context = await browser.newContext();
+    const context = await browser.newContext({ locale: "en-US" });
     const page = await context.newPage();
     const gateway = await installMockGateway(page, {
       featureMethods: [
@@ -387,7 +390,7 @@ suite("Claude native session catalog", () => {
   });
 
   it("auto-loads older chat without moving the viewport and disables paired-node continuation", async () => {
-    const page = await browser.newPage();
+    const page = await browser.newPage({ locale: "en-US" });
     await page.clock.install();
     const catalogResponse = (threadId: string, name: string, nextCursor?: string) => ({
       catalogs: [
@@ -571,7 +574,7 @@ suite("Claude native session catalog", () => {
   });
 
   it("auto-loads older native history with a spinner and stable viewport", async () => {
-    const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+    const page = await browser.newPage({ locale: "en-US", viewport: { width: 1280, height: 800 } });
     await page.clock.install();
     const historyMessage = (seq: number, prefix: string) => ({
       __openclaw: { seq },
@@ -620,6 +623,8 @@ suite("Claude native session catalog", () => {
 
     await page.goto(`${server.baseUrl}chat`);
     await page.getByText(/^recent native message 140\n/).waitFor();
+    // Finish initial pinning and virtual row measurements before taking over the viewport.
+    await page.clock.runFor(100);
     const thread = page.locator(".chat-thread");
     await expect
       .poll(() => thread.evaluate((element) => element.scrollHeight > element.clientHeight + 100))
@@ -633,6 +638,7 @@ suite("Claude native session catalog", () => {
       element.scrollTop = 0;
       element.dispatchEvent(new Event("scroll"));
     });
+    await page.clock.runFor(100);
     await page.locator('.chat-virtual-row:not([data-virtual-row-key="history"])').first().waitFor();
     const anchor = await firstVisibleVirtualRow(thread);
     await gateway.waitForRequest("chat.history");
@@ -670,7 +676,7 @@ suite("Claude native session catalog", () => {
   });
 
   it("keeps a focused message action mounted while its row scrolls out of view", async () => {
-    const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+    const page = await browser.newPage({ locale: "en-US", viewport: { width: 1280, height: 800 } });
     const messages = Array.from({ length: 200 }, (_, index) => ({
       __openclaw: { seq: index + 1 },
       content: [

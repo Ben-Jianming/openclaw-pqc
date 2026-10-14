@@ -127,4 +127,30 @@ describe("chat transcript row measurement", () => {
       expect(observedElements.has(row)).toBe(false);
     }
   });
+
+  it("measures new rows only after their DOM commit connects them", async () => {
+    const detachedMeasurements: HTMLElement[] = [];
+    vi.spyOn(HTMLElement.prototype, "offsetHeight", "get").mockImplementation(
+      function (this: HTMLElement) {
+        if (!this.isConnected) {
+          detachedMeasurements.push(this);
+          return 0;
+        }
+        return 100;
+      },
+    );
+    const transcript = createTestTranscript();
+    const container = document.body.appendChild(document.createElement("div"));
+    render(renderChatThread(threadProps("pane-connected-measure"), transcript), container);
+    transcript.hostConnected();
+    transcript.hostUpdated();
+    await flushDeferredRowPrune();
+
+    const rows = transcriptRows(container);
+    expect(rows.length).toBeGreaterThanOrEqual(4);
+    expect(detachedMeasurements).toEqual([]);
+    for (const row of rows) {
+      expect(observedElements.has(row)).toBe(true);
+    }
+  });
 });

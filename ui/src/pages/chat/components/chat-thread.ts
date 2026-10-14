@@ -238,7 +238,17 @@ class ChatSessionVirtualizerHost implements ReactiveControllerHost {
     if (!callback) {
       callback = (element?: Element) => {
         if (element instanceof HTMLElement) {
-          this.virtualizerController.getVirtualizer().measureElement(element);
+          if (element.isConnected) {
+            this.virtualizerController.getVirtualizer().measureElement(element);
+          } else {
+            // Lit invokes refs before inserting new rows. Measuring here would
+            // cache a zero height and corrupt prepend anchor compensation.
+            queueMicrotask(() => {
+              if (element.isConnected) {
+                this.virtualizerController.getVirtualizer().measureElement(element);
+              }
+            });
+          }
           return;
         }
         // Re-stamps (e.g. the chat<->dashboard face switch) re-invoke each
