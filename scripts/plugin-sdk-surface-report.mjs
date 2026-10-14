@@ -196,7 +196,8 @@ export function readPluginSdkSurfaceBudgets(env = process.env) {
       // +9: canonical PQC push-envelope verification and receiver key contracts.
       // +6: shared experimental context-bound PQC message contract.
       // +2: durable push replay factory and receiver guard contract.
-      4861,
+      // push-envelope adds the transactional completion consumer.
+      4862,
       env,
     ),
     publicFunctionExports: readPluginSdkSurfaceBudgetEnv(
@@ -228,7 +229,8 @@ export function readPluginSdkSurfaceBudgets(env = process.env) {
       // +4: canonical PQC push-envelope verification helpers.
       // +5: canonical PQC message codecs and key decoders.
       // +1: durable push replay factory.
-      2951,
+      // Same single callable addition; further growth remains gated.
+      2952,
       env,
     ),
     publicDeprecatedExports: readPluginSdkSurfaceBudgetEnv(

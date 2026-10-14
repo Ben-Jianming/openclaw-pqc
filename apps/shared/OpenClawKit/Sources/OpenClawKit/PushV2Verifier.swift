@@ -419,7 +419,9 @@ public final class PushV2ReplayStore: @unchecked Sendable {
             else { throw PushV2Error.capacity }
             try self.acceptInTransaction(e, nowMs: nowMs)
             let insert = try self.database.prepare("""
-            INSERT INTO pqc_push_completions(sender_id,recipient_id,nonce,transcript_hash,result_json,expires_at_ms,state,lease_until_ms,reference_id)
+            INSERT INTO pqc_push_completions(
+                sender_id,recipient_id,nonce,transcript_hash,result_json,
+                expires_at_ms,state,lease_until_ms,reference_id)
             VALUES (?,?,?,?,?,?,'pending',?,?)
             """)
             try self.bindMessage(e, to: insert)

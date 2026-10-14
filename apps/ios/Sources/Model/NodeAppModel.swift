@@ -7946,7 +7946,7 @@ extension NodeAppModel {
             _ = await self.performBackgroundAliveBeaconIfNeeded(
                 wakeId: Self.makePushWakeAttemptID(), trigger: .silentPush)
         }
-        guard let route = await self.nodeGateway.currentRoute() else { return .retry }
+        guard let route = await nodeGateway.currentRoute() else { return .retry }
         var staged: (store: PushV2ReplayStore, envelope: PushV2Envelope, leaseUntilMs: Int64)?
         defer {
             if let staged {
@@ -7955,7 +7955,7 @@ extension NodeAppModel {
         }
         do {
             let decoder = JSONDecoder()
-            let keyJSON = try await self.nodeGateway.request(
+            let keyJSON = try await nodeGateway.request(
                 method: "node.push.pqc.keys",
                 paramsJSON: "{}",
                 timeoutSeconds: 8,
@@ -7973,9 +7973,11 @@ extension NodeAppModel {
             {
                 object = retained
             } else {
-                let objectJSON = try await self.nodeGateway.request(
-                    method: "node.push.pqc.redeem", paramsJSON: referenceJSON,
-                    timeoutSeconds: 8, ifCurrentRoute: route)
+                let objectJSON = try await nodeGateway.request(
+                    method: "node.push.pqc.redeem",
+                    paramsJSON: referenceJSON,
+                    timeoutSeconds: 8,
+                    ifCurrentRoute: route)
                 guard objectJSON.count <= 100_000 else { return .discard }
                 object = try decoder.decode(PushV2Object.self, from: objectJSON)
             }
@@ -7999,25 +8001,10 @@ extension NodeAppModel {
                       Int64(Date().timeIntervalSince1970 * 1000) < wake.expiresAtMs,
                       await self.nodeGateway.currentRoute() == route
                 else { return .retry }
-                guard let info = try JSONSerialization.jsonObject(with: Data(object.payload.utf8)) as? [String: Any]
-                else { return .discard }
-                if let resolved = ApprovalNotificationBridge.parseResolvedPush(userInfo: info) {
-                    guard await self.handleExecApprovalResolvedRemotePush(resolved) else { return .retry }
-                } else if let requested = ApprovalNotificationBridge.parseRequestedPush(userInfo: info) {
-                    // Keep the existing authenticated approval readback before action.
-                    guard await self.handleExecApprovalRequestedRemotePush(requested) else { return .retry }
-                } else if let aps = info["aps"] as? [String: Any], let alert = aps["alert"] as? [String: Any],
-                          let title = alert["title"] as? String
-                {
-                    let content = UNMutableNotificationContent()
-                    content.title = title
-                    content.body = alert["body"] as? String ?? ""
-                    content.userInfo = info
-                    content.userInfo["openclaw_pqc_verified"] = true
-                    let notification = UNNotificationRequest(
-                        identifier: "pqc-\(object.envelope.sender_id)-\(object.envelope.sequence)",
-                        content: content, trigger: nil)
-                    try await UNUserNotificationCenter.current().add(notification)
+                switch try await self.applyVerifiedPqcPushObject(object) {
+                case .handled: break
+                case .retry: return .retry
+                case .discard: return .discard
                 }
                 try replayStore.completeDelivery(object.envelope, leaseUntilMs: leaseUntilMs)
                 staged = nil
@@ -8027,13 +8014,42 @@ extension NodeAppModel {
             let ackData = try JSONSerialization.data(withJSONObject: acknowledgement)
             guard let ackJSON = String(data: ackData, encoding: .utf8) else { return .retry }
             _ = try await self.nodeGateway.request(
-                method: "node.push.pqc.redeem", paramsJSON: ackJSON,
-                timeoutSeconds: 8, ifCurrentRoute: route)
+                method: "node.push.pqc.redeem",
+                paramsJSON: ackJSON,
+                timeoutSeconds: 8,
+                ifCurrentRoute: route)
             return .handled
         } catch {
             self.pushWakeLogger.warning("Secure push deferred or rejected; no remote content displayed")
             return .retry
         }
+    }
+
+    private func applyVerifiedPqcPushObject(_ object: PushV2Object) async throws -> PqcPushWakeOutcome {
+        guard let info = try JSONSerialization.jsonObject(with: Data(object.payload.utf8)) as? [String: Any]
+        else { return .discard }
+        if let resolved = ApprovalNotificationBridge.parseResolvedPush(userInfo: info) {
+            return await self.handleExecApprovalResolvedRemotePush(resolved) ? .handled : .retry
+        }
+        if let requested = ApprovalNotificationBridge.parseRequestedPush(userInfo: info) {
+            // Keep the existing authenticated approval readback before action.
+            return await self.handleExecApprovalRequestedRemotePush(requested) ? .handled : .retry
+        }
+        guard let aps = info["aps"] as? [String: Any],
+              let alert = aps["alert"] as? [String: Any],
+              let title = alert["title"] as? String
+        else { return .handled }
+        let content = UNMutableNotificationContent()
+        content.title = title
+        content.body = alert["body"] as? String ?? ""
+        content.userInfo = info
+        content.userInfo["openclaw_pqc_verified"] = true
+        let notification = UNNotificationRequest(
+            identifier: "pqc-\(object.envelope.sender_id)-\(object.envelope.sequence)",
+            content: content,
+            trigger: nil)
+        try await UNUserNotificationCenter.current().add(notification)
+        return .handled
     }
 
     func handleSilentPushWake(_ userInfo: [AnyHashable: Any]) async -> Bool {
