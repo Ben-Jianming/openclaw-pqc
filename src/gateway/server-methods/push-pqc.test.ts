@@ -51,6 +51,20 @@ describe("authenticated V2 push redemption", () => {
       expect.objectContaining({ payload: "private body" }),
       undefined,
     ]);
+    expect((await invoke("push.pqc.redeem", descriptor, "alice")).mock.calls[0]![0]).toBe(true);
+    expect(
+      (await invoke("push.pqc.redeem", { ...descriptor, acknowledge: true }, "bob")).mock
+        .calls[0]![0],
+    ).toBe(false);
+    expect(
+      (await invoke("push.pqc.redeem", { ...descriptor, acknowledge: true }, "alice")).mock
+        .calls[0],
+    ).toEqual([true, { acknowledged: true }, undefined]);
+    closeOpenClawStateDatabase();
+    expect(
+      (await invoke("push.pqc.redeem", { ...descriptor, acknowledge: true }, "alice")).mock
+        .calls[0]![0],
+    ).toBe(true);
     expect((await invoke("push.pqc.redeem", descriptor, "alice")).mock.calls[0]![0]).toBe(false);
   });
 

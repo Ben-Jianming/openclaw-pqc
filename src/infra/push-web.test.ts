@@ -83,11 +83,16 @@ describe("resolveVapidKeys", () => {
     expect(vi.mocked(webPush.generateVAPIDKeys)).not.toHaveBeenCalled();
 
     await fs.rm(`${legacyPath}.doctor-importing`);
-    await fs.symlink(
-      path.join(tmpDir, "missing-vapid-keys.json"),
-      legacyPath,
-      process.platform === "win32" ? "junction" : "file",
-    );
+    const missingTarget = path.join(tmpDir, "missing-vapid-keys.json");
+    // Windows junction creation resolves the target first. Remove the owned
+    // directory after linking to exercise the same dangling legacy entry.
+    if (process.platform === "win32") {
+      await fs.mkdir(missingTarget);
+    }
+    await fs.symlink(missingTarget, legacyPath, process.platform === "win32" ? "junction" : "file");
+    if (process.platform === "win32") {
+      await fs.rmdir(missingTarget);
+    }
     await expect(resolveVapidKeys(tmpDir)).rejects.toThrow("openclaw doctor --fix");
     expect(vi.mocked(webPush.generateVAPIDKeys)).not.toHaveBeenCalled();
   });
@@ -302,6 +307,7 @@ describe("sending", () => {
     });
     expect(() => store.redeem(wire.pqc_ref, "bob")).toThrow("unavailable");
     expect(JSON.parse(store.redeem(wire.pqc_ref, "alice").payload).body).toBe("private body");
+    store.acknowledge(wire.pqc_ref, "alice");
     expect(() => store.redeem(wire.pqc_ref, "alice")).toThrow("unavailable");
   });
 

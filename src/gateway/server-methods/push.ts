@@ -66,11 +66,17 @@ export const pushHandlers: GatewayRequestHandlers = {
       return;
     }
     try {
-      if (!allowPushRedemption(recipientId)) {
+      const operation = params.acknowledge === true ? "acknowledge" : "read";
+      if (!allowPushRedemption(recipientId, {}, Date.now(), operation)) {
         throw new Error("rate limit");
       }
-      const value = new SqlitePushReferenceStore().redeem(params, recipientId);
-      respond(true, value, undefined);
+      const store = new SqlitePushReferenceStore();
+      if (params.acknowledge === true) {
+        store.acknowledge(params, recipientId);
+        respond(true, { acknowledged: true }, undefined);
+      } else {
+        respond(true, store.redeem(params, recipientId), undefined);
+      }
     } catch {
       // Never log the capability, payload or a distinguishable binding failure.
       respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, "push reference unavailable"));

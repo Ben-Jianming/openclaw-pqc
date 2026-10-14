@@ -20,6 +20,7 @@ public enum OpenClawNativeStateCanonicalTable: Equatable, Sendable {
     case pqcPushReplay
     case pqcPushNonces
     case pqcPushWakes
+    case pqcPushCompletions
 }
 
 public enum OpenClawNativeStateSQLiteStep: Equatable, Sendable {
@@ -217,6 +218,36 @@ public final class OpenClawNativeStateSQLite: @unchecked Sendable {
         ],
         indexColumns: [])
 
+    private static let pqcPushCompletions = CanonicalTable(
+        name: "pqc_push_completions",
+        indexName: "idx_pqc_push_completion_reference",
+        createSQL: """
+        CREATE TABLE IF NOT EXISTS pqc_push_completions (
+          sender_id TEXT NOT NULL, recipient_id TEXT NOT NULL, nonce TEXT NOT NULL,
+          transcript_hash TEXT NOT NULL, result_json TEXT NOT NULL, expires_at_ms INTEGER NOT NULL,
+          state TEXT NOT NULL, lease_until_ms INTEGER NOT NULL DEFAULT 0,
+          reference_id TEXT,
+          PRIMARY KEY (sender_id, recipient_id, nonce)
+        ) STRICT;
+        CREATE INDEX IF NOT EXISTS idx_pqc_push_completion_reference
+          ON pqc_push_completions(recipient_id, reference_id);
+        """,
+        columns: [
+            Column(name: "sender_id", type: "TEXT", notNull: true, primaryKeyPosition: 1, hidden: 0),
+            Column(name: "recipient_id", type: "TEXT", notNull: true, primaryKeyPosition: 2, hidden: 0),
+            Column(name: "nonce", type: "TEXT", notNull: true, primaryKeyPosition: 3, hidden: 0),
+            Column(name: "transcript_hash", type: "TEXT", notNull: true, primaryKeyPosition: 0, hidden: 0),
+            Column(name: "result_json", type: "TEXT", notNull: true, primaryKeyPosition: 0, hidden: 0),
+            Column(name: "expires_at_ms", type: "INTEGER", notNull: true, primaryKeyPosition: 0, hidden: 0),
+            Column(name: "state", type: "TEXT", notNull: true, primaryKeyPosition: 0, hidden: 0),
+            Column(name: "lease_until_ms", type: "INTEGER", notNull: true, primaryKeyPosition: 0, hidden: 0),
+            Column(name: "reference_id", type: "TEXT", notNull: false, primaryKeyPosition: 0, hidden: 0),
+        ],
+        indexColumns: [
+            IndexColumn(name: "recipient_id", descending: false),
+            IndexColumn(name: "reference_id", descending: false),
+        ])
+
     private static let canonicalTables = [
         OpenClawNativeStateSQLite.deviceIdentities,
         OpenClawNativeStateSQLite.execApprovalsConfig,
@@ -224,6 +255,7 @@ public final class OpenClawNativeStateSQLite: @unchecked Sendable {
         OpenClawNativeStateSQLite.pqcPushReplay,
         OpenClawNativeStateSQLite.pqcPushNonces,
         OpenClawNativeStateSQLite.pqcPushWakes,
+        OpenClawNativeStateSQLite.pqcPushCompletions,
     ]
 
     private let databaseURL: URL
@@ -308,7 +340,8 @@ public final class OpenClawNativeStateSQLite: @unchecked Sendable {
             } else {
                 try self.validateSharedDatabaseMetadata(userVersion: userVersion)
                 if try !self.schemaObjectExists(type: "table", name: descriptor.name),
-                   table == .pqcPushReplay || table == .pqcPushNonces || table == .pqcPushWakes
+                   table == .pqcPushReplay || table == .pqcPushNonces || table == .pqcPushWakes ||
+                   table == .pqcPushCompletions
                 {
                     // Additive security tables follow the gateway v6 lazy-ensure contract.
                     try self.execute(descriptor.createSQL)
@@ -416,6 +449,7 @@ public final class OpenClawNativeStateSQLite: @unchecked Sendable {
         case .pqcPushReplay: self.pqcPushReplay
         case .pqcPushNonces: self.pqcPushNonces
         case .pqcPushWakes: self.pqcPushWakes
+        case .pqcPushCompletions: self.pqcPushCompletions
         }
     }
 

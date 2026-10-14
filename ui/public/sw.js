@@ -145,7 +145,9 @@ function rememberPqcWake(ref) {
             store.delete(item.object_id);
           }
         }
-        if (live.length < 64) {
+        // A repeated provider wake must not overwrite a verified inbox or its
+        // completion marker written by the authenticated application.
+        if (live.length < 64 && !live.some((item) => item.object_id === ref.object_id)) {
           store.put({
             version: 1,
             object_id: ref.object_id,

@@ -91,75 +91,81 @@ export class SqlitePushReplayGuard implements PushReplayGuard {
     private readonly now: () => number = Date.now,
   ) {}
   accept(input: Parameters<PushReplayGuard["accept"]>[0]): boolean {
-    return transaction(this.options, (db, sql) => {
-      const nowMs = this.now();
-      if (
-        !Number.isSafeInteger(input.sequence) ||
-        input.sequence < 0 ||
-        input.createdAtMs > nowMs + 30_000 ||
-        nowMs - input.createdAtMs > DEFAULT_PUSH_REFERENCE_TTL_MS
-      ) {
-        return false;
-      }
-      executeSqliteQuerySync(
-        db,
-        sql.deleteFrom("pqc_push_nonces").where("expires_at_ms", "<=", nowMs),
-      );
-      const peer = executeSqliteQueryTakeFirstSync(
-        db,
-        sql
-          .selectFrom("pqc_push_replay")
-          .select("sequence")
-          .where("sender_id", "=", input.senderId)
-          .where("recipient_id", "=", input.recipientId),
-      );
-      const seen = executeSqliteQueryTakeFirstSync(
-        db,
-        sql
-          .selectFrom("pqc_push_nonces")
-          .select("nonce")
-          .where("sender_id", "=", input.senderId)
-          .where("recipient_id", "=", input.recipientId)
-          .where("nonce", "=", input.nonce),
-      );
-      if (seen || (peer && peer.sequence >= input.sequence)) {
-        return false;
-      }
-      const peers = executeSqliteQueryTakeFirstSync(
-        db,
-        sql.selectFrom("pqc_push_replay").select(sql.fn.countAll<number>().as("count")),
-      )!.count;
-      const nonces = executeSqliteQueryTakeFirstSync(
-        db,
-        sql.selectFrom("pqc_push_nonces").select(sql.fn.countAll<number>().as("count")),
-      )!.count;
-      if ((!peer && peers >= MAX_PEERS) || nonces >= MAX_NONCES) {
-        return false;
-      }
-      executeSqliteQuerySync(
-        db,
-        sql
-          .insertInto("pqc_push_replay")
-          .values({
-            sender_id: input.senderId,
-            recipient_id: input.recipientId,
-            sequence: input.sequence,
-          })
-          .onConflict((oc) =>
-            oc.columns(["sender_id", "recipient_id"]).doUpdateSet({ sequence: input.sequence }),
-          ),
-      );
-      executeSqliteQuerySync(
-        db,
-        sql.insertInto("pqc_push_nonces").values({
+    return transaction(this.options, (db) => this.acceptInTransaction(db, input));
+  }
+  /** Caller owns the enclosing commit; do not open a database or commit here. */
+  acceptInTransaction(db: DatabaseSync, input: Parameters<PushReplayGuard["accept"]>[0]): boolean {
+    if (!db.isTransaction) {
+      throw new Error("push replay acceptance requires an active transaction");
+    }
+    const sql = getNodeSqliteKysely<OpenClawStateDb>(db);
+    const nowMs = this.now();
+    if (
+      !Number.isSafeInteger(input.sequence) ||
+      input.sequence < 0 ||
+      input.createdAtMs > nowMs + 30_000 ||
+      nowMs - input.createdAtMs > DEFAULT_PUSH_REFERENCE_TTL_MS
+    ) {
+      return false;
+    }
+    executeSqliteQuerySync(
+      db,
+      sql.deleteFrom("pqc_push_nonces").where("expires_at_ms", "<=", nowMs),
+    );
+    const peer = executeSqliteQueryTakeFirstSync(
+      db,
+      sql
+        .selectFrom("pqc_push_replay")
+        .select("sequence")
+        .where("sender_id", "=", input.senderId)
+        .where("recipient_id", "=", input.recipientId),
+    );
+    const seen = executeSqliteQueryTakeFirstSync(
+      db,
+      sql
+        .selectFrom("pqc_push_nonces")
+        .select("nonce")
+        .where("sender_id", "=", input.senderId)
+        .where("recipient_id", "=", input.recipientId)
+        .where("nonce", "=", input.nonce),
+    );
+    if (seen || (peer && peer.sequence >= input.sequence)) {
+      return false;
+    }
+    const peers = executeSqliteQueryTakeFirstSync(
+      db,
+      sql.selectFrom("pqc_push_replay").select(sql.fn.countAll<number>().as("count")),
+    )!.count;
+    const nonces = executeSqliteQueryTakeFirstSync(
+      db,
+      sql.selectFrom("pqc_push_nonces").select(sql.fn.countAll<number>().as("count")),
+    )!.count;
+    if ((!peer && peers >= MAX_PEERS) || nonces >= MAX_NONCES) {
+      return false;
+    }
+    executeSqliteQuerySync(
+      db,
+      sql
+        .insertInto("pqc_push_replay")
+        .values({
           sender_id: input.senderId,
           recipient_id: input.recipientId,
-          nonce: input.nonce,
-          expires_at_ms: input.createdAtMs + DEFAULT_PUSH_REFERENCE_TTL_MS + 30_000,
-        }),
-      );
-      return true;
-    });
+          sequence: input.sequence,
+        })
+        .onConflict((oc) =>
+          oc.columns(["sender_id", "recipient_id"]).doUpdateSet({ sequence: input.sequence }),
+        ),
+    );
+    executeSqliteQuerySync(
+      db,
+      sql.insertInto("pqc_push_nonces").values({
+        sender_id: input.senderId,
+        recipient_id: input.recipientId,
+        nonce: input.nonce,
+        expires_at_ms: input.createdAtMs + DEFAULT_PUSH_REFERENCE_TTL_MS + 30_000,
+      }),
+    );
+    return true;
   }
 }
 
@@ -228,11 +234,29 @@ export class SqlitePushReferenceStore implements PushReferenceStore {
     recipientId: string,
     nowMs = Date.now(),
   ): StoredSignedPush {
+    const value = this.access(descriptor, recipientId, nowMs, "read");
+    if (!value) {
+      throw new Error("push reference unavailable");
+    }
+    return value;
+  }
+  acknowledge(descriptor: PushReferenceDescriptor, recipientId: string, nowMs = Date.now()): void {
+    this.access(descriptor, recipientId, nowMs, "acknowledge");
+  }
+  private access(
+    descriptor: PushReferenceDescriptor,
+    recipientId: string,
+    nowMs: number,
+    mode: "read" | "acknowledge",
+  ): StoredSignedPush | undefined {
     if (
       descriptor.version !== 1 ||
       typeof descriptor.object_id !== "string" ||
+      descriptor.object_id.length === 0 ||
       descriptor.object_id.length > 64 ||
-      !Number.isSafeInteger(descriptor.expires_at_ms)
+      !Number.isSafeInteger(descriptor.expires_at_ms) ||
+      !Number.isSafeInteger(nowMs) ||
+      nowMs < 0
     ) {
       throw new Error("invalid push reference");
     }
@@ -244,25 +268,70 @@ export class SqlitePushReferenceStore implements PushReferenceStore {
           .selectAll()
           .where("object_id", "=", descriptor.object_id),
       );
+      const receipt =
+        mode === "acknowledge" && !row
+          ? executeSqliteQueryTakeFirstSync(
+              db,
+              sql
+                .selectFrom("pqc_push_acknowledgements")
+                .selectAll()
+                .where("object_id", "=", descriptor.object_id),
+            )
+          : undefined;
+      const binding = row ?? receipt;
       // Hash every well-formed token even for a missing id. Never reveal which
       // binding failed, and never consume another device's object on failure.
       const tokenMatches = matchesPushReferenceToken(
-        row?.token_hash ?? "0".repeat(64),
+        binding?.token_hash ?? "0".repeat(64),
         descriptor.token,
       );
       if (
-        !row ||
+        !binding ||
         !tokenMatches ||
-        row.recipient_id !== recipientId ||
-        row.expires_at_ms !== descriptor.expires_at_ms ||
-        nowMs >= row.expires_at_ms
+        binding.recipient_id !== recipientId ||
+        binding.expires_at_ms !== descriptor.expires_at_ms ||
+        nowMs >= binding.expires_at_ms
       ) {
         throw new Error("push reference unavailable");
       }
-      executeSqliteQuerySync(
-        db,
-        sql.deleteFrom("pqc_push_objects").where("object_id", "=", descriptor.object_id),
-      );
+      // A read response can be lost before the receiver commits its inbox.
+      // Keep the capability retryable until authenticated acknowledgement or expiry.
+      if (mode === "acknowledge") {
+        if (row) {
+          executeSqliteQuerySync(
+            db,
+            sql.deleteFrom("pqc_push_acknowledgements").where("expires_at_ms", "<=", nowMs),
+          );
+          const count = executeSqliteQueryTakeFirstSync(
+            db,
+            sql
+              .selectFrom("pqc_push_acknowledgements")
+              .select(sql.fn.countAll<number>().as("count")),
+          )!.count;
+          if (count >= MAX_NONCES) {
+            throw new Error("push acknowledgement capacity exceeded");
+          }
+          // Retain only capability hashes until the original expiry. Lost ACK
+          // responses can then be retried without releasing the body again.
+          executeSqliteQuerySync(
+            db,
+            sql.insertInto("pqc_push_acknowledgements").values({
+              object_id: descriptor.object_id,
+              token_hash: row.token_hash,
+              recipient_id: row.recipient_id,
+              expires_at_ms: row.expires_at_ms,
+            }),
+          );
+        }
+        executeSqliteQuerySync(
+          db,
+          sql.deleteFrom("pqc_push_objects").where("object_id", "=", descriptor.object_id),
+        );
+      }
+      if (!row) {
+        // Only acknowledgement can reach a tombstone, whose body is erased.
+        return undefined;
+      }
       return {
         payload: row.payload,
         envelope: JSON.parse(row.envelope_json),
@@ -338,7 +407,9 @@ export function allowPushRedemption(
   deviceId: string,
   options: OpenClawStateDatabaseOptions = {},
   nowMs = Date.now(),
+  operation: "read" | "acknowledge" = "read",
 ): boolean {
+  const budgetId = JSON.stringify([deviceId, operation]);
   return transaction(options, (db, sql) => {
     executeSqliteQuerySync(
       db,
@@ -346,7 +417,7 @@ export function allowPushRedemption(
     );
     const row = executeSqliteQueryTakeFirstSync(
       db,
-      sql.selectFrom("pqc_push_attempts").selectAll().where("device_id", "=", deviceId),
+      sql.selectFrom("pqc_push_attempts").selectAll().where("device_id", "=", budgetId),
     );
     if (row && row.attempts >= 60) {
       return false;
@@ -365,7 +436,7 @@ export function allowPushRedemption(
       sql
         .insertInto("pqc_push_attempts")
         .values({
-          device_id: deviceId,
+          device_id: budgetId,
           window_start_ms: row?.window_start_ms ?? nowMs,
           attempts: (row?.attempts ?? 0) + 1,
         })

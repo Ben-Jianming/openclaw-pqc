@@ -17,6 +17,8 @@ export const LAZY_ADDITIVE_STATE_TABLES = [
   "pqc_push_bindings",
   "pqc_push_attempts",
   "pqc_push_wakes",
+  "pqc_push_completions",
+  "pqc_push_acknowledgements",
 ] as const;
 /** Maximum time one synchronous SQLite call may wait for a lock. */
 export const OPENCLAW_SQLITE_BUSY_TIMEOUT_MS = 5_000;

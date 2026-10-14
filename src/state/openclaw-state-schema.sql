@@ -2158,3 +2158,15 @@ CREATE TABLE IF NOT EXISTS pqc_push_attempts (
 CREATE TABLE IF NOT EXISTS pqc_push_wakes (
   reference_json TEXT NOT NULL PRIMARY KEY, expires_at_ms INTEGER NOT NULL
 ) STRICT;
+CREATE TABLE IF NOT EXISTS pqc_push_completions (
+  sender_id TEXT NOT NULL, recipient_id TEXT NOT NULL, nonce TEXT NOT NULL,
+  transcript_hash TEXT NOT NULL, result_json TEXT NOT NULL, expires_at_ms INTEGER NOT NULL,
+  state TEXT NOT NULL, lease_until_ms INTEGER NOT NULL DEFAULT 0,
+  reference_id TEXT,
+  PRIMARY KEY (sender_id, recipient_id, nonce)
+) STRICT;
+CREATE INDEX IF NOT EXISTS idx_pqc_push_completion_reference ON pqc_push_completions(recipient_id, reference_id);
+CREATE TABLE IF NOT EXISTS pqc_push_acknowledgements (
+  object_id TEXT NOT NULL PRIMARY KEY, token_hash TEXT NOT NULL,
+  recipient_id TEXT NOT NULL, expires_at_ms INTEGER NOT NULL
+) STRICT;

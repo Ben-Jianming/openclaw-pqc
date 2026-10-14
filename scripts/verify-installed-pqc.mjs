@@ -2,7 +2,7 @@
 // Runs only against built artifacts, in a throwaway state directory owned by this verifier.
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync, unlinkSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
@@ -233,6 +233,28 @@ if (process.argv[2] === "--probe") {
       replayGuard,
       ...overrides,
     });
+  const completionRegistry = {
+    resolve: (algorithm, keyId) => {
+      const expectedId = algorithm === "ed25519" ? keys.keyIdEd25519 : keys.keyIdMldsa65;
+      if (keyId !== expectedId) {
+        return undefined;
+      }
+      return {
+        algorithm,
+        keyId,
+        senderId: keys.senderId,
+        publicKeyRaw: Buffer.from(
+          algorithm === "ed25519" ? keys.ed25519PublicKeyBase64Url : keys.mldsa65PublicKeyBase64Url,
+          "base64url",
+        ),
+      };
+    },
+  };
+  const consume = (signed, apply) =>
+    sdk.consumePushPayloadDual(
+      { ...signed, registry: completionRegistry, expectedRecipientId: "installation-test" },
+      apply,
+    );
   if (mode === "gateway") {
     const { GatewayClient } = await import(
       pathToFileURL(path.join(root, "dist/plugin-sdk/gateway-runtime.js")).href
@@ -272,6 +294,57 @@ if (process.argv[2] === "--probe") {
         }),
         (error) => error.code === "UNAVAILABLE" && error.message === "push reference unavailable",
       );
+      const signed = sdk.signPushEnvelope({
+        payload: '{"title":"Retryable installed RPC"}',
+        recipientId,
+      });
+      const descriptor = {
+        version: 1,
+        object_id: randomUUID(),
+        token: randomBytes(32).toString("base64url"),
+        expires_at_ms: Date.now() + 60_000,
+      };
+      // Seed a controlled signed object, then exercise the real installed
+      // authenticated dispatch path rather than a handler or socket mock.
+      const state = new DatabaseSync(path.join(dir, "state/openclaw.sqlite"));
+      try {
+        state
+          .prepare(
+            "INSERT INTO pqc_push_objects(object_id,token_hash,recipient_id,payload,envelope_json,expires_at_ms) VALUES (?,?,?,?,?,?)",
+          )
+          .run(
+            descriptor.object_id,
+            createHash("sha256").update(descriptor.token, "utf8").digest("hex"),
+            recipientId,
+            signed.payload,
+            JSON.stringify(signed.envelope),
+            descriptor.expires_at_ms,
+          );
+      } finally {
+        state.close();
+      }
+      await client.request("push.pqc.redeem", descriptor); // Discard the first read response.
+      const retried = await client.request("push.pqc.redeem", descriptor);
+      assert.equal(retried.payload, signed.payload);
+      assert.deepEqual(retried.envelope, signed.envelope);
+      assert.equal(
+        sdk.verifySignedPushEnvelope({
+          ...retried,
+          trustedKeys: keys,
+          expectedRecipientId: recipientId,
+          replayGuard: sdk.createPushReplayGuard(),
+        }),
+        true,
+      );
+      const acknowledgement = { ...descriptor, acknowledge: true };
+      await client.request("push.pqc.redeem", acknowledgement); // Discard the first ACK response.
+      assert.deepEqual(await client.request("push.pqc.redeem", acknowledgement), {
+        acknowledged: true,
+      });
+      await assert.rejects(
+        client.request("push.pqc.redeem", descriptor),
+        (error) => error.code === "UNAVAILABLE" && error.message === "push reference unavailable",
+      );
     } finally {
       clearTimeout(timer);
       await client.stopAndWait();
@@ -305,11 +378,60 @@ if (process.argv[2] === "--probe") {
     } finally {
       db.close();
     }
-    writeFileSync(proofPath(dir), JSON.stringify({ signed, keys }), { flag: "wx", mode: 0o600 });
+    const completionSigned = sdk.signPushEnvelope({
+      payload: '{"operation":"installed-local-effect"}',
+      recipientId: "installation-test",
+    });
+    const writable = new DatabaseSync(path.join(dir, "state/openclaw.sqlite"));
+    writable.exec("CREATE TABLE installed_pqc_effects(value INTEGER NOT NULL) STRICT");
+    writable.close();
+    const effect = ({ db: effectDatabase }) => {
+      effectDatabase.prepare("INSERT INTO installed_pqc_effects(value) VALUES (1)").run();
+      return { result: "completed" };
+    };
+    assert.throws(
+      () =>
+        consume(completionSigned, (database) => {
+          effect(database);
+          throw new Error("controlled pre-commit failure");
+        }),
+      /controlled pre-commit failure/,
+    );
+    assert.deepEqual(consume(completionSigned, effect), {
+      status: "fresh_completed",
+      value: { result: "completed" },
+    });
+    assert.deepEqual(
+      consume(completionSigned, () => {
+        throw new Error("duplicate effect");
+      }),
+      { status: "already_completed", value: { result: "completed" } },
+    );
+    writeFileSync(proofPath(dir), JSON.stringify({ signed, keys, completionSigned }), {
+      flag: "wx",
+      mode: 0o600,
+    });
   } else if (mode === "restart" || mode === "restored") {
     const proof = JSON.parse(readFileSync(proofPath(dir), "utf8"));
     assert.deepEqual(keys, proof.keys, "restored identity changed");
     assert.throws(() => verify(proof.signed), "restart lost replay state");
+    assert.deepEqual(
+      consume(proof.completionSigned, () => {
+        throw new Error("restart repeated effect");
+      }),
+      { status: "already_completed", value: { result: "completed" } },
+    );
+    const effectState = new DatabaseSync(path.join(dir, "state/openclaw.sqlite"), {
+      readOnly: true,
+    });
+    try {
+      assert.equal(
+        effectState.prepare("SELECT COUNT(*) AS count FROM installed_pqc_effects").get().count,
+        1,
+      );
+    } finally {
+      effectState.close();
+    }
     const signed = sdk.signPushEnvelope({
       payload: '{"title":"After restart"}',
       recipientId: "installation-test",
@@ -390,7 +512,7 @@ if (process.argv[2] === "--probe") {
     child([scriptPath, "--probe", "restored"], recovered);
     assert.ok(proof.keys.senderId);
     process.stdout.write(
-      "Installed PQC behavior verified: encrypted identity, dual signatures, binding, expiry, persistent replay, restart, authenticated gateway handshake, dispatchable push RPCs, invalid-proof rejection, lost-key refusal and backup recovery. Live services and physical devices are not covered.\n",
+      "Installed PQC behavior verified: encrypted identity, dual signatures, binding, expiry, persistent replay, atomic local completion, restart, authenticated gateway handshake, retryable read and ACK RPCs, invalid-proof rejection, lost-key refusal and backup recovery. Live services and physical devices are not covered.\n",
     );
   } finally {
     assert.equal(path.dirname(directory), path.resolve(tmpdir()));

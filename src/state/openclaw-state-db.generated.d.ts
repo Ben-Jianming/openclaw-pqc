@@ -1005,6 +1005,13 @@ export interface PluginStateEntries {
   value_json: string;
 }
 
+export interface PqcPushAcknowledgements {
+  expires_at_ms: number;
+  object_id: string;
+  recipient_id: string;
+  token_hash: string;
+}
+
 export interface PqcPushAttempts {
   attempts: number;
   device_id: string;
@@ -1014,6 +1021,18 @@ export interface PqcPushAttempts {
 export interface PqcPushBindings {
   device_id: string;
   subscription_id: string;
+}
+
+export interface PqcPushCompletions {
+  expires_at_ms: number;
+  lease_until_ms: Generated<number>;
+  nonce: string;
+  recipient_id: string;
+  reference_id: string | null;
+  result_json: string;
+  sender_id: string;
+  state: string;
+  transcript_hash: string;
 }
 
 export interface PqcPushNonces {
@@ -1612,8 +1631,10 @@ export interface DB {
   plugin_binding_approvals: PluginBindingApprovals;
   plugin_blob_entries: PluginBlobEntries;
   plugin_state_entries: PluginStateEntries;
+  pqc_push_acknowledgements: PqcPushAcknowledgements;
   pqc_push_attempts: PqcPushAttempts;
   pqc_push_bindings: PqcPushBindings;
+  pqc_push_completions: PqcPushCompletions;
   pqc_push_nonces: PqcPushNonces;
   pqc_push_objects: PqcPushObjects;
   pqc_push_replay: PqcPushReplay;

@@ -138,6 +138,9 @@ describe("real browser durable wake retries", () => {
         if (method === "push.pqc.keys") {
           return m.keys;
         }
+        if (p.acknowledge === true) {
+          return { acknowledged: true };
+        }
         if (++attempts > 60) {
           throw new Error("UNAVAILABLE: rate limited");
         }
@@ -154,7 +157,7 @@ describe("real browser durable wake retries", () => {
     await receivePendingPqcPushes(client);
     expect(showNotification).toHaveBeenCalledTimes(64);
   });
-  it("keeps an unconsumed reference on connection failure and discards bad consumed content", async () => {
+  it("keeps a reference on connection failure and never displays tampered content", async () => {
     const m = await messages(1);
     let disconnected = true;
     const client = {
@@ -174,7 +177,7 @@ describe("real browser durable wake retries", () => {
     expect(showNotification).not.toHaveBeenCalled();
     disconnected = false;
     await expect(receivePendingPqcPushes(client)).rejects.toThrow();
-    expect(await queued()).toBe(0);
+    expect(await queued()).toBe(1);
     expect(showNotification).not.toHaveBeenCalled();
   });
   it("removes expired references without trying to redeem or display them", async () => {
@@ -185,5 +188,54 @@ describe("real browser durable wake retries", () => {
     expect(request).toHaveBeenCalledTimes(1);
     expect(await queued()).toBe(0);
     expect(showNotification).not.toHaveBeenCalled();
+  });
+  it("retries a failed display from the durable verified inbox without another redemption", async () => {
+    const m = await messages(1);
+    const request = vi.fn(async (method: string, p: Record<string, unknown>) => {
+      if (method === "push.pqc.keys") {
+        return m.keys;
+      }
+      if (p.acknowledge === true) {
+        return { acknowledged: true };
+      }
+      return m.values.get(p.object_id as string);
+    });
+    const client = { request } as unknown as GatewayBrowserClient;
+    showNotification.mockRejectedValueOnce(new Error("presentation unavailable"));
+    await expect(receivePendingPqcPushes(client)).rejects.toThrow();
+    expect(await queued()).toBe(1);
+    expect(
+      request.mock.calls.filter(([method, p]) => method === "push.pqc.redeem" && !p.acknowledge),
+    ).toHaveLength(1);
+    await receivePendingPqcPushes(client);
+    expect(await queued()).toBe(0);
+    expect(
+      request.mock.calls.filter(([method, p]) => method === "push.pqc.redeem" && !p.acknowledge),
+    ).toHaveLength(1);
+    expect(showNotification).toHaveBeenCalledTimes(2);
+  });
+  it("retries a lost acknowledgement without displaying a completed notification again", async () => {
+    const m = await messages(1);
+    let lost = true;
+    const request = vi.fn(async (method: string, p: Record<string, unknown>) => {
+      if (method === "push.pqc.keys") {
+        return m.keys;
+      }
+      if (p.acknowledge === true) {
+        if (lost) {
+          lost = false;
+          throw new Error("ack response lost");
+        }
+        return { acknowledged: true };
+      }
+      return m.values.get(p.object_id as string);
+    });
+    const client = { request } as unknown as GatewayBrowserClient;
+    await expect(receivePendingPqcPushes(client)).rejects.toThrow();
+    expect(showNotification).toHaveBeenCalledTimes(1);
+    expect(await queued()).toBe(1);
+    await receivePendingPqcPushes(client);
+    expect(showNotification).toHaveBeenCalledTimes(1);
+    expect(await queued()).toBe(0);
   });
 });

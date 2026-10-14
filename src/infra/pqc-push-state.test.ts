@@ -41,7 +41,7 @@ function compete(operation: "sequence" | "redeem", descriptor?: unknown): Promis
       process.stdout.write(JSON.stringify(Array.from({length: 20}, () => nextPushSequence('gateway', 'alice'))));
     } else {
       let accepted = false;
-      try { new SqlitePushReferenceStore().redeem(data.descriptor, 'alice'); accepted = true; } catch {}
+      try { new SqlitePushReferenceStore().acknowledge(data.descriptor, 'alice'); accepted = true; } catch {}
       process.stdout.write(JSON.stringify(accepted));
     }
   `;
@@ -113,7 +113,7 @@ describe("durable push security state", () => {
     );
     expect(pushSubscriptionRecipient("subscription", options)).toBe("alice");
   });
-  it("serializes counters and once-only redemption across independent processes", async () => {
+  it("serializes counters and idempotent acknowledgement across independent processes", async () => {
     expect(nextPushSequence("gateway", "alice", options)).toBe(1);
     const descriptor = new SqlitePushReferenceStore(options).create({
       payload: "x",
@@ -130,7 +130,10 @@ describe("durable push security state", () => {
     const redemptions = await Promise.all(
       Array.from({ length: 4 }, () => compete("redeem", descriptor)),
     );
-    expect(redemptions.filter(Boolean)).toHaveLength(1);
+    expect(redemptions.filter(Boolean)).toHaveLength(4);
+    expect(() => new SqlitePushReferenceStore(options).redeem(descriptor, "alice")).toThrow(
+      "unavailable",
+    );
   }, 30000);
   it("preserves counters and replay decisions across a database close/reopen", () => {
     expect(nextPushSequence("gateway", "alice", options)).toBe(1);
@@ -151,7 +154,7 @@ describe("durable push security state", () => {
     expect(guard.accept({ ...input, sequence: 2, nonce: "new" })).toBe(true);
     expect(guard.accept({ ...input, nonce: "reordered" })).toBe(false);
   });
-  it("binds once-only redemption to recipient, token and expiry without burning valid content", () => {
+  it("keeps reads retryable and binds acknowledgement to recipient, token and expiry", () => {
     let store = new SqlitePushReferenceStore(options);
     const descriptor = store.create({ payload: "private body", recipientId: "alice", envelope });
     closeOpenClawStateDatabase();
@@ -164,6 +167,12 @@ describe("durable push security state", () => {
       "unavailable",
     );
     expect(store.redeem(descriptor, "alice").payload).toBe("private body");
+    closeOpenClawStateDatabase();
+    expect(store.redeem(descriptor, "alice").payload).toBe("private body");
+    expect(() => store.acknowledge(descriptor, "bob")).toThrow("unavailable");
+    store.acknowledge(descriptor, "alice");
+    closeOpenClawStateDatabase();
+    store.acknowledge(descriptor, "alice");
     expect(() => store.redeem(descriptor, "alice")).toThrow("unavailable");
   });
   it("rejects expiry equality and discards failed sends", () => {

@@ -45,6 +45,10 @@ public struct PushV2Wake: Sendable {
     public let referenceJSON: String
     public let expiresAtMs: Int64
 
+    public var objectID: String? {
+        (try? JSONDecoder().decode(Reference.self, from: Data(self.referenceJSON.utf8)))?.object_id
+    }
+
     public init?(userInfo: [AnyHashable: Any], nowMs: Int64) {
         guard nowMs >= 0, nowMs <= 9_007_199_254_740_991,
               userInfo["kind"] as? String == "openclaw.pqc.wake.v2",
@@ -157,6 +161,12 @@ public enum PushV2Error: Error {
     case format, binding, expired, hash, signature, replay, capacity
 }
 
+public enum PushV2DeliveryClaim: Equatable, Sendable {
+    case ready(leaseUntilMs: Int64)
+    case completed
+    case deferred
+}
+
 public enum PushV2Verifier {
     static let maximumInteger: Int64 = 9_007_199_254_740_991
 
@@ -227,6 +237,30 @@ public enum PushV2Verifier {
         nowMs: Int64,
         replayStore: PushV2ReplayStore) throws -> String
     {
+        let payload = try self.verify(object, keys: keys, expectedRecipientID: expectedRecipientID, nowMs: nowMs)
+        try replayStore.accept(object.envelope, nowMs: nowMs)
+        return payload
+    }
+
+    /// Persist verified work with replay acceptance before any asynchronous effect.
+    public static func stageDelivery(
+        _ object: PushV2Object,
+        keys: PushV2TrustedKeys,
+        expectedRecipientID: String,
+        nowMs: Int64,
+        referenceID: String,
+        replayStore: PushV2ReplayStore) throws -> PushV2DeliveryClaim
+    {
+        _ = try self.verify(object, keys: keys, expectedRecipientID: expectedRecipientID, nowMs: nowMs)
+        return try replayStore.stageDelivery(object, referenceID: referenceID, nowMs: nowMs)
+    }
+
+    private static func verify(
+        _ object: PushV2Object,
+        keys: PushV2TrustedKeys,
+        expectedRecipientID: String,
+        nowMs: Int64) throws -> String
+    {
         let e = object.envelope
         guard object.payload.utf8.count <= 65536,
               try JSONEncoder().encode(e).count <= 16384,
@@ -252,7 +286,6 @@ public enum PushV2Verifier {
                   message: message,
                   publicKey: self.decode(keys.mldsa65PublicKeyBase64Url, count: 1952))
         else { throw PushV2Error.signature }
-        try replayStore.accept(e, nowMs: nowMs)
         return object.payload
     }
 }
@@ -266,6 +299,7 @@ public final class PushV2ReplayStore: @unchecked Sendable {
         try self.database.withImmediateTransaction {
             try self.database.ensureCanonicalTable(.pqcPushReplay)
             try self.database.ensureCanonicalTable(.pqcPushNonces)
+            try self.database.ensureCanonicalTable(.pqcPushCompletions)
         }
     }
 
@@ -276,39 +310,154 @@ public final class PushV2ReplayStore: @unchecked Sendable {
 
     func accept(_ e: PushV2Envelope, nowMs: Int64) throws {
         try self.database.withImmediateTransaction {
-            let prune = try self.database.prepare("DELETE FROM pqc_push_nonces WHERE expires_at_ms <= ?")
+            try self.acceptInTransaction(e, nowMs: nowMs)
+        }
+    }
+
+    private func acceptInTransaction(_ e: PushV2Envelope, nowMs: Int64) throws {
+        let prune = try self.database.prepare("DELETE FROM pqc_push_nonces WHERE expires_at_ms <= ?")
+        try prune.bindInt64(nowMs, at: 1)
+        _ = try prune.step()
+        let previous = try self.database.prepare(
+            "SELECT sequence FROM pqc_push_replay WHERE sender_id = ? AND recipient_id = ?")
+        try previous.bindText(e.sender_id, at: 1)
+        try previous.bindText(e.recipient_id, at: 2)
+        let existing = try previous.step() == .row
+        if existing, previous.int64(at: 0) >= e.sequence { throw PushV2Error.replay }
+        let nonce = try self.database.prepare(
+            "SELECT 1 FROM pqc_push_nonces WHERE sender_id = ? AND recipient_id = ? AND nonce = ?")
+        try nonce.bindText(e.sender_id, at: 1)
+        try nonce.bindText(e.recipient_id, at: 2)
+        try nonce.bindText(e.nonce, at: 3)
+        if try nonce.step() == .row { throw PushV2Error.replay }
+        guard try (existing || self.database.scalarInt64("SELECT COUNT(*) FROM pqc_push_replay") < 10000),
+              try self.database.scalarInt64("SELECT COUNT(*) FROM pqc_push_nonces") < 50000
+        else { throw PushV2Error.capacity }
+        let update = try self.database.prepare("""
+        INSERT INTO pqc_push_replay(sender_id, recipient_id, sequence) VALUES (?, ?, ?)
+        ON CONFLICT(sender_id, recipient_id) DO UPDATE SET sequence = excluded.sequence
+        """)
+        try update.bindText(e.sender_id, at: 1)
+        try update.bindText(e.recipient_id, at: 2)
+        try update.bindInt64(e.sequence, at: 3)
+        _ = try update.step()
+        let insert = try self.database.prepare(
+            "INSERT INTO pqc_push_nonces(sender_id, recipient_id, nonce, expires_at_ms) VALUES (?, ?, ?, ?)")
+        try insert.bindText(e.sender_id, at: 1)
+        try insert.bindText(e.recipient_id, at: 2)
+        try insert.bindText(e.nonce, at: 3)
+        try insert.bindInt64(e.created_at_ms + 330_000, at: 4)
+        _ = try insert.step()
+    }
+
+    private func transcriptHash(_ e: PushV2Envelope) throws -> String {
+        try Data(SHA256.hash(data: PushV2Verifier.signedMessage(e)))
+            .map { String(format: "%02x", $0) }.joined()
+    }
+
+    private func bindMessage(_ e: PushV2Envelope, to statement: OpenClawNativeStateSQLiteStatement) throws {
+        try statement.bindText(e.sender_id, at: 1)
+        try statement.bindText(e.recipient_id, at: 2)
+        try statement.bindText(e.nonce, at: 3)
+    }
+
+    public func retainedDelivery(referenceID: String, recipientID: String) throws -> PushV2Object? {
+        let read = try self.database.prepare("""
+        SELECT result_json FROM pqc_push_completions WHERE recipient_id = ? AND reference_id = ?
+        """)
+        try read.bindText(recipientID, at: 1)
+        try read.bindText(referenceID, at: 2)
+        guard try read.step() == .row else { return nil }
+        let json = try read.requiredText(at: 0, field: "verified push inbox")
+        guard json.utf8.count <= 100_000 else { throw PushV2Error.format }
+        return try JSONDecoder().decode(PushV2Object.self, from: Data(json.utf8))
+    }
+
+    fileprivate func stageDelivery(
+        _ object: PushV2Object,
+        referenceID: String,
+        nowMs: Int64) throws -> PushV2DeliveryClaim
+    {
+        let e = object.envelope
+        let hash = try self.transcriptHash(e)
+        let encoded = try JSONEncoder().encode(object)
+        guard UUID(uuidString: referenceID)?.uuidString.lowercased() == referenceID,
+              nowMs <= PushV2Verifier.maximumInteger - 30000,
+              e.created_at_ms <= PushV2Verifier.maximumInteger - 300_000,
+              encoded.count <= 100_000,
+              let json = String(data: encoded, encoding: .utf8)
+        else { throw PushV2Error.format }
+        let leaseUntilMs = nowMs + 30000
+        return try self.database.withImmediateTransaction {
+            let previous = try self.database.prepare("""
+            SELECT transcript_hash, state, lease_until_ms, expires_at_ms FROM pqc_push_completions
+            WHERE sender_id = ? AND recipient_id = ? AND nonce = ?
+            """)
+            try self.bindMessage(e, to: previous)
+            if try previous.step() == .row {
+                guard try previous.requiredText(at: 0, field: "push transcript hash") == hash,
+                      previous.int64(at: 3) > nowMs else { throw PushV2Error.binding }
+                let state = try previous.requiredText(at: 1, field: "push completion state")
+                if state == "completed" { return .completed }
+                guard state == "pending" else { throw PushV2Error.format }
+                if previous.int64(at: 2) > nowMs { return .deferred }
+                let claim = try self.database.prepare("""
+                UPDATE pqc_push_completions SET lease_until_ms = ?
+                WHERE sender_id = ? AND recipient_id = ? AND nonce = ?
+                """)
+                try claim.bindInt64(leaseUntilMs, at: 1)
+                try claim.bindText(e.sender_id, at: 2)
+                try claim.bindText(e.recipient_id, at: 3)
+                try claim.bindText(e.nonce, at: 4)
+                _ = try claim.step()
+                return .ready(leaseUntilMs: leaseUntilMs)
+            }
+            let prune = try self.database.prepare("DELETE FROM pqc_push_completions WHERE expires_at_ms <= ?")
             try prune.bindInt64(nowMs, at: 1)
             _ = try prune.step()
-            let previous = try self.database.prepare(
-                "SELECT sequence FROM pqc_push_replay WHERE sender_id = ? AND recipient_id = ?")
-            try previous.bindText(e.sender_id, at: 1)
-            try previous.bindText(e.recipient_id, at: 2)
-            let existing = try previous.step() == .row
-            if existing, previous.int64(at: 0) >= e.sequence { throw PushV2Error.replay }
-            let nonce = try self.database.prepare(
-                "SELECT 1 FROM pqc_push_nonces WHERE sender_id = ? AND recipient_id = ? AND nonce = ?")
-            try nonce.bindText(e.sender_id, at: 1)
-            try nonce.bindText(e.recipient_id, at: 2)
-            try nonce.bindText(e.nonce, at: 3)
-            if try nonce.step() == .row { throw PushV2Error.replay }
-            guard try (existing || self.database.scalarInt64("SELECT COUNT(*) FROM pqc_push_replay") < 10000),
-                  try self.database.scalarInt64("SELECT COUNT(*) FROM pqc_push_nonces") < 50000
+            guard try self.database.scalarInt64("SELECT COUNT(*) FROM pqc_push_completions") < 50000
             else { throw PushV2Error.capacity }
-            let update = try self.database.prepare("""
-            INSERT INTO pqc_push_replay(sender_id, recipient_id, sequence) VALUES (?, ?, ?)
-            ON CONFLICT(sender_id, recipient_id) DO UPDATE SET sequence = excluded.sequence
+            try self.acceptInTransaction(e, nowMs: nowMs)
+            let insert = try self.database.prepare("""
+            INSERT INTO pqc_push_completions(sender_id,recipient_id,nonce,transcript_hash,result_json,expires_at_ms,state,lease_until_ms,reference_id)
+            VALUES (?,?,?,?,?,?,'pending',?,?)
             """)
-            try update.bindText(e.sender_id, at: 1)
-            try update.bindText(e.recipient_id, at: 2)
-            try update.bindInt64(e.sequence, at: 3)
-            _ = try update.step()
-            let insert = try self.database.prepare(
-                "INSERT INTO pqc_push_nonces(sender_id, recipient_id, nonce, expires_at_ms) VALUES (?, ?, ?, ?)")
-            try insert.bindText(e.sender_id, at: 1)
-            try insert.bindText(e.recipient_id, at: 2)
-            try insert.bindText(e.nonce, at: 3)
-            try insert.bindInt64(e.created_at_ms + 330_000, at: 4)
+            try self.bindMessage(e, to: insert)
+            try insert.bindText(hash, at: 4)
+            try insert.bindText(json, at: 5)
+            try insert.bindInt64(e.created_at_ms + 300_000, at: 6)
+            try insert.bindInt64(leaseUntilMs, at: 7)
+            try insert.bindText(referenceID, at: 8)
             _ = try insert.step()
+            return .ready(leaseUntilMs: leaseUntilMs)
+        }
+    }
+
+    /// Complete only the lease that performed the effect; a stale callback cannot steal a newer lease.
+    public func completeDelivery(_ e: PushV2Envelope, leaseUntilMs: Int64) throws {
+        try self.updateDelivery(e, leaseUntilMs: leaseUntilMs, completed: true)
+    }
+
+    public func releaseDelivery(_ e: PushV2Envelope, leaseUntilMs: Int64) throws {
+        try self.updateDelivery(e, leaseUntilMs: leaseUntilMs, completed: false)
+    }
+
+    private func updateDelivery(_ e: PushV2Envelope, leaseUntilMs: Int64, completed: Bool) throws {
+        let hash = try self.transcriptHash(e)
+        try self.database.withImmediateTransaction {
+            let update = try self.database.prepare("""
+            UPDATE pqc_push_completions SET state = ?, lease_until_ms = 0
+            WHERE sender_id = ? AND recipient_id = ? AND nonce = ?
+              AND transcript_hash = ? AND state = 'pending' AND lease_until_ms = ?
+            """)
+            try update.bindText(completed ? "completed" : "pending", at: 1)
+            try update.bindText(e.sender_id, at: 2)
+            try update.bindText(e.recipient_id, at: 3)
+            try update.bindText(e.nonce, at: 4)
+            try update.bindText(hash, at: 5)
+            try update.bindInt64(leaseUntilMs, at: 6)
+            _ = try update.step()
+            guard self.database.changes == 1 else { throw PushV2Error.binding }
         }
     }
 }

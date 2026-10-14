@@ -26,6 +26,8 @@ export interface PushReferenceStore {
     recipientId: string,
     nowMs?: number,
   ): StoredSignedPush;
+  /** Delete only after the receiver has durably retained or completed the work. */
+  acknowledge(descriptor: PushReferenceDescriptor, recipientId: string, nowMs?: number): void;
   discard(descriptor: PushReferenceDescriptor): void;
 }
 

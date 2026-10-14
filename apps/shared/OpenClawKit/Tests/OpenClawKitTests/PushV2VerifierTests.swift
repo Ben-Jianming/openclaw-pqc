@@ -53,6 +53,22 @@ struct PushV2VerifierTests {
         #expect(PushV2Wake(userInfo: farFuture.userInfo, nowMs: 999) == nil)
     }
 
+    @Test func `provider acknowledgement flag cannot turn a wake read into deletion`() throws {
+        let original = try self.wake("00000000-0000-4000-8000-000000000001")
+        var poisoned = original.userInfo
+        var reference = try #require(poisoned["pqc_ref"] as? [String: Any])
+        reference["acknowledge"] = true
+        reference["recipient_id"] = "untrusted route"
+        poisoned["pqc_ref"] = reference
+        let sanitized = try #require(PushV2Wake(userInfo: poisoned, nowMs: 1000))
+        let readRequest = try #require(JSONSerialization.jsonObject(
+            with: Data(sanitized.referenceJSON.utf8)) as? [String: Any])
+        #expect(Set(readRequest.keys) == ["version", "object_id", "token", "expires_at_ms"])
+        #expect(readRequest["acknowledge"] == nil)
+        #expect(readRequest["recipient_id"] == nil)
+        #expect(sanitized.referenceJSON == original.referenceJSON)
+    }
+
     @Test func `cold start wake survives reopen and concurrent callbacks share capacity`() throws {
         try self.withDatabase { url in
             let first = try self.wake("00000000-0000-4000-8000-000000000001")
@@ -116,6 +132,71 @@ struct PushV2VerifierTests {
                     expectedRecipientID: "alice",
                     nowMs: f.nowMs,
                     replayStore: reopened)
+            }
+        }
+    }
+
+    @Test func `pending delivery survives reopen and a lost acknowledgement`() throws {
+        let f = try self.fixture()
+        let referenceID = "00000000-0000-4000-8000-000000000001"
+        try self.withDatabase { url in
+            do {
+                let store = try PushV2ReplayStore(databaseURL: url)
+                #expect(try PushV2Verifier.stageDelivery(
+                    f.object, keys: f.keys, expectedRecipientID: "alice", nowMs: f.nowMs,
+                    referenceID: referenceID, replayStore: store) == .ready(leaseUntilMs: f.nowMs + 30000))
+            }
+            let reopened = try PushV2ReplayStore(databaseURL: url)
+            #expect(try reopened.retainedDelivery(referenceID: referenceID, recipientID: "alice")?.payload ==
+                f.object.payload)
+            #expect(try reopened.retainedDelivery(referenceID: referenceID, recipientID: "bob") == nil)
+            #expect(try PushV2Verifier.stageDelivery(
+                f.object, keys: f.keys, expectedRecipientID: "alice", nowMs: f.nowMs + 1,
+                referenceID: referenceID, replayStore: reopened) == .deferred)
+            // A killed presenter loses its lease, not its verified inbox.
+            let retryTime = f.nowMs + 30001
+            let retryLease = retryTime + 30000
+            #expect(try PushV2Verifier.stageDelivery(
+                f.object, keys: f.keys, expectedRecipientID: "alice", nowMs: retryTime,
+                referenceID: referenceID, replayStore: reopened) == .ready(leaseUntilMs: retryLease))
+            #expect(throws: PushV2Error.self) {
+                try reopened.completeDelivery(f.object.envelope, leaseUntilMs: f.nowMs + 30000)
+            }
+            try reopened.completeDelivery(f.object.envelope, leaseUntilMs: retryLease)
+            let afterCompletion = try PushV2ReplayStore(databaseURL: url)
+            #expect(try PushV2Verifier.stageDelivery(
+                f.object, keys: f.keys, expectedRecipientID: "alice", nowMs: retryTime + 1,
+                referenceID: referenceID, replayStore: afterCompletion) == .completed)
+            var wrongKeys = f.keys
+            wrongKeys.keyIdMldsa65 = "changed-current-key"
+            #expect(throws: PushV2Error.self) {
+                try PushV2Verifier.stageDelivery(
+                    f.object, keys: wrongKeys, expectedRecipientID: "alice", nowMs: retryTime + 1,
+                    referenceID: referenceID, replayStore: afterCompletion)
+            }
+        }
+    }
+
+    @Test func `presentation failure releases the owned delivery lease`() throws {
+        let f = try self.fixture()
+        let referenceID = "00000000-0000-4000-8000-000000000001"
+        try self.withDatabase { url in
+            let store = try PushV2ReplayStore(databaseURL: url)
+            let lease = f.nowMs + 30000
+            #expect(try PushV2Verifier.stageDelivery(
+                f.object, keys: f.keys, expectedRecipientID: "alice", nowMs: f.nowMs,
+                referenceID: referenceID, replayStore: store) == .ready(leaseUntilMs: lease))
+            try store.releaseDelivery(f.object.envelope, leaseUntilMs: lease)
+            #expect(try PushV2Verifier.stageDelivery(
+                f.object, keys: f.keys, expectedRecipientID: "alice", nowMs: f.nowMs + 1,
+                referenceID: referenceID, replayStore: store) == .ready(leaseUntilMs: lease + 1))
+            #expect(throws: PushV2Error.self) {
+                try store.releaseDelivery(f.object.envelope, leaseUntilMs: lease)
+            }
+            #expect(throws: PushV2Error.self) {
+                try PushV2Verifier.stageDelivery(
+                    f.object, keys: f.keys, expectedRecipientID: "bob", nowMs: f.nowMs + 1,
+                    referenceID: referenceID, replayStore: store)
             }
         }
     }

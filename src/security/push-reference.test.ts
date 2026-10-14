@@ -4,8 +4,8 @@ import { InMemoryPushReferenceStore } from "./push-reference.test-support.js";
 
 const envelope = { version: 2 } as PushDualEnvelope;
 
-describe("one-time push reference store", () => {
-  it("redeems exactly once and deletes before returning", () => {
+describe("acknowledged push reference store", () => {
+  it("keeps a lost read response retryable and deletes only on acknowledgement", () => {
     const store = new InMemoryPushReferenceStore();
     const ref = store.create(
       { payload: "{}", envelope, recipientId: "device-a" },
@@ -13,6 +13,8 @@ describe("one-time push reference store", () => {
     );
     expect(JSON.stringify({ pqc_ref: ref }).length).toBeLessThan(256);
     expect(store.redeem(ref, "device-a", 150).payload).toBe("{}");
+    expect(store.redeem(ref, "device-a", 151).payload).toBe("{}");
+    store.acknowledge(ref, "device-a", 151);
     expect(() => store.redeem(ref, "device-a", 151)).toThrow(/unknown or already consumed/);
   });
 

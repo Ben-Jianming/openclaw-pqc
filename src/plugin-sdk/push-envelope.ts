@@ -11,3 +11,4 @@ export {
 } from "../infra/push-envelope.js";
 
 export type { PushDualEnvelope, PushReplayGuard } from "../security/push-dual-signature.js";
+export { consumePushPayloadDual } from "../infra/pqc-push-consumer.js";

@@ -13,8 +13,7 @@ const PUSH_REFERENCE_VERSION = 1 as const;
 type StoredEntry = StoredSignedPush & { tokenHash: string; expiresAtMs: number };
 
 /**
- * Bounded, one-time reference store used by push transports. Redemption deletes
- * before returning, so a second request fails even if the first consumer later errors.
+ * Bounded transport fixture matching production reads and authenticated acknowledgement.
  */
 export class InMemoryPushReferenceStore implements PushReferenceStore {
   readonly #entries = new Map<string, StoredEntry>();
@@ -80,8 +79,12 @@ export class InMemoryPushReferenceStore implements PushReferenceStore {
     if (!matchesPushReferenceToken(entry.tokenHash, descriptor.token)) {
       throw new Error("push reference token is invalid");
     }
-    this.#entries.delete(descriptor.object_id);
     return { payload: entry.payload, envelope: entry.envelope, recipientId: entry.recipientId };
+  }
+
+  acknowledge(descriptor: PushReferenceDescriptor, recipientId: string, nowMs = Date.now()): void {
+    this.redeem(descriptor, recipientId, nowMs);
+    this.#entries.delete(descriptor.object_id);
   }
 
   discard(descriptor: PushReferenceDescriptor): void {

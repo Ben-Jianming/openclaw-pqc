@@ -171,10 +171,28 @@ function openPushDatabase(): Promise<IDBDatabase> {
     });
   });
 }
-async function acceptDurably(e: PushV2Envelope): Promise<boolean> {
+type PendingPush = {
+  version: 1;
+  object_id: string;
+  token: string;
+  expires_at_ms: number;
+  inbox?: {
+    payload: string;
+    envelope: PushV2Envelope;
+    displayed?: true;
+    leaseUntil?: number;
+    leaseToken?: string;
+  };
+};
+
+async function acceptDurably(
+  e: PushV2Envelope,
+  reference: PendingPush,
+  payload: string,
+): Promise<boolean> {
   const db = await openPushDatabase();
   return new Promise((resolve, reject) => {
-    const tx = db.transaction("replay", "readwrite");
+    const tx = db.transaction(["replay", "wakes"], "readwrite");
     const store = tx.objectStore("replay");
     const key = JSON.stringify([e.sender_id, e.recipient_id]);
     let accepted = false;
@@ -196,6 +214,9 @@ async function acceptDurably(e: PushV2Envelope): Promise<boolean> {
         const commit = () => {
           nonces.push([e.nonce, e.created_at_ms + 330000]);
           store.put({ sequence: e.sequence, nonces }, key);
+          // Replay and the verified inbox share one commit. A crash before
+          // presentation leaves work to drain instead of burning a valid retry.
+          tx.objectStore("wakes").put({ ...reference, inbox: { payload, envelope: e } });
           accepted = true;
         };
         if (prior) {
@@ -235,6 +256,50 @@ async function acceptDurably(e: PushV2Envelope): Promise<boolean> {
   });
 }
 
+async function updatePendingPush(
+  reference: PendingPush,
+  change: (row: PendingPush) => PendingPush | undefined,
+): Promise<void> {
+  const db = await openPushDatabase();
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction("wakes", "readwrite");
+      const store = tx.objectStore("wakes");
+      const read = store.get(reference.object_id);
+      read.addEventListener(
+        "success",
+        () => {
+          const row = read.result as PendingPush | undefined;
+          if (
+            !row ||
+            row.token !== reference.token ||
+            row.expires_at_ms !== reference.expires_at_ms
+          ) {
+            return;
+          }
+          try {
+            const updated = change(row);
+            if (updated) {
+              store.put(updated);
+            } else {
+              store.delete(reference.object_id);
+            }
+          } catch {
+            tx.abort();
+          }
+        },
+        { once: true },
+      );
+      tx.addEventListener("complete", () => resolve(), { once: true });
+      tx.addEventListener("abort", () => reject(new Error("push inbox update failed")), {
+        once: true,
+      });
+    });
+  } finally {
+    db.close();
+  }
+}
+
 const pendingReceivers = new WeakMap<GatewayBrowserClient, Promise<void>>();
 /** Invoked only after the gateway handshake; concurrent wake signals share one drain. */
 export function receivePendingPqcPushes(client: GatewayBrowserClient): Promise<void> {
@@ -249,9 +314,9 @@ export function receivePendingPqcPushes(client: GatewayBrowserClient): Promise<v
 
 async function receivePending(client: GatewayBrowserClient): Promise<void> {
   const db = await openPushDatabase();
-  let references: Array<Record<string, unknown>>;
+  let references: PendingPush[];
   try {
-    references = await new Promise<Array<Record<string, unknown>>>((resolve, reject) => {
+    references = await new Promise<PendingPush[]>((resolve, reject) => {
       const tx = db.transaction("wakes", "readonly");
       const r = tx.objectStore("wakes").getAll();
       r.addEventListener("success", () => resolve(r.result), { once: true });
@@ -270,22 +335,28 @@ async function receivePending(client: GatewayBrowserClient): Promise<void> {
   if (keys.recipientId !== identity.deviceId) {
     throw new Error("push session identity mismatch");
   }
-  const values: Array<{ payload: string; envelope: PushV2Envelope }> = [];
+  const values: Array<{ reference: PendingPush; payload: string; envelope: PushV2Envelope }> = [];
   let rejected = false;
   for (const reference of references) {
-    // Unredeemed capabilities survive connection and quota failures until expiry.
-    let removeReference = true;
     try {
       const expiresAtMs = reference.expires_at_ms;
       if (!Number.isSafeInteger(expiresAtMs) || (expiresAtMs as number) <= Date.now()) {
+        await updatePendingPush(reference, () => undefined);
         continue;
       }
-      removeReference = false;
-      const value = (await client.request("push.pqc.redeem", reference)) as {
-        payload: string;
-        envelope: PushV2Envelope;
+      // Send only protocol fields; the trusted local inbox is never RPC input.
+      const descriptor = {
+        version: reference.version,
+        object_id: reference.object_id,
+        token: reference.token,
+        expires_at_ms: reference.expires_at_ms,
       };
-      removeReference = true; // Successful redemption has consumed the server object.
+      const value =
+        reference.inbox ??
+        ((await client.request("push.pqc.redeem", descriptor)) as {
+          payload: string;
+          envelope: PushV2Envelope;
+        });
       // Verify before ordering; a forged sequence must not control the drain.
       await verifyBrowserPush(
         value.payload,
@@ -294,25 +365,9 @@ async function receivePending(client: GatewayBrowserClient): Promise<void> {
         identity.deviceId,
         async () => true,
       );
-      values.push(value);
+      values.push({ reference, payload: value.payload, envelope: value.envelope });
     } catch {
       rejected = true;
-    } finally {
-      if (removeReference) {
-        const cleanup = await openPushDatabase();
-        try {
-          await new Promise<void>((resolve, reject) => {
-            const tx = cleanup.transaction("wakes", "readwrite");
-            tx.objectStore("wakes").delete(reference.object_id as IDBValidKey);
-            tx.addEventListener("complete", () => resolve(), { once: true });
-            tx.addEventListener("abort", () => reject(new Error("push wake cleanup failed")), {
-              once: true,
-            });
-          });
-        } finally {
-          cleanup.close();
-        }
-      }
     }
   }
   // Arrival order is relay controlled; process this authenticated batch in sequence order.
@@ -326,19 +381,84 @@ async function receivePending(client: GatewayBrowserClient): Promise<void> {
       ) {
         throw new Error("unsupported notification content");
       }
-      await verifyBrowserPush(
-        value.payload,
-        value.envelope,
-        keys,
-        identity.deviceId,
-        acceptDurably,
-      );
-      const registration = await navigator.serviceWorker.ready;
-      await registration.showNotification(payload.title, {
-        body: payload.body as string | undefined,
-        tag: "openclaw-verified-push",
-        data: { url: registration.scope, explicitUrl: false },
+      if (!value.reference.inbox) {
+        await verifyBrowserPush(value.payload, value.envelope, keys, identity.deviceId, (e) =>
+          acceptDurably(e, value.reference, value.payload),
+        );
+      }
+      let claimed = false;
+      let displayed = false;
+      const leaseToken = crypto.randomUUID();
+      await updatePendingPush(value.reference, (row) => {
+        displayed = row.inbox?.displayed === true;
+        if (!displayed && row.inbox && (row.inbox.leaseUntil ?? 0) <= Date.now()) {
+          row.inbox.leaseUntil = Date.now() + 30_000;
+          row.inbox.leaseToken = leaseToken;
+          claimed = true;
+        }
+        return row;
       });
+      if (!displayed && !claimed) {
+        continue;
+      }
+      if (!displayed) {
+        try {
+          const registration = await navigator.serviceWorker.ready;
+          if (Date.now() >= value.reference.expires_at_ms) {
+            throw new Error("expired push reference");
+          }
+          await verifyBrowserPush(
+            value.payload,
+            value.envelope,
+            keys,
+            identity.deviceId,
+            async () => true,
+          );
+          const tagInput = JSON.stringify([
+            value.envelope.sender_id,
+            identity.deviceId,
+            value.envelope.sequence,
+            value.envelope.nonce,
+          ]);
+          const tag = base64(
+            new Uint8Array(await crypto.subtle.digest("SHA-256", utf8.encode(tagInput))),
+          );
+          // Presentation is outside IndexedDB. Stable tags replace the same
+          // notification if a crash precedes its local completion marker.
+          await registration.showNotification(payload.title, {
+            body: payload.body as string | undefined,
+            tag: `openclaw-verified-push-${tag}`,
+            data: { url: registration.scope, explicitUrl: false },
+          });
+          await updatePendingPush(value.reference, (row) => {
+            if (row.inbox?.leaseToken === leaseToken) {
+              row.inbox.displayed = true;
+              row.inbox.leaseUntil = 0;
+              delete row.inbox.leaseToken;
+            } else {
+              throw new Error("push presentation lease replaced");
+            }
+            return row;
+          });
+        } catch (error) {
+          await updatePendingPush(value.reference, (row) => {
+            if (row.inbox?.leaseToken === leaseToken) {
+              row.inbox.leaseUntil = 0;
+              delete row.inbox.leaseToken;
+            }
+            return row;
+          });
+          throw error;
+        }
+      }
+      await client.request("push.pqc.redeem", {
+        version: value.reference.version,
+        object_id: value.reference.object_id,
+        token: value.reference.token,
+        expires_at_ms: value.reference.expires_at_ms,
+        acknowledge: true,
+      });
+      await updatePendingPush(value.reference, () => undefined);
     } catch {
       // A bad wake cannot prevent unrelated valid notifications from being processed.
       rejected = true;
