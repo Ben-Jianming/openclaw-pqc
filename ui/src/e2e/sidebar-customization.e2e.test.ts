@@ -373,7 +373,31 @@ describeControlUiE2e("Control UI sidebar customization mocked Gateway E2E", () =
           ),
         )
         .toEqual(["General", "Gateway Host"]);
-      await settingsSearch.fill("mcp");
+      try {
+        await settingsSearch.fill("mcp");
+      } catch (error) {
+        // This mocked-browser flow has no user data. Preserve its route and
+        // accessibility state when the search field becomes unavailable.
+        const state = await page
+          .evaluate(() => ({
+            url: location.href,
+            language: document.documentElement.lang,
+            settingsSidebars: document.querySelectorAll(".settings-sidebar").length,
+            inputs: [...document.querySelectorAll<HTMLInputElement>("input[type=search]")].map(
+              (input) => ({
+                label: input.getAttribute("aria-label"),
+                value: input.value,
+                visible: input.offsetParent !== null,
+                inert: input.closest("[inert]")?.tagName ?? null,
+                hiddenAncestor: input.closest('[aria-hidden="true"]')?.className ?? null,
+              }),
+            ),
+          }))
+          .catch((diagnosticError: unknown) => ({ diagnosticError: String(diagnosticError) }));
+        throw new Error(`Settings search became unavailable: ${JSON.stringify(state)}`, {
+          cause: error,
+        });
+      }
       await expect
         .poll(() =>
           trimmedTextContents(
