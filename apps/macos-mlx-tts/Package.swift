@@ -13,7 +13,7 @@ let package = Package(
         .executable(name: "openclaw-mlx-tts", targets: ["OpenClawMLXTTSHelper"]),
     ],
     dependencies: [
-        .package(url: "https://github.com/Blaizzy/mlx-audio-swift", exact: "0.1.3"),
+        .package(url: "https://github.com/Blaizzy/mlx-audio-swift", exact: "0.1.5"),
         .package(path: "../shared/OpenClawMLXTTSProtocol"),
     ],
     targets: [
