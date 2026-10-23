@@ -1,5 +1,6 @@
 import { verifyAsync } from "@noble/ed25519";
 import { ml_dsa65 } from "@noble/post-quantum/ml-dsa.js";
+import { assertPushKeyPolicy, type PushKeyPolicy } from "../../../src/shared/push-key-policy.ts";
 import type { GatewayBrowserClient } from "../api/gateway.ts";
 import { loadOrCreateDeviceIdentity } from "../lib/nodes/index.ts";
 
@@ -19,6 +20,8 @@ export type PushV2Envelope = {
   mldsa65_sig: string;
 };
 export type PushV2Keys = {
+  keyPolicyVersion: 1;
+  keyPolicy: { ed25519: PushKeyPolicy; mldsa65: PushKeyPolicy };
   senderId: string;
   keyIdEd25519: string;
   keyIdMldsa65: string;
@@ -98,6 +101,34 @@ export function encodeBrowserPushTranscript(e: PushV2Envelope): Uint8Array {
   return utf8.encode(`openclaw-push-v2-binary:${base64(combined)}`);
 }
 
+function validateBrowserPushKeys(keys: PushV2Keys, nowMs: number): void {
+  integer(nowMs);
+  if (!keys || keys.keyPolicyVersion !== 1) {
+    throw new Error("push key policy version unavailable");
+  }
+  text(keys.senderId);
+  text(keys.keyIdEd25519, 128);
+  text(keys.keyIdMldsa65, 128);
+  decode(keys.ed25519PublicKeyBase64Url, 32);
+  decode(keys.mldsa65PublicKeyBase64Url, 1952);
+  assertPushKeyPolicy(
+    keys.keyPolicy?.ed25519,
+    "ed25519",
+    keys.keyIdEd25519,
+    keys.senderId,
+    keys.ed25519PublicKeyBase64Url,
+    nowMs,
+  );
+  assertPushKeyPolicy(
+    keys.keyPolicy?.mldsa65,
+    "ml-dsa-65",
+    keys.keyIdMldsa65,
+    keys.senderId,
+    keys.mldsa65PublicKeyBase64Url,
+    nowMs,
+  );
+}
+
 export async function verifyBrowserPush(
   payload: string,
   e: PushV2Envelope,
@@ -106,7 +137,7 @@ export async function verifyBrowserPush(
   accept: (e: PushV2Envelope) => Promise<boolean>,
   nowMs = Date.now(),
 ): Promise<void> {
-  integer(nowMs);
+  validateBrowserPushKeys(keys, nowMs);
   if (
     typeof payload !== "string" ||
     utf8.encode(payload).length > 65536 ||
@@ -312,6 +343,8 @@ export function receivePendingPqcPushes(client: GatewayBrowserClient): Promise<v
   return drain;
 }
 
+class PushPolicyRefreshError extends Error {}
+
 async function receivePending(client: GatewayBrowserClient): Promise<void> {
   const db = await openPushDatabase();
   let references: PendingPush[];
@@ -331,10 +364,22 @@ async function receivePending(client: GatewayBrowserClient): Promise<void> {
     return;
   }
   const identity = await loadOrCreateDeviceIdentity();
-  const keys = (await client.request("push.pqc.keys", {})) as PushV2Keys & { recipientId: string };
-  if (keys.recipientId !== identity.deviceId) {
-    throw new Error("push session identity mismatch");
-  }
+  const freshKeys = async (): Promise<PushV2Keys> => {
+    try {
+      const keys = (await client.request("push.pqc.keys", {})) as PushV2Keys & {
+        recipientId: string;
+      };
+      if (keys.recipientId !== identity.deviceId) {
+        throw new Error("push session identity mismatch");
+      }
+      // Validate the whole authenticated response inside the refresh boundary.
+      // Malformed policy/key metadata must not be mistaken for a bad message.
+      validateBrowserPushKeys(keys, Date.now());
+      return keys;
+    } catch (cause) {
+      throw new PushPolicyRefreshError("Secure push key policy refresh failed.", { cause });
+    }
+  };
   const values: Array<{ reference: PendingPush; payload: string; envelope: PushV2Envelope }> = [];
   let rejected = false;
   for (const reference of references) {
@@ -357,6 +402,8 @@ async function receivePending(client: GatewayBrowserClient): Promise<void> {
           payload: string;
           envelope: PushV2Envelope;
         });
+      // Refresh per object, including inbox recovery; a batch snapshot can outlive revocation.
+      const keys = await freshKeys();
       // Verify before ordering; a forged sequence must not control the drain.
       await verifyBrowserPush(
         value.payload,
@@ -366,7 +413,12 @@ async function receivePending(client: GatewayBrowserClient): Promise<void> {
         async () => true,
       );
       values.push({ reference, payload: value.payload, envelope: value.envelope });
-    } catch {
+    } catch (error) {
+      // A policy outage is shared state, not an invalid individual wake. Do not
+      // advance replay watermarks beyond work whose policy could not be refreshed.
+      if (error instanceof PushPolicyRefreshError) {
+        throw error;
+      }
       rejected = true;
     }
   }
@@ -382,6 +434,7 @@ async function receivePending(client: GatewayBrowserClient): Promise<void> {
         throw new Error("unsupported notification content");
       }
       if (!value.reference.inbox) {
+        const keys = await freshKeys();
         await verifyBrowserPush(value.payload, value.envelope, keys, identity.deviceId, (e) =>
           acceptDurably(e, value.reference, value.payload),
         );
@@ -407,6 +460,9 @@ async function receivePending(client: GatewayBrowserClient): Promise<void> {
           if (Date.now() >= value.reference.expires_at_ms) {
             throw new Error("expired push reference");
           }
+          // Revalidate after asynchronous worker startup and before business presentation.
+          // Revocation committed after this response can still race OS notification delivery.
+          const keys = await freshKeys();
           await verifyBrowserPush(
             value.payload,
             value.envelope,
@@ -459,7 +515,10 @@ async function receivePending(client: GatewayBrowserClient): Promise<void> {
         acknowledge: true,
       });
       await updatePendingPush(value.reference, () => undefined);
-    } catch {
+    } catch (error) {
+      if (error instanceof PushPolicyRefreshError) {
+        throw error;
+      }
       // A bad wake cannot prevent unrelated valid notifications from being processed.
       rejected = true;
     }

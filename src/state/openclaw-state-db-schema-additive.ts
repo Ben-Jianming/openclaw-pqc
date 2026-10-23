@@ -15,6 +15,15 @@ import { ensureColumn } from "./openclaw-state-db-schema-helpers.js";
 
 // Additive shared-state tables are initialized by their first feature use.
 const PQC_PUSH_SCHEMA_SQL = `
+CREATE TABLE IF NOT EXISTS pqc_push_key_policies (
+  sender_id TEXT NOT NULL, algorithm TEXT NOT NULL CHECK (algorithm IN ('ed25519', 'ml-dsa-65')),
+  key_id TEXT NOT NULL, public_key_base64url TEXT NOT NULL,
+  valid_from_ms INTEGER NOT NULL CHECK (valid_from_ms >= 0),
+  valid_until_ms INTEGER NOT NULL CHECK (valid_until_ms > valid_from_ms),
+  revoked_at_ms INTEGER, revision INTEGER NOT NULL CHECK (revision > 0),
+  PRIMARY KEY (sender_id, algorithm, key_id)
+) STRICT;
+
 CREATE TABLE IF NOT EXISTS pqc_push_sequences (
   sender_id TEXT NOT NULL, recipient_id TEXT NOT NULL, sequence INTEGER NOT NULL,
   PRIMARY KEY (sender_id, recipient_id)

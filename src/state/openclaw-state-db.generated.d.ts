@@ -1035,6 +1035,17 @@ export interface PqcPushCompletions {
   transcript_hash: string;
 }
 
+export interface PqcPushKeyPolicies {
+  algorithm: string;
+  key_id: string;
+  public_key_base64url: string;
+  revision: number;
+  revoked_at_ms: number | null;
+  sender_id: string;
+  valid_from_ms: number;
+  valid_until_ms: number;
+}
+
 export interface PqcPushNonces {
   expires_at_ms: number;
   nonce: string;
@@ -1635,6 +1646,7 @@ export interface DB {
   pqc_push_attempts: PqcPushAttempts;
   pqc_push_bindings: PqcPushBindings;
   pqc_push_completions: PqcPushCompletions;
+  pqc_push_key_policies: PqcPushKeyPolicies;
   pqc_push_nonces: PqcPushNonces;
   pqc_push_objects: PqcPushObjects;
   pqc_push_replay: PqcPushReplay;

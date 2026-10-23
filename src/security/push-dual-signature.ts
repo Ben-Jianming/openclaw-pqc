@@ -351,7 +351,8 @@ function resolveTrustedKey(params: {
   if (key.validFromMs !== undefined && params.nowMs < key.validFromMs) {
     throw new PushDualSignatureError("trusted key is not yet valid");
   }
-  if (key.validUntilMs !== undefined && params.nowMs > key.validUntilMs) {
+  // Both receivers use [validFrom, validUntil); the expiry instant is not valid.
+  if (key.validUntilMs !== undefined && params.nowMs >= key.validUntilMs) {
     throw new PushDualSignatureError("trusted key has expired");
   }
   if (key.revokedAtMs !== undefined && params.nowMs >= key.revokedAtMs) {

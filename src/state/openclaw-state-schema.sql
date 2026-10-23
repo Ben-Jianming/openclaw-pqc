@@ -2170,3 +2170,12 @@ CREATE TABLE IF NOT EXISTS pqc_push_acknowledgements (
   object_id TEXT NOT NULL PRIMARY KEY, token_hash TEXT NOT NULL,
   recipient_id TEXT NOT NULL, expires_at_ms INTEGER NOT NULL
 ) STRICT;
+
+CREATE TABLE IF NOT EXISTS pqc_push_key_policies (
+  sender_id TEXT NOT NULL, algorithm TEXT NOT NULL CHECK (algorithm IN ('ed25519', 'ml-dsa-65')),
+  key_id TEXT NOT NULL, public_key_base64url TEXT NOT NULL,
+  valid_from_ms INTEGER NOT NULL CHECK (valid_from_ms >= 0),
+  valid_until_ms INTEGER NOT NULL CHECK (valid_until_ms > valid_from_ms),
+  revoked_at_ms INTEGER, revision INTEGER NOT NULL CHECK (revision > 0),
+  PRIMARY KEY (sender_id, algorithm, key_id)
+) STRICT;

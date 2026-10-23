@@ -16,10 +16,12 @@ import {
   signPushPayloadDual,
   verifyPushPayloadDualStrict,
 } from "../security/push-dual-signature.js";
-import { loadOrCreateProcessDeviceIdentity } from "./device-identity.js";
+import { assertPushKeyPolicy, type PushKeyPolicy } from "../shared/push-key-policy.js";
+import { loadDeviceIdentityIfPresent } from "./device-identity.js";
 import { decodeMlDsa65PublicKey, decodeMlDsa65SecretKey } from "./mldsa65-key-storage.js";
 import { nextPushSequence, SqlitePushReplayGuard } from "./pqc-push-state.js";
-import { getOrCreatePushSigningKey } from "./push-signing-key.js";
+import { readPushKeyPolicy } from "./push-key-policy-store.js";
+import { getExistingPushSigningKey } from "./push-signing-key.js";
 
 const ENVELOPE_KEY_ID_MLDSA65 = "primary";
 
@@ -46,6 +48,8 @@ export interface SignPushEnvelopeResult {
 }
 
 export interface PushEnvelopeVerificationKeys {
+  keyPolicyVersion: 1;
+  keyPolicy: { ed25519: PushKeyPolicy; mldsa65: PushKeyPolicy };
   senderId: string;
   ed25519PublicKeyBase64Url: string;
   mldsa65PublicKeyBase64Url: string;
@@ -101,10 +105,34 @@ export function signPushEnvelope(options: SignPushEnvelopeOptions): SignPushEnve
   if (typeof options.payload !== "string") {
     throw new Error("signPushEnvelope: payload must be a UTF-8 string");
   }
-  const pushKey = getOrCreatePushSigningKey(options.env);
-  const identity = loadOrCreateProcessDeviceIdentity({ env: options.env });
+  const keys = getPushEnvelopeVerificationKeys(options.env);
+  const nowMs = Date.now();
+  assertPushKeyPolicy(
+    keys.keyPolicy.ed25519,
+    "ed25519",
+    keys.keyIdEd25519,
+    keys.senderId,
+    keys.ed25519PublicKeyBase64Url,
+    nowMs,
+  );
+  assertPushKeyPolicy(
+    keys.keyPolicy.mldsa65,
+    "ml-dsa-65",
+    keys.keyIdMldsa65,
+    keys.senderId,
+    keys.mldsa65PublicKeyBase64Url,
+    nowMs,
+  );
+  const pushKey = getExistingPushSigningKey(options.env);
+  const identity = loadDeviceIdentityIfPresent({ env: options.env });
+  if (pushKey.keyId !== keys.keyIdEd25519 || !identity || identity.deviceId !== keys.senderId) {
+    throw new Error("push signing identity unavailable or changed");
+  }
   const mldsaSecretRaw = decodeMlDsa65SecretKey(identity.privateKeyPem);
   const keyIdMldsa65 = options.keyIdMldsa65 ?? ENVELOPE_KEY_ID_MLDSA65;
+  if (keyIdMldsa65 !== keys.keyIdMldsa65) {
+    throw new Error("push signing key is not enrolled");
+  }
   const recipientId = options.recipientId ?? identity.deviceId;
 
   const signed = signPushPayloadDual({
@@ -139,9 +167,25 @@ export function signPushEnvelope(options: SignPushEnvelopeOptions): SignPushEnve
 export function getPushEnvelopeVerificationKeys(
   env: NodeJS.ProcessEnv = process.env,
 ): PushEnvelopeVerificationKeys {
-  const pushKey = getOrCreatePushSigningKey(env);
-  const identity = loadOrCreateProcessDeviceIdentity({ env });
+  const pushKey = getExistingPushSigningKey(env);
+  const identity = loadDeviceIdentityIfPresent({ env });
+  if (!identity) {
+    throw new Error("push device identity missing; enroll existing keys before use");
+  }
+  const edPublic = Buffer.from(pushKey.publicKeyRaw).toString("base64url");
+  const mlPublic = Buffer.from(decodeMlDsa65PublicKey(identity.publicKeyPem)).toString("base64url");
   return {
+    keyPolicyVersion: 1,
+    keyPolicy: {
+      ed25519: readPushKeyPolicy(identity.deviceId, "ed25519", pushKey.keyId, edPublic, { env }),
+      mldsa65: readPushKeyPolicy(
+        identity.deviceId,
+        "ml-dsa-65",
+        ENVELOPE_KEY_ID_MLDSA65,
+        mlPublic,
+        { env },
+      ),
+    },
     senderId: identity.deviceId,
     ed25519PublicKeyBase64Url: Buffer.from(pushKey.publicKeyRaw).toString("base64url"),
     mldsa65PublicKeyBase64Url: Buffer.from(decodeMlDsa65PublicKey(identity.publicKeyPem)).toString(
@@ -162,6 +206,26 @@ export function verifySignedPushEnvelope(options: VerifySignedPushEnvelopeOption
     throw new Error("push envelope ML-DSA-65 key id does not match the pinned key");
   }
   const trustedKeys = options.trustedKeys;
+  const nowMs = options.nowMs ?? Date.now();
+  if (trustedKeys.keyPolicyVersion !== 1) {
+    throw new Error("push key policy version unavailable");
+  }
+  assertPushKeyPolicy(
+    trustedKeys.keyPolicy?.ed25519,
+    "ed25519",
+    trustedKeys.keyIdEd25519,
+    trustedKeys.senderId,
+    trustedKeys.ed25519PublicKeyBase64Url,
+    nowMs,
+  );
+  assertPushKeyPolicy(
+    trustedKeys.keyPolicy?.mldsa65,
+    "ml-dsa-65",
+    trustedKeys.keyIdMldsa65,
+    trustedKeys.senderId,
+    trustedKeys.mldsa65PublicKeyBase64Url,
+    nowMs,
+  );
   verifyPushPayloadDualStrict({
     payload: options.payload,
     envelope,

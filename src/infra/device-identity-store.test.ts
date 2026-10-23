@@ -9,7 +9,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { closeOpenClawStateDatabaseForTest } from "../state/openclaw-state-db.js";
-import { withTempDir } from "../test-utils/temp-dir.js";
+import { withTempDir as withBaseTempDir } from "../test-utils/temp-dir.js";
 import {
   generateStoredDeviceIdentity,
   insertStoredDeviceIdentityIfAbsent,
@@ -31,6 +31,17 @@ import {
   signMlDsa65Payload,
   verifyMlDsa65Signature,
 } from "./mldsa65-key-storage.js";
+
+// Windows cannot remove SQLite files before their owning connection closes.
+async function withTempDir<T>(prefix: string, run: (directory: string) => Promise<T>): Promise<T> {
+  return withBaseTempDir(prefix, async (directory) => {
+    try {
+      return await run(directory);
+    } finally {
+      closeOpenClawStateDatabaseForTest();
+    }
+  });
+}
 
 afterEach(() => {
   closeOpenClawStateDatabaseForTest();

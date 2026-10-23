@@ -97,6 +97,19 @@ function writeNewKey(filePath: string, secretRaw: Uint8Array): void {
   writePrivateKeyFile(filePath, secretRaw);
 }
 
+/** Read existing material for enrollment/runtime without silently creating a new identity. */
+export function getExistingPushSigningKey(env: NodeJS.ProcessEnv = process.env): PushSigningKey {
+  const secretRaw = readExistingKey(resolvePushSigningKeyPath(env));
+  if (!secretRaw) {
+    throw new Error("push signing key missing; provision it explicitly before policy enrollment");
+  }
+  return {
+    keyId: keyIdFromSecret(secretRaw),
+    secretKeyRaw: secretRaw,
+    publicKeyRaw: publicKeyRawFromSecretRaw(secretRaw),
+  };
+}
+
 /**
  * Get or create the Ed25519 push-signing key.
  *

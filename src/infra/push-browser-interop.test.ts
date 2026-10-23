@@ -14,6 +14,42 @@ import {
   InMemoryPushReplayGuard,
 } from "../security/push-dual-signature.js";
 
+function withPolicies<
+  T extends {
+    senderId: string;
+    keyIdEd25519: string;
+    keyIdMldsa65: string;
+    ed25519PublicKeyBase64Url: string;
+    mldsa65PublicKeyBase64Url: string;
+  },
+>(keys: T, nowMs: number) {
+  return {
+    ...keys,
+    keyPolicyVersion: 1 as const,
+    keyPolicy: {
+      ed25519: {
+        algorithm: "ed25519" as const,
+        keyId: keys.keyIdEd25519,
+        senderId: keys.senderId,
+        publicKeyBase64Url: keys.ed25519PublicKeyBase64Url,
+        status: "active" as const,
+        validFromMs: nowMs - 1000,
+        validUntilMs: nowMs + 600000,
+        revision: 1,
+      },
+      mldsa65: {
+        algorithm: "ml-dsa-65" as const,
+        keyId: keys.keyIdMldsa65,
+        senderId: keys.senderId,
+        publicKeyBase64Url: keys.mldsa65PublicKeyBase64Url,
+        status: "active" as const,
+        validFromMs: nowMs - 1000,
+        validUntilMs: nowMs + 600000,
+        revision: 1,
+      },
+    },
+  };
+}
 describe("server/browser V2 interoperability", () => {
   it("accepts the same public-only fixed vector used by Swift", async () => {
     const fixture = JSON.parse(
@@ -25,18 +61,28 @@ describe("server/browser V2 interoperability", () => {
       signedMessage,
     );
     await expect(
-      verifyBrowserPush(object.payload, object.envelope, keys, "alice", async () => true, nowMs),
+      verifyBrowserPush(
+        object.payload,
+        object.envelope,
+        withPolicies(keys, nowMs),
+        "alice",
+        async () => true,
+        nowMs,
+      ),
     ).resolves.toBeUndefined();
   });
   const secret = randomBytes(32);
   const ml = ml_dsa65.keygen();
-  const keys = {
-    senderId: "gateway",
-    keyIdEd25519: "ed",
-    keyIdMldsa65: "ml",
-    ed25519PublicKeyBase64Url: Buffer.from(ed25519.getPublicKey(secret)).toString("base64url"),
-    mldsa65PublicKeyBase64Url: Buffer.from(ml.publicKey).toString("base64url"),
-  };
+  const keys = withPolicies(
+    {
+      senderId: "gateway",
+      keyIdEd25519: "ed",
+      keyIdMldsa65: "ml",
+      ed25519PublicKeyBase64Url: Buffer.from(ed25519.getPublicKey(secret)).toString("base64url"),
+      mldsa65PublicKeyBase64Url: Buffer.from(ml.publicKey).toString("base64url"),
+    },
+    Date.now(),
+  );
   function signed() {
     return signPushPayloadDual({
       payload: '{"title":"Verified title","body":"private body"}',
@@ -112,7 +158,7 @@ describe("server/browser V2 interoperability", () => {
     );
     await expect(
       verifyBrowserPush(s.payload, s.envelope, { ...keys, senderId: "other" }, "alice", accept),
-    ).rejects.toThrow("identity");
+    ).rejects.toThrow(/identity|policy/);
     await expect(
       verifyBrowserPush(
         s.payload,

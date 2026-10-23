@@ -56,12 +56,17 @@ beforeEach(async () => {
   const pemPriv = encodeMlDsa65SecretKey(kp.secretKey);
   const pemPub = encodeMlDsa65PublicKey(kp.publicKey);
   vi.doMock("./device-identity.js", () => ({
-    loadOrCreateProcessDeviceIdentity: () => ({
+    loadDeviceIdentityIfPresent: () => ({
       deviceId: "primary",
       publicKeyPem: pemPub,
       privateKeyPem: pemPriv,
     }),
   }));
+  const { getOrCreatePushSigningKey } = await import("./push-signing-key.js");
+  getOrCreatePushSigningKey();
+  const { enrollExistingPushKeys } = await import("./push-key-policy-store.js");
+  const nowMs = Date.now();
+  enrollExistingPushKeys({ validFromMs: nowMs - 1000, validUntilMs: nowMs + 600000 });
 });
 
 afterEach(async () => {
@@ -115,10 +120,11 @@ describe("push-envelope M11 step 2 — signPushEnvelope", () => {
     expect(b.envelope.nonce).not.toBe(a.envelope.nonce);
   });
 
-  it("accepts custom keyIdMldsa65 override", async () => {
+  it("refuses a custom key id that is not enrolled", async () => {
     const { signPushEnvelope } = await import("./push-envelope.js");
-    const result = signPushEnvelope({ payload: "x", keyIdMldsa65: "custom-key" });
-    expect(result.envelope.key_id_mldsa65).toBe("custom-key");
+    expect(() => signPushEnvelope({ payload: "x", keyIdMldsa65: "custom-key" })).toThrow(
+      "not enrolled",
+    );
   });
 
   it("rejects non-string payload", async () => {
@@ -184,6 +190,8 @@ describe("push-envelope M11 step 2 — trySignPushEnvelope", () => {
 
   it("returns null and emits pqcLog.warn with status=fail on error", async () => {
     // Force signPushPayloadDual to throw by mocking it
+    // Close the original module's SQLite handles before replacing its module registry.
+    (await import("../state/openclaw-state-db.js")).closeOpenClawStateDatabase();
     vi.resetModules();
     vi.doMock("../security/push-dual-signature.js", () => ({
       signPushPayloadDual: () => {

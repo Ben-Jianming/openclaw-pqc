@@ -350,7 +350,9 @@
     "scripts/postinstall-bundled-plugins.mjs",
     "scripts/windows-cmd-helpers.mjs",
     "!dist/plugin-sdk/test-state.js",
-    "!dist/plugin-sdk/test-state.d.ts"
+    "!dist/plugin-sdk/test-state.d.ts",
+    "INSTALL.md",
+    "INSTALL.zh-CN.md"
   ],
   "type": "module",
   "main": "dist/index.js",

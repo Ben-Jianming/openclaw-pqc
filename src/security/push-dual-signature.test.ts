@@ -200,6 +200,36 @@ describe("push dual-signature protocol v2", () => {
     }
   });
 
+  it.each(["ed25519", "ml-dsa-65"] as const)(
+    "uses inclusive activation and exclusive expiry for %s without consuming replay state",
+    (algorithm) => {
+      const replayGuard = new InMemoryPushReplayGuard();
+      const policyRegistry = (
+        validFromMs: number,
+        validUntilMs: number,
+      ): PushTrustedKeyRegistry => ({
+        resolve: (requested, keyId) => {
+          const key = registry.resolve(requested, keyId);
+          return key && requested === algorithm ? { ...key, validFromMs, validUntilMs } : key;
+        },
+      });
+      const verify = (validFromMs: number, validUntilMs: number) =>
+        verifyPushPayloadDualStrict({
+          payload,
+          envelope,
+          nowMs: now,
+          expectedRecipientId: "device-b",
+          replayGuard,
+          registry: policyRegistry(validFromMs, validUntilMs),
+        });
+      expect(() => verify(now + 1, now + 1000)).toThrow(/not yet valid/);
+      expect(() => verify(now - 1000, now)).toThrow(/expired/);
+      expect(() => verify(now - 1000, now - 1)).toThrow(/expired/);
+      expect(verify(now, now + 1)).toBe(true);
+      expect(() => verify(now, now + 1)).toThrow(/replayed/);
+    },
+  );
+
   it("rejects stale envelopes and replayed sequence/nonce pairs", () => {
     expect(() =>
       verifyPushPayloadDual({ payload, envelope, registry, nowMs: now + 301_000 }),
