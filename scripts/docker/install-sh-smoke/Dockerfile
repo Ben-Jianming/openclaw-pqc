@@ -1,6 +1,9 @@
 # syntax=docker/dockerfile:1.7
 
-FROM node:24-bookworm-slim@sha256:6f7b03f7c2c8e2e784dcf9295400527b9b1270fd37b7e9a7285cf83b6951452d
+# The freshness control installs upstream releases with an enforced Node minimum.
+# Use the upstream smoke image's supported runtime so npm policy is tested
+# instead of failing in preinstall before the package can be installed.
+FROM node:24.22.1-trixie-slim@sha256:43b9ba1142b8dcf33fa8f922ca1be85714adc444e0586c7cf7726daaeabc1bea
 
 # Smoke images are pinned and short-lived, so skip distro upgrades here and
 # spend the time budget on installer coverage instead.
