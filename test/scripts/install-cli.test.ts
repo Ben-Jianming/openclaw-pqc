@@ -42,8 +42,8 @@ describe("install-cli.sh", () => {
   const script = readFileSync(SCRIPT_PATH, "utf8");
 
   it("defaults to a Node release accepted by the current npm package", () => {
-    expect(script).toContain('DEFAULT_NODE_VERSION="24.16.0"');
-    expect(script).toContain("Node version (default: 24.16.0;");
+    expect(script).toContain('DEFAULT_NODE_VERSION="24.22.1"');
+    expect(script).toContain("Node version (default: 24.22.1;");
   });
 
   it("bounds stalled curl downloads and propagates timeout failures", () => {
@@ -441,8 +441,8 @@ describe("install-cli.sh", () => {
       expect(result.status).toBe(0);
       expect(result.stdout).not.toContain("Installing Node via apk");
       expect(() => readFileSync(apkLog, "utf8")).toThrow();
-      const nodeLink = join(prefix, "tools", "node-v24.16.0", "bin", "node");
-      const npmLink = join(prefix, "tools", "node-v24.16.0", "bin", "npm");
+      const nodeLink = join(prefix, "tools", "node-v24.22.1", "bin", "node");
+      const npmLink = join(prefix, "tools", "node-v24.22.1", "bin", "npm");
       expect(lstatSync(nodeLink).isSymbolicLink()).toBe(true);
       expect(readlinkSync(nodeLink)).toBe(fakeNode);
       expect(readlinkSync(npmLink)).toBe(fakeNpm);
@@ -708,8 +708,8 @@ describe("install-cli.sh", () => {
       );
 
       expect(result.status).toBe(0);
-      const nodeLink = join(prefix, "tools", "node-v24.16.0", "bin", "node");
-      const npmLink = join(prefix, "tools", "node-v24.16.0", "bin", "npm");
+      const nodeLink = join(prefix, "tools", "node-v24.22.1", "bin", "node");
+      const npmLink = join(prefix, "tools", "node-v24.22.1", "bin", "npm");
       expect(readFileSync(badNpmLog, "utf8")).toBe("--version\n");
       expect(readFileSync(goodNpmLog, "utf8")).toBe("--version\n");
       expect(readFileSync(goodNodeLog, "utf8")).toContain("npm --version");
@@ -1191,7 +1191,7 @@ describe("install-cli.sh", () => {
     const tmp = mkdtempSync(join(tmpdir(), "openclaw-install-cli-freshness-"));
     const prefix = join(tmp, "prefix");
     const home = join(tmp, "home");
-    const nodeBin = join(prefix, "tools/node-v24.16.0/bin");
+    const nodeBin = join(prefix, "tools/node-v24.22.1/bin");
     const argsLog = join(tmp, "npm-args.log");
     mkdirSync(nodeBin, { recursive: true });
     mkdirSync(home, { recursive: true });
@@ -1227,7 +1227,7 @@ describe("install-cli.sh", () => {
     const prefix = join(tmp, "prefix");
     const home = join(tmp, "home");
     const project = join(tmp, "project");
-    const nodeBin = join(prefix, "tools/node-v24.16.0/bin");
+    const nodeBin = join(prefix, "tools/node-v24.22.1/bin");
     const argsLog = join(tmp, "npm-args.log");
     mkdirSync(nodeBin, { recursive: true });
     mkdirSync(home, { recursive: true });
