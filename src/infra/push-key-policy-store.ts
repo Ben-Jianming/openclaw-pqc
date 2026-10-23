@@ -3,6 +3,7 @@ import type { PushKeyPolicy } from "../shared/push-key-policy.js";
 import type { OpenClawStateDatabaseOptions } from "../state/openclaw-state-db-contract.js";
 import { withOpenClawStateDatabaseReadOnly } from "../state/openclaw-state-db-readonly.js";
 import { ensurePqcPushStateSchema } from "../state/openclaw-state-db-schema-additive.js";
+import { tableExists } from "../state/openclaw-state-db-schema-helpers.js";
 import type { DB } from "../state/openclaw-state-db.generated.js";
 import {
   openOpenClawStateDatabase,
@@ -37,11 +38,7 @@ export function hasStoredPushKeyPolicies(options: OpenClawStateDatabaseOptions =
     return false;
   }
   return withOpenClawStateDatabaseReadOnly(({ db }) => {
-    if (
-      !db
-        .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?")
-        .get("pqc_push_key_policies")
-    ) {
+    if (!tableExists(db, "pqc_push_key_policies")) {
       return false;
     }
     return Boolean(
@@ -199,11 +196,7 @@ export function readPushKeyPolicy(
 ): PushKeyPolicy {
   // Diagnostics and recipient reads must not create tables or silently enroll keys.
   return withOpenClawStateDatabaseReadOnly(({ db }) => {
-    if (
-      !db
-        .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?")
-        .get("pqc_push_key_policies")
-    ) {
+    if (!tableExists(db, "pqc_push_key_policies")) {
       throw new PushKeyEnrollmentRequiredError();
     }
     const sql = getNodeSqliteKysely<DB>(db);

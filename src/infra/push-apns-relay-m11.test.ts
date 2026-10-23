@@ -45,22 +45,16 @@ beforeEach(async () => {
     },
   }));
 
-  // Mock device-identity so the real trySignPushEnvelope can succeed
-  const { generateMlDsa65Keypair, encodeMlDsa65PublicKey, encodeMlDsa65SecretKey } =
-    await import("./mldsa65-key-storage.js");
-  const kp = generateMlDsa65Keypair();
-  const pemPriv = encodeMlDsa65SecretKey(kp.secretKey);
-  const pemPub = encodeMlDsa65PublicKey(kp.publicKey);
-  vi.doMock("./device-identity.js", () => ({
-    loadOrCreateProcessDeviceIdentity: () => ({
-      deviceId: "primary",
-      publicKeyPem: pemPub,
-      privateKeyPem: pemPriv,
-    }),
-  }));
+  // Exercise real enrolled keys in this test's isolated profile.
+  const { initializePushKeySetup } = await import("./push-key-setup.js");
+  const nowMs = Date.now();
+  initializePushKeySetup({ validFromMs: nowMs - 1000, validUntilMs: nowMs + 600000 });
+  pqcLogCalls = [];
 });
 
-afterEach(() => {
+afterEach(async () => {
+  const { closeOpenClawStateDatabase } = await import("../state/openclaw-state-db.js");
+  closeOpenClawStateDatabase();
   if (savedEnv.OPENCLAW_PUSH_SIGNING_KEY_FILE === undefined) {
     delete process.env.OPENCLAW_PUSH_SIGNING_KEY_FILE;
   } else {
@@ -73,7 +67,6 @@ afterEach(() => {
   }
   rmSync(tmpDir, { recursive: true, force: true });
   vi.doUnmock("../logging/pqc-log.js");
-  vi.doUnmock("./device-identity.js");
   vi.resetModules();
 });
 
@@ -100,12 +93,13 @@ describe("push-apns-relay-m11 step 5 — buildApnsRelayM11Audit", () => {
     expect(relayCall!.payload.status).toBe("ok");
   });
 
-  it("accepts custom deviceKeyId", async () => {
+  it("refuses an unenrolled custom deviceKeyId without a success audit", async () => {
     const { buildApnsRelayM11Audit } = await import("./push-apns-relay-m11.js");
     const result = buildApnsRelayM11Audit("test", "my-custom-key");
-    expect(result.keyIdMldsa65).toBe("my-custom-key");
-    const infoCall = pqcLogCalls.find((c) => c.level === "info");
-    expect(infoCall!.payload.identityKey).toBe("my-custom-key");
+    expect(result.signed).toBe(false);
+    expect(result.keyIdMldsa65).toBeNull();
+    expect(result.envelopeBytes).toBeNull();
+    expect(pqcLogCalls.filter((c) => c.level === "info")).toHaveLength(0);
   });
 
   it("returns signed=false on signing failure (no info event from this fn)", async () => {

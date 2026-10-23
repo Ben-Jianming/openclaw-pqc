@@ -12,7 +12,7 @@ import {
 } from "./push-key-policy-store.js";
 import { getOrCreatePushSigningKey, resolvePushSigningKeyPath } from "./push-signing-key.js";
 
-export type PushKeySetupStatus = {
+type PushKeySetupStatus = {
   ready: boolean;
   state: "uninitialized" | "incomplete" | "unenrolled" | "ready" | "unavailable";
   senderId?: string;

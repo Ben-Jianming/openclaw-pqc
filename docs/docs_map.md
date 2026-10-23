@@ -9452,6 +9452,8 @@ Do not edit it by hand; run `pnpm docs:map:gen`.
 - Route: /security/pqc-production-v2
 - Headings:
   - H1: PQC production acceptance
+  - H2: Candidate key lifecycle policy
+  - H3: First installation and existing-key enrollment
   - H2: Implementation and release status
   - H2: Trust and capability boundaries
   - H2: Push V2 signed envelope

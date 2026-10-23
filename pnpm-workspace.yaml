@@ -110,7 +110,7 @@ overrides:
   "source-map-js@1.2.1": 1.2.2
   "simple-git@3.36.0": 4.0.2
   "undici@7.29.0": 7.29.1
-  "@modelcontextprotocol/sdk@1.29.0": 1.31.0
+  "@modelcontextprotocol/sdk@1.29.0": 1.32.0
 
 allowBuilds:
   "@openclaw/fs-safe": true
