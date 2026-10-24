@@ -25,7 +25,8 @@ const FeishuGroupPolicySchema = z.union([
 ]);
 const FeishuDomainSchema = z.union([
   z.enum(["feishu", "lark"]),
-  z.string().url().startsWith("https://"),
+  // Keep URI validation last so JSON Schema retains both format and prefix checks.
+  z.string().startsWith("https://").url(),
 ]);
 const FeishuConnectionModeSchema = z.enum(["websocket", "webhook"]);
 const TtsOverrideSchema = z

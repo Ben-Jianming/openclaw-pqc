@@ -143,7 +143,8 @@ const defaultPublicDeprecatedExportsByEntrypointBudget = Object.freeze({
   "provider-auth": 19,
   "provider-model-shared": 28,
   "telegram-account": 3,
-  zod: 282,
+  // +21: exports added by Zod 4.6.6 through the existing deprecated facade.
+  zod: 303,
 });
 
 export function readPluginSdkSurfaceBudgets(env = process.env) {
@@ -197,7 +198,8 @@ export function readPluginSdkSurfaceBudgets(env = process.env) {
       // +6: shared experimental context-bound PQC message contract.
       // +2: durable push replay factory and receiver guard contract.
       // push-envelope adds the transactional completion consumer.
-      4862,
+      // +21: exports added by the approved Zod 4.6.6 dependency update.
+      4883,
       env,
     ),
     publicFunctionExports: readPluginSdkSurfaceBudgetEnv(
@@ -230,7 +232,8 @@ export function readPluginSdkSurfaceBudgets(env = process.env) {
       // +5: canonical PQC message codecs and key decoders.
       // +1: durable push replay factory.
       // Same single callable addition; further growth remains gated.
-      2952,
+      // +14: callable exports added by Zod 4.6.6; further growth remains gated.
+      2966,
       env,
     ),
     publicDeprecatedExports: readPluginSdkSurfaceBudgetEnv(
@@ -240,7 +243,8 @@ export function readPluginSdkSurfaceBudgets(env = process.env) {
       // +10: named media legacy projection deprecations across public compatibility barrels.
       // +2: channel prompt-context type and metadata builder compatibility aliases.
       // +1: flushLogger projected through the deprecated text-runtime barrel.
-      1729,
+      // +21: the deprecated Zod SDK facade reexports the updated dependency.
+      1750,
       env,
     ),
     publicWildcardReexports: readPluginSdkSurfaceBudgetEnv(

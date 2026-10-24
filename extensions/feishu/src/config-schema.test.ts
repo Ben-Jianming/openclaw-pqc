@@ -1,6 +1,35 @@
 // Feishu tests cover config schema plugin behavior.
+import { validateJsonSchemaValue } from "openclaw/plugin-sdk/json-schema-runtime";
 import { describe, expect, it } from "vitest";
 import { FeishuChannelConfigSchema, FeishuConfigSchema } from "./config-schema.js";
+
+describe("Feishu domain validation parity", () => {
+  const cases = [
+    ["feishu", true],
+    ["lark", true],
+    ["https://open.feishu.cn", true],
+    ["https://example.com/api", true],
+    ["http://open.feishu.cn", false],
+    ["https://", false],
+    ["https://not a url", false],
+    ["javascript:alert(1)", false],
+  ] as const;
+
+  describe.each(["root", "account"] as const)("%s configuration", (scope) => {
+    it.each(cases)("validates %s consistently at runtime and in JSON Schema", (domain, valid) => {
+      const value = scope === "root" ? { domain } : { accounts: { main: { domain } } };
+      expect(FeishuConfigSchema.safeParse(value).success).toBe(valid);
+      expect(
+        validateJsonSchemaValue({
+          schema: FeishuChannelConfigSchema.schema,
+          cacheKey: "feishu-domain-validation-parity",
+          cache: false,
+          value,
+        }).ok,
+      ).toBe(valid);
+    });
+  });
+});
 
 // The NEGATIVE webhook fixtures below spread these bases and add
 // verificationToken separately so the GHSA-G353-MGV3-8PCJ opengrep pattern —
