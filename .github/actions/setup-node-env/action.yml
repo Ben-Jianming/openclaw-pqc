@@ -100,7 +100,7 @@ runs:
       env:
         RUNNER_ENVIRONMENT: ${{ runner.environment }}
         RUNNER_OS: ${{ runner.os }}
-      run: node "$GITHUB_ACTION_PATH/prepare-hosted-linux-disk.mjs"
+      run: node "$GITHUB_ACTION_PATH/prepare-hosted-linux-disk.mts"
 
     - name: Setup pnpm
       id: setup-pnpm

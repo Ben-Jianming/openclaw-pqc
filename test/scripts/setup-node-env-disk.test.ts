@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { prepareHostedLinuxDisk } from "../../.github/actions/setup-node-env/prepare-hosted-linux-disk.mjs";
+import { prepareHostedLinuxDisk } from "../../.github/actions/setup-node-env/prepare-hosted-linux-disk.mts";
 
 const hostedEnv = { RUNNER_ENVIRONMENT: "github-hosted", RUNNER_OS: "Linux" };
 

@@ -3,12 +3,23 @@ import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+type DiskPreparationOptions = {
+  env?: NodeJS.ProcessEnv;
+  platform?: string;
+  isContainer?: boolean;
+  run?: (
+    command: string,
+    args: string[],
+    options: { stdio: "inherit" },
+  ) => { status: number | null; error?: Error };
+};
+
 export function prepareHostedLinuxDisk({
   env = process.env,
   platform = process.platform,
   isContainer = existsSync("/.dockerenv"),
   run = spawnSync,
-} = {}) {
+}: DiskPreparationOptions = {}): boolean {
   // Never reclaim software on operator-owned machines or inside job containers.
   if (
     env.RUNNER_ENVIRONMENT !== "github-hosted" ||
@@ -19,7 +30,7 @@ export function prepareHostedLinuxDisk({
     return false;
   }
 
-  function checked(command, args) {
+  function checked(command: string, args: string[]) {
     const result = run(command, args, { stdio: "inherit" });
     if (result.error || result.status !== 0) {
       throw new Error(`Hosted runner disk preparation failed: ${command}`, {
