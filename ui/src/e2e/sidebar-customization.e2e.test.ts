@@ -373,31 +373,7 @@ describeControlUiE2e("Control UI sidebar customization mocked Gateway E2E", () =
           ),
         )
         .toEqual(["General", "Gateway Host"]);
-      try {
-        await settingsSearch.fill("mcp");
-      } catch (error) {
-        // This mocked-browser flow has no user data. Preserve its route and
-        // accessibility state when the search field becomes unavailable.
-        const state = await page
-          .evaluate(() => ({
-            url: location.href,
-            language: document.documentElement.lang,
-            settingsSidebars: document.querySelectorAll(".settings-sidebar").length,
-            inputs: [...document.querySelectorAll<HTMLInputElement>("input[type=search]")].map(
-              (input) => ({
-                label: input.getAttribute("aria-label"),
-                value: input.value,
-                visible: input.offsetParent !== null,
-                inert: input.closest("[inert]")?.tagName ?? null,
-                hiddenAncestor: input.closest('[aria-hidden="true"]')?.className ?? null,
-              }),
-            ),
-          }))
-          .catch((diagnosticError: unknown) => ({ diagnosticError: String(diagnosticError) }));
-        throw new Error(`Settings search became unavailable: ${JSON.stringify(state)}`, {
-          cause: error,
-        });
-      }
+      await settingsSearch.fill("mcp");
       await expect
         .poll(() =>
           trimmedTextContents(
@@ -651,6 +627,45 @@ describeControlUiE2e("Control UI sidebar customization mocked Gateway E2E", () =
         )
         .toBeLessThanOrEqual(0);
       await captureUiProof(page, "06-mobile-brand.png");
+    } catch (error) {
+      // This mocked flow contains no user data. Capture every failure before
+      // teardown: the field can disappear before the second search as well.
+      // evaluate has no operation timeout; a stalled renderer must not keep
+      // this failure handler from reaching context teardown.
+      let diagnosticTimer: ReturnType<typeof setTimeout> | undefined;
+      const state = await Promise.race([
+        page.evaluate(() => ({
+          url: location.href,
+          language: document.documentElement.lang,
+          settingsSidebars: document.querySelectorAll(".settings-sidebar").length,
+          inputs: [...document.querySelectorAll<HTMLInputElement>(".settings-sidebar input")].map(
+            (input) => ({
+              type: input.type,
+              label: input.getAttribute("aria-label"),
+              value: input.value,
+              visible: input.offsetParent !== null,
+              inert: input.closest("[inert]")?.tagName ?? null,
+              hiddenAncestor: input.closest('[aria-hidden="true"]')?.className ?? null,
+            }),
+          ),
+        })),
+        new Promise<never>((_, reject) => {
+          diagnosticTimer = setTimeout(
+            () => reject(new Error("DOM diagnostic timed out after 2000ms")),
+            2_000,
+          );
+        }),
+      ])
+        .catch((diagnosticError: unknown) => ({ diagnosticError: String(diagnosticError) }))
+        .finally(() => clearTimeout(diagnosticTimer));
+      const accessibility = await page
+        .locator(".settings-sidebar")
+        .ariaSnapshot({ timeout: 2_000 })
+        .catch((diagnosticError: unknown) => String(diagnosticError));
+      throw new Error(
+        `Sidebar customization failed: ${JSON.stringify({ browser: browser.version(), state, accessibility })}`,
+        { cause: error },
+      );
     } finally {
       await context.close();
       if (video) {
