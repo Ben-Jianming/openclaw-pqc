@@ -5,6 +5,8 @@ settings:
   excludeLinksFromLockfile: false
 
 overrides:
+  '@a2ui/web_core@0.10.5>zod': 4.6.6
+  '@a2ui/lit@0.10.2>zod': 4.6.6
   '@discord/embedded-app-sdk@2.5.0>zod': 4.6.6
   '@azure/identity@4.13.1>@azure/msal-node': 7.1.0
   '@microsoft/teams.apps@2.0.14>@azure/msal-node': 7.1.0
@@ -28,6 +30,7 @@ overrides:
 packageExtensionsChecksum: sha256-zZ8fyodhMTumshonC7kktCqTPsiHL3UAyS9vltFAlMo=
 
 patchedDependencies:
+  '@a2ui/web_core@0.10.5': d007224317121fda6be15bab86fdf80f168bad216173beda65c226b3cffbfce6
   '@discord/embedded-app-sdk@2.5.0': 7eee7156035b90c5058a80c2870ba303d12288299403c2ee1c021dd04c4aaf6f
 
 importers:
@@ -8822,9 +8825,6 @@ packages:
     peerDependencies:
       zod: ^3.25.28 || ^4
 
-  zod@3.25.76:
-    resolution: {integrity: sha512-gzUt/qt81nXsFGKIFcC3YnfEAx5NkunCfnDlvuBSSFS02bcXu4Lmea0AFIUwbLWxWPx3d9p8S5QoaujKcNQxcQ==}
-
   zod@4.6.6:
     resolution: {integrity: sha512-4UmzQUF5fxvfcYHlbjBmejU+w+hbDnWFx4aS8kBx7nPBHcO2SqPbpAG8snbdg+Xse4pRefR98hgjFgIMCI/UhA==}
 
@@ -8835,21 +8835,21 @@ snapshots:
 
   '@a2ui/lit@0.10.2(signal-polyfill@0.2.2)':
     dependencies:
-      '@a2ui/web_core': 0.10.5
+      '@a2ui/web_core': 0.10.5(patch_hash=d007224317121fda6be15bab86fdf80f168bad216173beda65c226b3cffbfce6)
       '@lit-labs/signals': 0.3.0
       '@lit/context': 1.1.6
       lit: 3.3.3
       signal-utils: 0.21.1(signal-polyfill@0.2.2)
-      zod: 3.25.76
+      zod: 4.6.6
     transitivePeerDependencies:
       - signal-polyfill
 
-  '@a2ui/web_core@0.10.5':
+  '@a2ui/web_core@0.10.5(patch_hash=d007224317121fda6be15bab86fdf80f168bad216173beda65c226b3cffbfce6)':
     dependencies:
       '@preact/signals-core': 1.14.4
       date-fns: 4.4.0
-      zod: 3.25.76
-      zod-to-json-schema: 3.25.2(zod@3.25.76)
+      zod: 4.6.6
+      zod-to-json-schema: 3.25.2(zod@4.6.6)
 
   '@agentclientprotocol/claude-agent-acp@0.59.0(@anthropic-ai/sdk@0.112.3(zod@4.6.6))(@modelcontextprotocol/sdk@1.32.0(supports-color@10.2.2)(zod@4.6.6))':
     dependencies:
@@ -16007,15 +16007,9 @@ snapshots:
       - bufferutil
       - utf-8-validate
 
-  zod-to-json-schema@3.25.2(zod@3.25.76):
-    dependencies:
-      zod: 3.25.76
-
   zod-to-json-schema@3.25.2(zod@4.6.6):
     dependencies:
       zod: 4.6.6
-
-  zod@3.25.76: {}
 
   zod@4.6.6: {}
 
