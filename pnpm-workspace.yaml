@@ -98,6 +98,7 @@ nodeLinker: hoisted
 blockExoticSubdeps: true
 
 overrides:
+  "@openclaw/crabline@0.1.11>re2js": 2.8.7
   "@a2ui/web_core@0.10.5>zod": 4.6.6
   "@a2ui/lit@0.10.2>zod": 4.6.6
   "@discord/embedded-app-sdk@2.5.0>zod": 4.6.6

@@ -1,6 +1,6 @@
 // Check Package Patches tests cover check package patches script behavior.
 import { execFileSync } from "node:child_process";
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { collectPackagePatchViolations } from "../../scripts/check-package-patches.mjs";
@@ -51,6 +51,44 @@ afterEach(() => {
   cleanupTempDirs(tempDirs);
 });
 
+const SECURITY_PATCHES = [
+  [
+    "@discord/embedded-app-sdk@2.5.0",
+    "@discord__embedded-app-sdk@2.5.0.patch",
+    "7eee7156035b90c5058a80c2870ba303d12288299403c2ee1c021dd04c4aaf6f",
+  ],
+  [
+    "@a2ui/web_core@0.10.5",
+    "@a2ui__web_core@0.10.5.patch",
+    "d007224317121fda6be15bab86fdf80f168bad216173beda65c226b3cffbfce6",
+  ],
+] as const;
+
+function addMandatorySecurityPins(dir: string) {
+  mkdirSync(path.join(dir, "patches"), { recursive: true });
+  for (const [name, isLock] of [
+    ["pnpm-workspace.yaml", false],
+    ["pnpm-lock.yaml", true],
+  ] as const) {
+    const file = path.join(dir, name);
+    let text = readFileSync(file, "utf8");
+    const entries = SECURITY_PATCHES.map(
+      ([specifier, patch, hash]) => `  "${specifier}": ${isLock ? hash : `patches/${patch}`}\n`,
+    ).join("");
+    text = text.includes("patchedDependencies:\n")
+      ? text.replace("patchedDependencies:\n", `patchedDependencies:\n${entries}`)
+      : `${text}\npatchedDependencies:\n${entries}`;
+    writeFileSync(file, text);
+  }
+  for (const [, patch] of SECURITY_PATCHES) {
+    writeFileSync(
+      path.join(dir, "patches", patch),
+      readFileSync(new URL(`../../patches/${patch}`, import.meta.url)),
+    );
+  }
+  git(dir, ["add", "pnpm-workspace.yaml", "pnpm-lock.yaml", "patches"]);
+}
+
 describe("check-package-patches", () => {
   it("allows approved pnpm patches", () => {
     const dir = makeRepo();
@@ -75,6 +113,7 @@ patchedDependencies:
     writeFileSync(path.join(dir, "patches", "baileys@7.0.0-rc12.patch"), "diff\n", "utf8");
     git(dir, ["add", "pnpm-workspace.yaml", "pnpm-lock.yaml", "patches"]);
 
+    addMandatorySecurityPins(dir);
     expect(collectPackagePatchViolations(dir)).toEqual([]);
   });
 
@@ -95,6 +134,7 @@ patchedDependencies:
     writeFileSync(path.join(dir, "fixtures", "fixture.patch"), "diff\n", "utf8");
     git(dir, ["add", "pnpm-workspace.yaml", "patches", "fixtures"]);
 
+    addMandatorySecurityPins(dir);
     expect(collectPackagePatchViolations(dir)).toEqual([
       {
         file: "pnpm-workspace.yaml",
@@ -125,6 +165,7 @@ patchedDependencies:
     git(dir, ["add", "patches"]);
     rmSync(path.join(dir, "patches", "@agentclientprotocol__claude-agent-acp@0.33.1.patch"));
 
+    addMandatorySecurityPins(dir);
     expect(collectPackagePatchViolations(dir)).toEqual([]);
   });
 
@@ -148,6 +189,7 @@ patchedDependencies:
     );
     git(dir, ["add", "package.json", "pnpm-lock.yaml"]);
 
+    addMandatorySecurityPins(dir);
     expect(collectPackagePatchViolations(dir)).toEqual([
       {
         file: "pnpm-lock.yaml",
@@ -176,6 +218,89 @@ patchedDependencies:
     git(dir, ["add", "packages/deleted/package.json"]);
     rmSync(path.join(dir, "packages", "deleted", "package.json"));
 
+    addMandatorySecurityPins(dir);
     expect(collectPackagePatchViolations(dir)).toEqual([]);
+  });
+});
+
+describe("pinned security migration patches", () => {
+  const pins = SECURITY_PATCHES;
+  function pinnedRepo() {
+    const dir = makeRepo();
+    mkdirSync(path.join(dir, "patches"));
+    let workspace = "packages:\n  - .\npatchedDependencies:\n";
+    let lock = "lockfileVersion: '9.0'\npatchedDependencies:\n";
+    for (const [specifier, file, hash] of pins) {
+      workspace += `  "${specifier}": patches/${file}\n`;
+      lock += `  "${specifier}": ${hash}\n`;
+      writeFileSync(
+        path.join(dir, "patches", file),
+        readFileSync(new URL(`../../patches/${file}`, import.meta.url)),
+      );
+    }
+    writeFileSync(path.join(dir, "pnpm-workspace.yaml"), workspace);
+    writeFileSync(path.join(dir, "pnpm-lock.yaml"), lock);
+    git(dir, ["add", "--all"]);
+    return dir;
+  }
+  it("accepts the approved bytes and lock hashes", () => {
+    expect(collectPackagePatchViolations(pinnedRepo())).toEqual([]);
+  });
+  it.each(pins)("rejects changed patch bytes for %s", (_specifier, file) => {
+    const dir = pinnedRepo();
+    writeFileSync(path.join(dir, "patches", file), "modified patch\n");
+    expect(collectPackagePatchViolations(dir)).toContainEqual({
+      file: `patches/${file}`,
+      kind: "patchHash",
+      detail: "approved patch bytes changed",
+    });
+  });
+  it("rejects an altered lock hash", () => {
+    const dir = pinnedRepo();
+    const file = path.join(dir, "pnpm-lock.yaml");
+    writeFileSync(file, readFileSync(file, "utf8").replace(pins[0][2], "0".repeat(64)));
+    expect(collectPackagePatchViolations(dir)).toContainEqual(
+      expect.objectContaining({ file: "pnpm-lock.yaml" }),
+    );
+  });
+  it("rejects a declared patch whose file was removed", () => {
+    const dir = pinnedRepo();
+    rmSync(path.join(dir, "patches", pins[0][1]));
+    expect(collectPackagePatchViolations(dir)).toContainEqual({
+      file: `patches/${pins[0][1]}`,
+      kind: "patchHash",
+      detail: "approved patch file missing",
+    });
+  });
+  it.each(["pnpm-workspace.yaml", "pnpm-lock.yaml"])(
+    "rejects removed declaration in %s",
+    (name) => {
+      const dir = pinnedRepo();
+      writeFileSync(
+        path.join(dir, name),
+        name === "pnpm-lock.yaml" ? "lockfileVersion: '9.0'\n" : "packages:\n  - .\n",
+      );
+      expect(collectPackagePatchViolations(dir)).toContainEqual(
+        expect.objectContaining({ file: name, kind: "requiredPatch" }),
+      );
+    },
+  );
+  it("rejects complete removal of both pinned declarations and untracked patch files", () => {
+    const dir = pinnedRepo();
+    writeFileSync(path.join(dir, "pnpm-workspace.yaml"), "packages:\n  - .\n");
+    writeFileSync(path.join(dir, "pnpm-lock.yaml"), "lockfileVersion: '9.0'\n");
+    for (const [, file] of pins) {
+      git(dir, ["rm", "--cached", `patches/${file}`]);
+      rmSync(path.join(dir, "patches", file));
+    }
+    const violations = collectPackagePatchViolations(dir);
+    expect(
+      violations.filter(
+        (v) => typeof v === "object" && v !== null && "kind" in v && v.kind === "requiredPatch",
+      ),
+    ).toHaveLength(4);
+    expect(violations).toContainEqual(
+      expect.objectContaining({ kind: "patchHash", detail: "approved patch file missing" }),
+    );
   });
 });

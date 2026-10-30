@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 
-// Guards pnpm package patches against unapproved additions.
 import { execFileSync } from "node:child_process";
+// Guards pnpm package patches against unapproved additions.
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -11,6 +12,26 @@ const ALLOWED_PATCHED_DEPENDENCIES = new Map([
   ["baileys@7.0.0-rc12", "patches/baileys@7.0.0-rc12.patch"],
   ["baileys@7.0.0-rc13", "patches/baileys@7.0.0-rc13.patch"],
 ]);
+
+const PINNED_PATCHES = new Map([
+  [
+    "@discord/embedded-app-sdk@2.5.0",
+    {
+      path: "patches/@discord__embedded-app-sdk@2.5.0.patch",
+      sha256: "7eee7156035b90c5058a80c2870ba303d12288299403c2ee1c021dd04c4aaf6f",
+    },
+  ],
+  [
+    "@a2ui/web_core@0.10.5",
+    {
+      path: "patches/@a2ui__web_core@0.10.5.patch",
+      sha256: "d007224317121fda6be15bab86fdf80f168bad216173beda65c226b3cffbfce6",
+    },
+  ],
+]);
+for (const [specifier, pin] of PINNED_PATCHES) {
+  ALLOWED_PATCHED_DEPENDENCIES.set(specifier, pin.path);
+}
 
 const ALLOWED_PATCH_FILES = new Set(["patches/.gitkeep", ...ALLOWED_PATCHED_DEPENDENCIES.values()]);
 
@@ -44,7 +65,9 @@ function collectPatchedDependencyViolations(file, patchedDependencies, violation
   for (const [specifier, patchPathOrHash] of Object.entries(patchedDependencies ?? {})) {
     if (
       options.allowAnyValueForLegacy === true
-        ? ALLOWED_PATCHED_DEPENDENCIES.has(specifier)
+        ? PINNED_PATCHES.has(specifier)
+          ? PINNED_PATCHES.get(specifier).sha256 === patchPathOrHash
+          : ALLOWED_PATCHED_DEPENDENCIES.has(specifier)
         : ALLOWED_PATCHED_DEPENDENCIES.get(specifier) === patchPathOrHash
     ) {
       continue;
@@ -103,6 +126,40 @@ function collectPatchFileViolations(cwd, violations) {
   }
 }
 
+function collectPinnedPatchContentViolations(cwd, violations) {
+  const workspace = readYamlFile(cwd, "pnpm-workspace.yaml");
+  const lockfile = readYamlFile(cwd, "pnpm-lock.yaml");
+  for (const [specifier, pin] of PINNED_PATCHES) {
+    if (workspace.patchedDependencies?.[specifier] !== pin.path) {
+      violations.push({
+        file: "pnpm-workspace.yaml",
+        kind: "requiredPatch",
+        detail: `${specifier} requires ${pin.path}`,
+      });
+    }
+    if (lockfile.patchedDependencies?.[specifier] !== pin.sha256) {
+      violations.push({
+        file: "pnpm-lock.yaml",
+        kind: "requiredPatch",
+        detail: `${specifier} requires ${pin.sha256}`,
+      });
+    }
+    const file = path.join(cwd, pin.path);
+    if (!fs.existsSync(file)) {
+      violations.push({ file: pin.path, kind: "patchHash", detail: "approved patch file missing" });
+      continue;
+    }
+    const digest = createHash("sha256").update(fs.readFileSync(file)).digest("hex");
+    if (digest !== pin.sha256) {
+      violations.push({
+        file: pin.path,
+        kind: "patchHash",
+        detail: "approved patch bytes changed",
+      });
+    }
+  }
+}
+
 /**
  * Collects disallowed package patch declarations and patch files.
  */
@@ -111,6 +168,7 @@ export function collectPackagePatchViolations(cwd = process.cwd()) {
   collectWorkspacePatchViolations(cwd, violations);
   collectLockfilePatchViolations(cwd, violations);
   collectPackageJsonPatchViolations(cwd, violations);
+  collectPinnedPatchContentViolations(cwd, violations);
   collectPatchFileViolations(cwd, violations);
   return violations;
 }
@@ -122,7 +180,7 @@ export async function main() {
   const violations = collectPackagePatchViolations();
   if (violations.length === 0) {
     process.stdout.write(
-      `PASS package patch guard: no new pnpm patches; ${ALLOWED_PATCHED_DEPENDENCIES.size} approved patches allowlisted.\n`,
+      `PASS package patch guard: only approved pnpm patches; ${ALLOWED_PATCHED_DEPENDENCIES.size} approved patches allowlisted.\n`,
     );
     return;
   }
