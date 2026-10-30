@@ -226,6 +226,60 @@ describeControlUiE2e("Control UI sidebar customization mocked Gateway E2E", () =
     }
   });
 
+  it("keeps settings navigation while the initial chat module finishes loading", async () => {
+    const context = await browser.newContext({
+      locale: "en-US",
+      serviceWorkers: "block",
+      viewport: { height: 900, width: 1440 },
+    });
+    const page = await context.newPage();
+    let releaseChat!: () => void;
+    const chatBlocked = new Promise<void>((resolve) => {
+      releaseChat = resolve;
+    });
+    let chatRequested = false;
+    await page.route(/\/pages\/chat\/chat-page\.ts(?:\?|$)/u, async (route) => {
+      chatRequested = true;
+      await chatBlocked;
+      await route.continue().catch(() => undefined);
+    });
+    await installMockGateway(page);
+
+    try {
+      await page.goto(controlUiSessionUrl(server.baseUrl, "agent:main:main"));
+      await expect.poll(() => chatRequested).toBe(true);
+      const sidebar = page.locator("openclaw-app-sidebar");
+      await sidebar.locator(".sidebar-identity-card").click();
+      await sidebar
+        .locator("wa-dropdown.sidebar-identity-menu")
+        .getByRole("menuitem", { exact: true, name: "Settings" })
+        .click();
+      await expect.poll(() => new URL(page.url()).pathname).toBe("/settings/general");
+      const settingsSidebar = page.locator(".settings-sidebar");
+      await expect.poll(() => settingsSidebar.isVisible()).toBe(true);
+
+      releaseChat();
+      await page.waitForFunction(() => Boolean(customElements.get("openclaw-chat-page")));
+      // Let the released module's import continuations and Lit render commit;
+      // a stale startup replay must not take ownership back from Settings.
+      await page.evaluate(
+        () =>
+          new Promise<void>((resolve) => {
+            requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+          }),
+      );
+      await expect.poll(() => new URL(page.url()).pathname).toBe("/settings/general");
+      const settingsSearch = settingsSidebar.getByRole("searchbox", { name: "Search settings" });
+      await settingsSearch.fill("theme");
+      await expect
+        .poll(() => trimmedTextContents(settingsSidebar.locator(".settings-sidebar__item")))
+        .toEqual(["Appearance"]);
+    } finally {
+      releaseChat();
+      await context.close();
+    }
+  });
+
   it("pins routes, restores defaults, and persists navigation state across reloads", async () => {
     if (captureUiProofEnabled) {
       await mkdir(uiProofArtifactDir, { recursive: true });

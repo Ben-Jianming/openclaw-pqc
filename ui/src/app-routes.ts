@@ -161,7 +161,14 @@ export async function startApplicationRouter(
       }),
   };
   await router.start(applicationHistory, basePath, context);
-  if (initialDynamicRoute) {
+  const currentLocation = history.location();
+  // A cold startup may finish after the operator navigated elsewhere. Only
+  // restore its synthetic match while the original browser location is owned.
+  const startupLocationUnchanged =
+    currentLocation.pathname === location.pathname &&
+    currentLocation.search === location.search &&
+    currentLocation.hash === location.hash;
+  if (initialDynamicRoute && startupLocationUnchanged) {
     // Replace the synthetic exact-match location with the real browser path
     // before the shell renders; the matching loader data is already cached.
     await router.navigate(
