@@ -310,7 +310,9 @@ function resolvePnpmLockOverridePlan(lockfile) {
       if (!multiVersionPackageNames.has(dependencyName)) {
         continue;
       }
-      const version = exactVersionFromOverrideSpec(String(dependencySpec));
+      // pnpm snapshots append peer contexts to exact dependency references.
+      // npm override versions must use only the locked version, not those contexts.
+      const version = exactVersionFromOverrideSpec(String(dependencySpec).replace(/\(.*/u, ""));
       if (!version || !versionsByName.get(dependencyName)?.has(version)) {
         continue;
       }
