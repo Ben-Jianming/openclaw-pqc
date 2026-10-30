@@ -5,6 +5,7 @@ settings:
   excludeLinksFromLockfile: false
 
 overrides:
+  '@discord/embedded-app-sdk@2.5.0>zod': 4.6.6
   '@azure/identity@4.13.1>@azure/msal-node': 7.1.0
   '@microsoft/teams.apps@2.0.14>@azure/msal-node': 7.1.0
   openclaw: 'link:'
@@ -25,6 +26,9 @@ overrides:
   '@modelcontextprotocol/sdk@1.29.0': 1.32.0
 
 packageExtensionsChecksum: sha256-zZ8fyodhMTumshonC7kktCqTPsiHL3UAyS9vltFAlMo=
+
+patchedDependencies:
+  '@discord/embedded-app-sdk@2.5.0': 7eee7156035b90c5058a80c2870ba303d12288299403c2ee1c021dd04c4aaf6f
 
 importers:
 
@@ -789,7 +793,7 @@ importers:
     dependencies:
       '@discord/embedded-app-sdk':
         specifier: 2.5.0
-        version: 2.5.0
+        version: 2.5.0(patch_hash=7eee7156035b90c5058a80c2870ba303d12288299403c2ee1c021dd04c4aaf6f)
       '@discordjs/voice':
         specifier: 0.19.2
         version: 0.19.2(@emnapi/core@1.11.2)(@emnapi/runtime@1.11.2)
@@ -9812,7 +9816,7 @@ snapshots:
     dependencies:
       tslib: 2.8.1
 
-  '@discord/embedded-app-sdk@2.5.0':
+  '@discord/embedded-app-sdk@2.5.0(patch_hash=7eee7156035b90c5058a80c2870ba303d12288299403c2ee1c021dd04c4aaf6f)':
     dependencies:
       '@types/lodash.transform': 4.6.9
       '@types/uuid': 10.0.0
@@ -9821,7 +9825,7 @@ snapshots:
       eventemitter3: 5.0.4
       lodash.transform: 4.6.0
       uuid: 11.1.1
-      zod: 3.25.76
+      zod: 4.6.6
 
   '@discordjs/voice@0.19.2(@emnapi/core@1.11.2)(@emnapi/runtime@1.11.2)':
     dependencies:
