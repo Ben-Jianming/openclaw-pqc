@@ -114,6 +114,18 @@ export function resolveInitialDoctorHealthContributions(params: {
       run: params.runLegacyStateHealth,
     }),
     createDoctorHealthContribution({
+      id: "doctor:push-key-policy",
+      label: "Push key policy",
+      healthChecks: {
+        description: "Dual-signature push identity and explicit key validity are ready.",
+        async detect(ctx) {
+          const { collectPushKeyPolicyHealthFindings } =
+            await import("../commands/doctor-push-key-policy.js");
+          return collectPushKeyPolicyHealthFindings(ctx.env ?? process.env);
+        },
+      },
+    }),
+    createDoctorHealthContribution({
       id: "doctor:legacy-plugin-manifests",
       label: "Legacy plugin manifests",
       healthChecks: {

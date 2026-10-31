@@ -245,7 +245,7 @@ describe("device-identity-store wrap integration (M5, whitepaper 2.2.2)", () => 
     });
   });
 
-  it("salvage preserves the wrap envelope (Doctor must not lose the seal)", async () => {
+  it("Doctor preserves a wrapped row with invalid metadata instead of rotating it", async () => {
     await withTempDir("openclaw-m5-wrap-salvage-", async (rootDir) => {
       const options = storeOptions(rootDir);
       const provider = makeKeyring("wrap-key-2026-08", newKey());
@@ -264,17 +264,25 @@ describe("device-identity-store wrap integration (M5, whitepaper 2.2.2)", () => 
       closeOpenClawStateDatabaseForTest();
 
       const candidate = generateStoredDeviceIdentity({ wrappingKeyProvider: provider });
-      const repaired = repairInvalidStoredDeviceIdentity(candidate, {
-        ...options,
-        wrappingKeyProvider: provider,
-      });
-      expect(repaired.repaired).toBe(true);
-      expect(repaired.rotated).toBe(true);
-      // The new row is fully wrapped under the same keyId.
-      expect(repaired.identity.mldsaPrivateKeyWrapKeyId).toBe("wrap-key-2026-08");
-      expect(repaired.identity.mldsaPrivateKeyWrapped).not.toBeNull();
+      expect(() =>
+        repairInvalidStoredDeviceIdentity(candidate, {
+          ...options,
+          wrappingKeyProvider: provider,
+        }),
+      ).toThrow(/wrapped and cannot be replaced automatically/);
+      closeOpenClawStateDatabaseForTest();
+      // Restore only the damaged metadata; the original sealed key must still work.
+      const restore = new sqlite.DatabaseSync(options.path!);
+      try {
+        restore
+          .prepare("UPDATE device_identities SET device_id = ? WHERE identity_key = ?")
+          .run(stored.deviceId, PRIMARY_DEVICE_IDENTITY_KEY);
+      } finally {
+        restore.close();
+      }
       const reloaded = readStoredDeviceIdentity({ ...options, wrappingKeyProvider: provider });
-      expect(reloaded!.deviceId).toBe(candidate.deviceId);
+      expect(reloaded!.deviceId).toBe(stored.deviceId);
+      expect(reloaded!.mldsaPrivateKeyWrapped).toEqual(stored.mldsaPrivateKeyWrapped);
     });
   });
 

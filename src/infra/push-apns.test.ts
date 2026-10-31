@@ -14,6 +14,7 @@ import {
   closeOpenClawStateDatabase,
 } from "../state/openclaw-state-db.js";
 import { createDeferred } from "../test-utils/deferred.js";
+import { captureEnv, deleteTestEnvValue } from "../test-utils/env.js";
 import { encodeMlDsa65SecretKey, generateMlDsa65Keypair } from "./mldsa65-key-storage.js";
 import { startProxy, stopProxy, type ProxyHandle } from "./net/proxy/proxy-lifecycle.js";
 import {
@@ -29,6 +30,7 @@ import {
   sendApnsPluginApprovalAlert,
   sendApnsPluginApprovalResolvedWake,
 } from "./push-apns.js";
+import { initializePushKeySetup } from "./push-key-setup.js";
 
 const testAuthPrivateKey = generateKeyPairSync("ec", {
   namedCurve: "prime256v1",
@@ -97,6 +99,7 @@ type DestroyableConnection = {
 };
 
 let stateDir: string;
+let signingEnv: ReturnType<typeof captureEnv>;
 let capturedPayloads = new WeakMap<object, Record<string, unknown>>();
 function captureCanonicalPayload(request: Record<string, unknown>): void {
   const wake = requireRecord(request.payload, "APNs opaque wake");
@@ -111,6 +114,10 @@ function captureCanonicalPayload(request: Record<string, unknown>): void {
     .get(ref.object_id as string);
   expect(row).toBeDefined();
   capturedPayloads.set(request, JSON.parse(row!.payload as string));
+}
+
+function successfulApnsSend(apnsId: string) {
+  return { status: 200, apnsId, body: "" };
 }
 
 function createDirectApnsSendFixture(params: {
@@ -322,11 +329,16 @@ async function startConnectProxy(upstreamPort: number): Promise<{
 beforeEach(() => {
   stateDir = mkdtempSync(join(tmpdir(), "pqc-apns-test-"));
   vi.stubEnv("OPENCLAW_STATE_DIR", stateDir);
+  signingEnv = captureEnv(["OPENCLAW_PUSH_SIGNING_KEY_FILE"]);
+  deleteTestEnvValue("OPENCLAW_PUSH_SIGNING_KEY_FILE");
+  const nowMs = Date.now();
+  initializePushKeySetup({ validFromMs: nowMs - 1000, validUntilMs: nowMs + 600000 });
   capturedPayloads = new WeakMap();
 });
 afterEach(async () => {
   closeOpenClawStateDatabase();
   vi.unstubAllEnvs();
+  signingEnv.restore();
   vi.unstubAllGlobals();
   rmSync(stateDir, { recursive: true, force: true });
 });
@@ -370,11 +382,7 @@ describe("push APNs send semantics", () => {
     const { send, registration, auth } = createDirectApnsSendFixture({
       nodeId: "ios-node-alert",
       environment: "sandbox",
-      sendResult: {
-        status: 200,
-        apnsId: "apns-alert-id",
-        body: "",
-      },
+      sendResult: successfulApnsSend("apns-alert-id"),
     });
 
     const result = await sendApnsAlert({
@@ -418,11 +426,7 @@ describe("push APNs send semantics", () => {
       const { registration, auth } = createDirectApnsSendFixture({
         nodeId: "ios-node-proxied-alert",
         environment: "sandbox",
-        sendResult: {
-          status: 200,
-          apnsId: "unused",
-          body: "",
-        },
+        sendResult: successfulApnsSend("unused"),
       });
 
       const result = await sendApnsAlert({
@@ -476,11 +480,7 @@ describe("push APNs send semantics", () => {
       const { registration, auth } = createDirectApnsSendFixture({
         nodeId: "ios-node-proxied-error-body",
         environment: "sandbox",
-        sendResult: {
-          status: 200,
-          apnsId: "unused",
-          body: "",
-        },
+        sendResult: successfulApnsSend("unused"),
       });
 
       const result = await sendApnsAlert({
@@ -515,11 +515,7 @@ describe("push APNs send semantics", () => {
     const { send, registration, auth } = createDirectApnsSendFixture({
       nodeId: "ios-node-wake",
       environment: "production",
-      sendResult: {
-        status: 200,
-        apnsId: "apns-wake-id",
-        body: "",
-      },
+      sendResult: successfulApnsSend("apns-wake-id"),
     });
 
     const result = await sendApnsBackgroundWake({
@@ -557,11 +553,7 @@ describe("push APNs send semantics", () => {
     const { send, registration, auth } = createDirectApnsSendFixture({
       nodeId: "ios-node-guarded-wake",
       environment: "production",
-      sendResult: {
-        status: 200,
-        apnsId: "apns-guarded-wake-id",
-        body: "",
-      },
+      sendResult: successfulApnsSend("apns-guarded-wake-id"),
     });
     const controller = new AbortController();
     const isCurrent = vi.fn().mockResolvedValue(true);
@@ -645,11 +637,7 @@ describe("push APNs send semantics", () => {
     const { send, registration, auth } = createDirectApnsSendFixture({
       nodeId: "ios-node-approval-alert",
       environment: "sandbox",
-      sendResult: {
-        status: 200,
-        apnsId: "apns-approval-alert-id",
-        body: "",
-      },
+      sendResult: successfulApnsSend("apns-approval-alert-id"),
     });
 
     const result = await sendApnsExecApprovalAlert({
@@ -689,11 +677,7 @@ describe("push APNs send semantics", () => {
     const { send, registration, auth } = createDirectApnsSendFixture({
       nodeId: "ios-node-approval-cleanup",
       environment: "sandbox",
-      sendResult: {
-        status: 200,
-        apnsId: "apns-approval-cleanup-id",
-        body: "",
-      },
+      sendResult: successfulApnsSend("apns-approval-cleanup-id"),
     });
 
     const result = await sendApnsExecApprovalResolvedWake({
@@ -727,11 +711,7 @@ describe("push APNs send semantics", () => {
     const { send, registration, auth } = createDirectApnsSendFixture({
       nodeId: "ios-node-plugin-approval-alert",
       environment: "sandbox",
-      sendResult: {
-        status: 200,
-        apnsId: "apns-plugin-approval-alert-id",
-        body: "",
-      },
+      sendResult: successfulApnsSend("apns-plugin-approval-alert-id"),
     });
     const description = `${"x".repeat(255)}😀${"y".repeat(300)}`;
 
@@ -873,11 +853,7 @@ describe("push APNs send semantics", () => {
     const { send, registration, auth } = createDirectApnsSendFixture({
       nodeId: "ios-node-invalid-topic",
       environment: "sandbox",
-      sendResult: {
-        status: 200,
-        apnsId: "unused",
-        body: "",
-      },
+      sendResult: successfulApnsSend("unused"),
     });
 
     await expect(
@@ -898,11 +874,7 @@ describe("push APNs send semantics", () => {
     const { send, registration, auth } = createDirectApnsSendFixture({
       nodeId: "ios-node-wake-default-reason",
       environment: "sandbox",
-      sendResult: {
-        status: 200,
-        apnsId: "apns-wake-default-reason-id",
-        body: "",
-      },
+      sendResult: successfulApnsSend("apns-wake-default-reason-id"),
     });
 
     await sendApnsBackgroundWake({

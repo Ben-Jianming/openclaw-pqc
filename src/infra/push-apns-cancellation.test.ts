@@ -1,15 +1,38 @@
 import { generateKeyPairSync } from "node:crypto";
 import { EventEmitter } from "node:events";
+import { mkdtempSync, rmSync } from "node:fs";
 import http2 from "node:http2";
-import { describe, expect, it, vi } from "vitest";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { closeOpenClawStateDatabase } from "../state/openclaw-state-db.js";
+import { captureEnv, deleteTestEnvValue } from "../test-utils/env.js";
 import { APNS_HTTP2_CANCEL_CODE } from "./push-apns-http2.js";
 import { sendApnsBackgroundWake } from "./push-apns.js";
+import { initializePushKeySetup } from "./push-key-setup.js";
 
 const testAuthPrivateKey = generateKeyPairSync("ec", {
   namedCurve: "prime256v1",
 }).privateKey.export({ format: "pem", type: "pkcs8" });
 
 describe("APNs cancellation", () => {
+  let stateDir: string;
+  let signingEnv: ReturnType<typeof captureEnv>;
+  beforeEach(() => {
+    stateDir = mkdtempSync(join(tmpdir(), "push-apns-cancellation-"));
+    vi.stubEnv("OPENCLAW_STATE_DIR", stateDir);
+    signingEnv = captureEnv(["OPENCLAW_PUSH_SIGNING_KEY_FILE"]);
+    deleteTestEnvValue("OPENCLAW_PUSH_SIGNING_KEY_FILE");
+    const nowMs = Date.now();
+    initializePushKeySetup({ validFromMs: nowMs - 1000, validUntilMs: nowMs + 600000 });
+  });
+  afterEach(() => {
+    closeOpenClawStateDatabase();
+    vi.unstubAllEnvs();
+    signingEnv.restore();
+    rmSync(stateDir, { recursive: true, force: true });
+  });
+
   it("cancels the active stream when pairing ownership is revoked", async () => {
     const request = Object.assign(new EventEmitter(), {
       destroyed: false,

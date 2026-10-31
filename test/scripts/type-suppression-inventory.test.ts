@@ -79,7 +79,7 @@ describe("type suppression inventory", () => {
       "src/security/keyring-provider.test.ts:61:@ts-expect-error -- intentional type violation to verify runtime guard",
       "src/security/keyring-provider.test.ts:70:@ts-expect-error -- intentional type violation",
       "src/security/keyring-provider.test.ts:367:@ts-expect-error -- intentional type violation",
-      "src/security/secret-wrapping.test.ts:108:@ts-expect-error -- intentional type violation to verify runtime guard",
+      "src/security/secret-wrapping.test.ts:110:@ts-expect-error -- intentional type violation to verify runtime guard",
       "src/security/wrap-key-rotation.test.ts:48:@ts-expect-error -- intentional type violation",
       "src/security/wrap-key-rotation.test.ts:50:@ts-expect-error -- intentional type violation",
     ]);

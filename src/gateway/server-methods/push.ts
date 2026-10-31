@@ -29,10 +29,33 @@ import {
   registerWebPushSubscription,
   resolveVapidKeys,
 } from "../../infra/push-web.js";
+import { PUSH_KEY_POLICY_CAPABILITY } from "../../shared/push-key-policy.js";
 import { respondInvalidParams, respondUnavailableOnThrow } from "./nodes.helpers.js";
 import { resolveDispatchableNodeSession } from "./nodes.shared.js";
 import { normalizeTrimmedString } from "./record-shared.js";
-import type { GatewayRequestHandlers } from "./types.js";
+import type { GatewayRequestHandlers, GatewayRequestHandlerOptions } from "./types.js";
+
+function requirePushKeyPolicyClient({
+  client,
+  respond,
+}: Pick<GatewayRequestHandlerOptions, "client" | "respond">): boolean {
+  if (client?.connect.caps?.includes(PUSH_KEY_POLICY_CAPABILITY)) {
+    return true;
+  }
+  // Old/native clients must not redeem signed content while ignoring lifecycle metadata.
+  // Node aliases delegate here too; non-push methods and unsubscribe remain available.
+  respond(
+    false,
+    undefined,
+    errorShape(ErrorCodes.INVALID_REQUEST, "upgrade required for secure push key policy", {
+      details: {
+        code: "PUSH_KEY_POLICY_CAPABILITY_REQUIRED",
+        requiredCapability: PUSH_KEY_POLICY_CAPABILITY,
+      },
+    }),
+  );
+  return false;
+}
 
 export const pushHandlers: GatewayRequestHandlers = {
   "push.pqc.keys": ({ params, client, respond }) => {
@@ -43,6 +66,9 @@ export const pushHandlers: GatewayRequestHandlers = {
         undefined,
         errorShape(ErrorCodes.INVALID_REQUEST, "authenticated device and empty params required"),
       );
+      return;
+    }
+    if (!requirePushKeyPolicyClient({ client, respond })) {
       return;
     }
     try {
@@ -63,6 +89,9 @@ export const pushHandlers: GatewayRequestHandlers = {
         undefined,
         errorShape(ErrorCodes.INVALID_REQUEST, "authenticated device and valid reference required"),
       );
+      return;
+    }
+    if (!requirePushKeyPolicyClient({ client, respond })) {
       return;
     }
     try {
@@ -215,6 +244,9 @@ export const pushHandlers: GatewayRequestHandlers = {
     }
 
     await respondUnavailableOnThrow(respond, async () => {
+      if (!requirePushKeyPolicyClient({ client, respond })) {
+        return;
+      }
       const subscription = await registerWebPushSubscription({
         endpoint: params.endpoint,
         keys: params.keys,

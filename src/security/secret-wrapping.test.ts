@@ -4,7 +4,7 @@
 // plaintexts, IV uniqueness, tamper detection, wrong-size key, dropped
 // keyId, non-Buffer rejection, and serialize/deserialize round-trip +
 // malformed input rejection.
-import { createHash, randomBytes } from "node:crypto";
+import { createCipheriv, createHash, randomBytes } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   deserializeWrappedSecret,
@@ -12,6 +12,8 @@ import {
   SecretWrappingError,
   serializeWrappedSecret,
   unwrapSecret,
+  WRAP_ALGORITHM,
+  WRAPPED_SECRET_VERSION,
   WRAP_AUTH_TAG_BYTES,
   WRAP_IV_BYTES,
   WRAP_KEY_BYTES,
@@ -146,7 +148,10 @@ describe("secret-wrapping (M4, whitepaper 2.2.1)", () => {
     const wrapped = wrapSecret(Buffer.from("auth-this"), "wrap-key-2026-08", key);
     const tampered: WrappedSecret = {
       ...wrapped,
-      ciphertext: Buffer.concat([Buffer.from("X"), wrapped.ciphertext.subarray(1)]),
+      ciphertext: Buffer.concat([
+        Buffer.from([wrapped.ciphertext[0]! ^ 0xff]),
+        wrapped.ciphertext.subarray(1),
+      ]),
     };
     expect(() => unwrapSecret(tampered, "wrap-key-2026-08", key)).toThrow(
       /AES-256-GCM authentication failed/,
@@ -155,10 +160,22 @@ describe("secret-wrapping (M4, whitepaper 2.2.1)", () => {
 
   it("rejects an envelope whose IV has been tampered with", () => {
     const key = newKey(14);
-    const wrapped = wrapSecret(Buffer.from("auth-this"), "wrap-key-2026-08", key);
+    const plaintext = Buffer.from("auth-this");
+    // A fixed test-only IV makes a no-op replacement of 0x42 reproducible.
+    const iv = Buffer.alloc(WRAP_IV_BYTES, 0x42);
+    const cipher = createCipheriv(WRAP_ALGORITHM, key, iv, { authTagLength: WRAP_AUTH_TAG_BYTES });
+    const wrapped: WrappedSecret = {
+      v: WRAPPED_SECRET_VERSION,
+      keyId: "wrap-key-2026-08",
+      iv,
+      ciphertext: Buffer.concat([cipher.update(plaintext), cipher.final()]),
+      authTag: cipher.getAuthTag(),
+      createdAtMs: 1_700_000_000_000,
+    };
+    expect(unwrapSecret(wrapped, "wrap-key-2026-08", key)).toEqual(plaintext);
     const tampered: WrappedSecret = {
       ...wrapped,
-      iv: Buffer.concat([Buffer.from([0x42]), wrapped.iv.subarray(1)]),
+      iv: Buffer.concat([Buffer.from([wrapped.iv[0]! ^ 0x01]), wrapped.iv.subarray(1)]),
     };
     expect(() => unwrapSecret(tampered, "wrap-key-2026-08", key)).toThrow(
       /AES-256-GCM authentication failed/,
@@ -170,7 +187,10 @@ describe("secret-wrapping (M4, whitepaper 2.2.1)", () => {
     const wrapped = wrapSecret(Buffer.from("auth-this"), "wrap-key-2026-08", key);
     const tampered: WrappedSecret = {
       ...wrapped,
-      authTag: Buffer.concat([Buffer.from([0x42]), wrapped.authTag.subarray(1)]),
+      authTag: Buffer.concat([
+        Buffer.from([wrapped.authTag[0]! ^ 0x80]),
+        wrapped.authTag.subarray(1),
+      ]),
     };
     expect(() => unwrapSecret(tampered, "wrap-key-2026-08", key)).toThrow(
       /AES-256-GCM authentication failed/,
@@ -253,7 +273,10 @@ describe("secret-wrapping (M4, whitepaper 2.2.1)", () => {
     const wrapped = wrapSecret(Buffer.from("auth-this"), "wrap-key-2026-08", key);
     const tampered: WrappedSecret = {
       ...wrapped,
-      authTag: Buffer.concat([Buffer.from([0x42]), wrapped.authTag.subarray(1)]),
+      authTag: Buffer.concat([
+        Buffer.from([wrapped.authTag[0]! ^ 0x80]),
+        wrapped.authTag.subarray(1),
+      ]),
     };
     let caught: unknown = null;
     try {

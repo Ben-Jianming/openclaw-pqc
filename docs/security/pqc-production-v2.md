@@ -8,6 +8,180 @@ title: "PQC production acceptance"
 
 # PQC production acceptance
 
+## Candidate key lifecycle policy
+
+This section describes a local integration candidate, not a shipped release or
+completed installed-Gateway acceptance. Its strict browser contract requires
+`keyPolicyVersion: 1` and separate `keyPolicy.ed25519` and `keyPolicy.mldsa65`
+records from the authenticated `push.pqc.keys` connection. Each record binds
+algorithm, sender, key ID and the exact public key, and carries `status`,
+`validFromMs`, `validUntilMs` and a persistent positive `revision`.
+
+Validity is the half-open interval `validFromMs <= nowMs < validUntilMs`.
+Missing policies, unsupported policy versions, malformed bounds, revoked keys
+and mismatched public keys are rejected. Signed payloads and untrusted wake
+messages cannot supply or override this trust policy.
+
+Existing installations need an explicit maintenance enrollment before using
+this candidate. Preserve the existing identity database, its wrapping material
+and the dedicated Ed25519 push key. Enrollment reads existing keys only; it does
+not generate replacements, extend an existing lifetime or reactivate revoked
+records. The two policies are registered in one SQLite transaction in the
+shared state database. The additive table does not bump the schema version.
+
+### First installation and existing-key enrollment
+
+The additive installed commands below belong to this local candidate. Their
+presence in source is not evidence that an older installation has them or that
+the candidate has passed installation, Doctor, CI or live-delivery acceptance.
+Check the installed build with `openclaw security push-key --help` first.
+
+Use a separate, previously unused profile for a first-install exercise. A named
+profile normally isolates state under `~/.openclaw-<name>`, but explicit
+`OPENCLAW_STATE_DIR` or `OPENCLAW_CONFIG_PATH` overrides can select other paths.
+Inspect those overrides before proceeding; never reuse an active Gateway
+profile for an installation, revocation or recovery drill.
+
+```sh
+openclaw --profile pqc-first-install config file
+openclaw --profile pqc-first-install setup --baseline --workspace /absolute/path/to/new-workspace
+openclaw --profile pqc-first-install config validate --json
+openclaw --profile pqc-first-install security push-key status --json
+```
+
+On an empty profile, status reports `ready: false`, state `uninitialized`, and
+exit status `1`; this is the expected pre-provisioning result. Run the commands
+individually rather than treating that initial status as a successful gate.
+
+`setup --baseline` creates the baseline configuration, workspace and session
+folders; it does not complete provider onboarding or establish push delivery.
+For interactive model, channel and Gateway configuration, use
+`openclaw --profile pqc-first-install setup --wizard`. The existing
+`openclaw --profile pqc-first-install config --section gateway` command opens
+the guided Gateway section. Keep the same selected profile throughout.
+See [Setup](/cli/setup) and [Config](/cli/config).
+
+For a fresh profile without existing push identity/key material, explicitly
+provision and enroll the two signing identities with operator-selected Unix
+millisecond bounds:
+
+```sh
+openclaw --profile pqc-first-install security push-key init \
+  --valid-from-ms <activation-ms> --valid-until-ms <expiry-ms>
+openclaw --profile pqc-first-install security push-key status --json
+openclaw --profile pqc-first-install doctor --lint --only core/doctor/push-key-policy --json
+```
+
+Angle-bracket values are placeholders. Supply nonnegative safe integers with
+`activation-ms < expiry-ms`; choose a currently active interval for a signing
+acceptance exercise. Do not infer validity from file modification times or use
+an unbounded default. Validity includes the activation instant and excludes the
+expiry instant: `validFromMs <= nowMs < validUntilMs`.
+
+`init` is explicit first provisioning. If either signing identity or its key
+material already exists, use enrollment or documented recovery instead of
+replacement. Preserve both original public identities, the state database,
+wrapping material and dedicated Ed25519 push key. For that existing profile,
+run:
+
+```sh
+openclaw --profile <existing-profile> security push-key enroll \
+  --valid-from-ms <activation-ms> --valid-until-ms <expiry-ms>
+openclaw --profile <existing-profile> security push-key status --json
+openclaw --profile <existing-profile> doctor --lint --only core/doctor/push-key-policy --json
+```
+
+Enrollment reads existing keys and registers both policies in one shared-state
+SQLite transaction. It does not generate replacement identities, change an
+already enrolled lifetime or reactivate a revoked key. Missing or partial key
+material is a provisioning/recovery failure, not permission to regenerate the
+existing identity. Repeating enrollment with the same active records and bounds
+is idempotent. Status and the selected Doctor lint check inspect state without
+generating signing keys or automatically enrolling policies. Status exits `0`
+only when `ready: true`; incomplete, unenrolled, future, expired or revoked
+material remains not ready. A clean Doctor result is limited to the named local
+lifecycle check, not whole-product readiness.
+
+The registered profile policy set anchors one dual-key identity. Initial
+enrollment requires an empty set. A nonempty set must be exactly the two records
+matching the current sender, algorithms, key IDs and public keys; partial,
+additional or mismatched records reject enrollment and renewal. Existing policy
+rows also prevent `init` before key generation, even when both key materials are
+absent. Status reports that missing-material state as `incomplete`, not a fresh
+profile. Do not overwrite or remove key files, delete policies or rerun `init`
+to bypass revocation or stale trust. Restore the matching original identity
+material. A change of identity requires a separately reviewed rotation workflow;
+these commands do not implement rotation.
+
+Prefer explicit renewal before expiry. Read both policy records with status,
+keep their original `validFromMs`, and supply a later expiry:
+
+```sh
+openclaw --profile <existing-profile> security push-key renew \
+  --valid-from-ms <original-activation-ms> --valid-until-ms <extended-expiry-ms> --json
+openclaw --profile <existing-profile> doctor --lint --only core/doctor/push-key-policy --json
+```
+
+Renewal requires both enrolled, unrevoked records to match the current keys and
+sender. The supplied start must equal both original starts; the new expiry must
+be strictly later than each existing expiry and the execution time. The pair
+updates in one SQLite transaction and each revision increases by one. A missing,
+revoked or mismatched member rejects the whole renewal. No identity or public
+key is replaced. Expired but unrevoked records may be explicitly renewed to
+restore service; expiry still blocks delivery until renewal completes. Neither
+enrollment nor diagnostics renew policies automatically. A renewal source path
+is not evidence that an installed package or published release passed this
+workflow.
+
+To revoke a registered key, select the same profile and use the public sender
+and key identifiers from status:
+
+```sh
+openclaw --profile <existing-profile> security push-key revoke \
+  --sender-id <sender-id> --algorithm ed25519 --key-id <key-id>
+```
+
+The other supported algorithm is `ml-dsa-65`. Revocation is idempotent and
+persists across database reopen. Recipient RPCs cannot mutate these policies.
+The signer checks current persisted policy before signing; an unregistered,
+expired or revoked key stops signing without a fallback signature. Revoking
+either member prevents dual-signature delivery until an explicitly reviewed
+rotation or recovery procedure supplies a usable pair. Do not run revocation
+against a working profile merely to test installation.
+
+The browser refreshes policy per object before accepting content, again before
+durable acceptance, and after Service Worker readiness before business display.
+Previously verified inbox entries are revalidated during recovery. A refresh
+failure or rejection retains pending work without presenting business content
+or prematurely acknowledging the reference. Expired wake references can be
+discarded. A displayed entry whose key is later revoked can remain pending
+until reference expiry; this candidate does not add a post-revocation cleanup
+or notification-retraction protocol.
+
+A successful final policy response is not atomic with OS presentation. A
+revocation committed after that response can race an in-flight notification.
+This candidate does not claim instantaneous global revocation, offline policy
+acceptance, database rollback protection, automatic rotation or historical-key
+delivery after rotation.
+
+The updated browser advertises `push-key-policy-v1` in its authenticated connect
+capabilities. Key retrieval, reference read/acknowledgement and new Web Push
+subscriptions require that capability on the established connection, returning
+`PUSH_KEY_POLICY_CAPABILITY_REQUIRED` when it is absent. Node aliases share the
+same gate after their existing pairing checks. Non-push methods, VAPID public
+key retrieval and subscription removal remain available to legacy clients.
+An existing legacy subscription may still receive a generic wake, but the old
+connection cannot redeem the signed business object. Native clients must not
+advertise this capability until they enforce the same lifecycle contract.
+
+This capability is an honest-client compatibility declaration, not remote
+attestation or proof that a malicious client actually validates signatures.
+It relies on the authenticated Gateway transport and does not replace role,
+scope, pairing or recipient checks. Do not deploy the browser patch alone.
+Before release, complete reviewed migration/provisioning and exact-build
+installation, full authenticated Gateway/browser acceptance and live delivery.
+Component tests and historical CI passes do not satisfy those gates.
+
 Use this reference to decide which PQC guarantees a particular installation can claim. It defines the Push V2 signed transcript and the eight acceptance groups needed to connect the paper components to installed clients. A signature helper, a source inspection, and a green job with skipped tests establish different facts. Record the exact build and the checks that ran before making a product claim.
 
 ## Implementation and release status
@@ -138,7 +312,7 @@ Sign before committing a provider send. If either signature, storage, payload bu
 
 The recipient comes from `connect.device.id`. The wake descriptor cannot select a different recipient. APNs registration uses the authenticated node identity; Web Push subscription creation and recipient binding occur together in the shared transaction. A reference is not an anonymous HTTP download URL.
 
-The service worker stores bounded wake descriptors and displays fixed generic text. After the browser gateway handshake, the application retrieves the active keys and confirms that the returned recipient matches its local device identity. It fetches objects, verifies their signatures before sorting by sequence, then atomically commits its IndexedDB replay decision with the verified pending object before displaying a canonical title or body. Presentation failures retain that inbox; completion is recorded before acknowledgement and removal. A forged sequence must not decide processing order before verification. Expired references are cleared; failed live reads remain retryable; one bad reference must not prevent unrelated valid ones from being processed.
+The service worker stores bounded wake descriptors and displays fixed generic text. After the browser gateway handshake, the application retrieves the active keys and confirms that the returned recipient matches its local device identity. It fetches objects, verifies their signatures before sorting by sequence, then atomically commits its IndexedDB replay decision with the verified pending object before displaying a canonical title or body. Presentation failures retain that inbox; completion is recorded before acknowledgement and removal. A failed authenticated key-policy refresh, including a response with malformed identity, key encoding or lifecycle metadata, aborts the current drain, including the initial verification pass and the pre-acceptance/presentation refreshes, so later sequences cannot advance the replay watermark past unresolved policy work. The next connection/retry revalidates retained references and inbox entries. Invalid individual wake content still does not block unrelated valid content; this rule does not promise arbitrary out-of-order recovery for every redemption failure. A forged sequence must not decide processing order before verification. Expired references are cleared; failed live reads remain retryable; one bad reference must not prevent unrelated valid ones from being processed.
 
 The iOS wake receiver uses `node.push.pqc.keys` and `node.push.pqc.redeem` on the captured authenticated gateway route. Swift verification precedes approval routing or local content rendering. Replay acceptance and the verified pending object share one SQLite transaction. Recovery rechecks current keys, recipient and time, then either claims an expired presentation lease or skips an already completed effect and retries acknowledgement. This source path does not establish that the OS cannot display an arbitrary remote alert sent by a compromised relay outside the verified path. In particular, a foreground callback or an optional notification service extension is insufficient evidence for background or terminated-app behavior.
 

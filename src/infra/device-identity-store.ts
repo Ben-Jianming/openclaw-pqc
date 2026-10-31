@@ -108,6 +108,10 @@ export class DeviceIdentityStorageError extends Error {
   }
 }
 
+// Unavailable wrapping material is not evidence that the persisted identity is
+// disposable. Doctor must preserve the row so restoring its key can recover it.
+class DeviceIdentityWrappingError extends DeviceIdentityStorageError {}
+
 function normalizeIdentityKey(key: string | undefined): string {
   const normalized = key ?? PRIMARY_DEVICE_IDENTITY_KEY;
   if (normalized.length === 0 || normalized !== normalized.trim()) {
@@ -278,6 +282,13 @@ export function validateStoredDeviceIdentity(
   }
 }
 
+function hasStoredWrappingMetadata(row: DeviceIdentityRow): boolean {
+  return (
+    (row.mldsa_private_key_wrapped !== null && row.mldsa_private_key_wrapped !== undefined) ||
+    (row.mldsa_private_key_wrap_key_id !== null && row.mldsa_private_key_wrap_key_id !== undefined)
+  );
+}
+
 function rowToStoredIdentity(
   row: DeviceIdentityRow,
   expectedIdentityKey: string,
@@ -312,6 +323,14 @@ function rowToStoredIdentity(
       ? new Uint8Array(wrappedBlob)
       : null;
 
+  // Either wrapping field makes this encrypted state, including an empty or
+  // incomplete tuple. Never reinterpret it as disposable legacy plaintext.
+  if (hasStoredWrappingMetadata(row) && (!mldsaPrivateKeyWrapped || !mldsaPrivateKeyWrapKeyId)) {
+    throw new DeviceIdentityWrappingError(
+      `SQLite device identity "${expectedIdentityKey}" has incomplete wrapping metadata. Restore the matching identity and wrapping-key backup before retrying.`,
+    );
+  }
+
   // Read priority for the public key: mldsa_public_key_pem (M3+) > legacy
   // public_key_pem (M1/M2). The private key flow: a present wrap envelope
   // is unwrapped via the keyring; otherwise the M1/M2 plaintext PEM (under
@@ -321,13 +340,13 @@ function rowToStoredIdentity(
   let privateKeyPem: string;
   if (mldsaPrivateKeyWrapped && mldsaPrivateKeyWrapKeyId) {
     if (!wrappingKeyProvider) {
-      throw new DeviceIdentityStorageError(
+      throw new DeviceIdentityWrappingError(
         `SQLite device identity "${expectedIdentityKey}" is wrapped under keyId "${mldsaPrivateKeyWrapKeyId}" but no wrapping key was configured. Restore the matching key backup and set OPENCLAW_WRAP_KEY_FILE before starting the gateway.`,
       );
     }
     const resolved = wrappingKeyProvider.getKeyById(mldsaPrivateKeyWrapKeyId);
     if (!resolved) {
-      throw new DeviceIdentityStorageError(
+      throw new DeviceIdentityWrappingError(
         `Wrapping key "${mldsaPrivateKeyWrapKeyId}" is not available. Restore the matching key backup, set OPENCLAW_WRAP_KEY_FILE and OPENCLAW_PQC_WRAP_KEY_ID, then restart the gateway.`,
       );
     }
@@ -335,7 +354,7 @@ function rowToStoredIdentity(
     try {
       envelope = deserializeWrappedSecret(Buffer.from(mldsaPrivateKeyWrapped).toString("utf8"));
     } catch (error) {
-      throw new DeviceIdentityStorageError(
+      throw new DeviceIdentityWrappingError(
         `SQLite device identity "${expectedIdentityKey}" has a malformed wrap envelope.`,
         { cause: error },
       );
@@ -344,7 +363,7 @@ function rowToStoredIdentity(
     try {
       raw = unwrapSecret(envelope, mldsaPrivateKeyWrapKeyId, resolved.key);
     } catch (error) {
-      throw new DeviceIdentityStorageError(
+      throw new DeviceIdentityWrappingError(
         `Failed to unwrap device identity "${expectedIdentityKey}": ${(error as Error).message}`,
         { cause: error },
       );
@@ -628,7 +647,7 @@ export function wrapStoredDeviceIdentityIfPlaintext(
   );
 }
 
-/** Replace only an invalid authoritative row; preserve a valid concurrent winner. */
+/** Replace only an invalid plaintext row; encrypted state requires explicit recovery. */
 export function repairInvalidStoredDeviceIdentity(
   candidate: StoredDeviceIdentity,
   options: DeviceIdentityReadOptions = {},
@@ -650,8 +669,19 @@ export function repairInvalidStoredDeviceIdentity(
           return { identity: existing, repaired, rotated };
         }
       } catch (error) {
-        if (!(error instanceof DeviceIdentityStorageError)) {
+        if (
+          !(error instanceof DeviceIdentityStorageError) ||
+          error instanceof DeviceIdentityWrappingError
+        ) {
           throw error;
+        }
+        if (existingRow && hasStoredWrappingMetadata(existingRow)) {
+          // Even structural metadata damage must not destroy a recoverable
+          // encrypted identity merely because plaintext salvage cannot read it.
+          throw new DeviceIdentityWrappingError(
+            `SQLite device identity "${resolved.identityKey}" is wrapped and cannot be replaced automatically. Restore the matching identity backup before retrying.`,
+            { cause: error },
+          );
         }
       }
       if (existingRow) {

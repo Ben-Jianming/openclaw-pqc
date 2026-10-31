@@ -94,6 +94,14 @@ runs:
         source "$GITHUB_ACTION_PATH/../setup-pnpm-store-cache/ensure-node.sh"
         openclaw_ensure_node "$REQUESTED_NODE_VERSION"
 
+    - name: Reclaim hosted Linux dependency space
+      if: ${{ runner.environment == 'github-hosted' && runner.os == 'Linux' && inputs.use-actions-cache == 'true' }}
+      shell: bash
+      env:
+        RUNNER_ENVIRONMENT: ${{ runner.environment }}
+        RUNNER_OS: ${{ runner.os }}
+      run: node "$GITHUB_ACTION_PATH/prepare-hosted-linux-disk.mts"
+
     - name: Setup pnpm
       id: setup-pnpm
       uses: ./.github/actions/setup-pnpm-store-cache

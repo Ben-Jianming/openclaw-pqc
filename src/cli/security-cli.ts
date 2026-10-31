@@ -16,6 +16,7 @@ import { formatCliCommand } from "./command-format.js";
 import { resolveCommandSecretRefsViaGateway } from "./command-secret-gateway.js";
 import { getSecurityAuditCommandSecretTargetIds } from "./command-secret-targets.js";
 import { formatHelpExamples } from "./help-format.js";
+import { registerPushKeyCli } from "./push-key-cli.js";
 import { registerWrapKeyCli } from "./wrap-key-cli.js";
 
 type SecurityAuditOptions = {
@@ -102,6 +103,7 @@ export function registerSecurityCli(program: Command) {
     );
 
   registerWrapKeyCli(security);
+  registerPushKeyCli(security);
 
   security
     .command("audit")

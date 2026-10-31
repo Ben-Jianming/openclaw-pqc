@@ -27,10 +27,12 @@ jobs:
     permissions:
       contents: read
     name: "build-artifacts"
-    runs-on: blacksmith-16vcpu-ubuntu-2404
+    # PRs validate setup on hosted hardware; only dispatch starts a real Testbox lease.
+    runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-24.04' || 'blacksmith-16vcpu-ubuntu-2404' }}
     timeout-minutes: 35
     steps:
       - name: Begin Testbox
+        if: github.event_name == 'workflow_dispatch'
         uses: useblacksmith/begin-testbox@233448af4bfdc6fca509a7f0974411ac6d8a8043
         with:
           testbox_id: ${{ inputs.testbox_id }}
@@ -158,7 +160,8 @@ jobs:
       - name: Build dist on cache miss
         if: steps.dist-cache.outputs.cache-hit != 'true'
         env:
-          NODE_OPTIONS: --max-old-space-size=16384
+          # Match the existing hosted CI heap budget; preserve the larger leased-box budget.
+          NODE_OPTIONS: ${{ github.event_name == 'pull_request' && '--max-old-space-size=8192' || '--max-old-space-size=16384' }}
         run: pnpm build:ci-artifacts
 
       - name: Build Control UI on cache miss
@@ -222,6 +225,8 @@ jobs:
           sudo chmod 0755 /usr/local/bin/pnpm
 
       - name: Hydrate Testbox provider env helper
+        # PR setup checks never need provider credentials or a credentialed lease.
+        if: github.event_name == 'workflow_dispatch'
         shell: bash
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
@@ -274,6 +279,6 @@ jobs:
 
       - name: Run Testbox
         uses: useblacksmith/run-testbox@3f60ff9ceb2c10c3feefa87dc0c6490cffae059d
-        if: always()
+        if: github.event_name == 'workflow_dispatch' && always()
         env:
           FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"

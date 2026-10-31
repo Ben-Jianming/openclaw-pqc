@@ -130,6 +130,8 @@ jobs:
           sudo chmod 0755 /usr/local/bin/pnpm
 
       - name: Hydrate Testbox provider env helper
+        # PR setup checks never need provider credentials or a credentialed lease.
+        if: github.event_name == 'workflow_dispatch'
         shell: bash
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}

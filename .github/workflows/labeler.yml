@@ -26,9 +26,11 @@ concurrency:
 permissions: {}
 
 jobs:
+  # These jobs use upstream-owned Apps and organization membership, not fork identities.
   label:
     if: >-
       ${{
+        github.repository == 'openclaw/openclaw' &&
         github.event_name == 'pull_request_target' &&
         (
           github.event.action != 'edited' ||
@@ -484,7 +486,7 @@ jobs:
             }
 
   backfill-pr-labels:
-    if: github.event_name == 'workflow_dispatch'
+    if: github.repository == 'openclaw/openclaw' && github.event_name == 'workflow_dispatch'
     permissions:
       contents: read
       pull-requests: write
@@ -792,7 +794,7 @@ jobs:
             core.info(`Processed ${processed} pull requests.`);
 
   label-issues:
-    if: github.event_name == 'issues'
+    if: github.repository == 'openclaw/openclaw' && github.event_name == 'issues'
     permissions:
       issues: write
     runs-on: ubuntu-24.04

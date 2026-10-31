@@ -19,6 +19,8 @@ permissions: {}
 
 jobs:
   auto-response:
+    # The configured App IDs belong to upstream; fork automation must not impersonate them.
+    if: github.repository == 'openclaw/openclaw'
     permissions:
       contents: read
       issues: write

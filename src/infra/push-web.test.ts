@@ -5,8 +5,9 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import webPush from "web-push";
 import { closeOpenClawStateDatabase } from "../state/openclaw-state-db.js";
-import { captureEnv, setTestEnvValue } from "../test-utils/env.js";
+import { captureEnv, deleteTestEnvValue, setTestEnvValue } from "../test-utils/env.js";
 import { SqlitePushReferenceStore } from "./pqc-push-state.js";
+import { initializePushKeySetup } from "./push-key-setup.js";
 import {
   createWebPushVapidKeyPair,
   listWebPushSubscriptions,
@@ -20,6 +21,7 @@ import {
 } from "./push-web.js";
 
 let tmpDir: string;
+let signingEnv: ReturnType<typeof captureEnv>;
 const generatedVapidKeys = vi.hoisted(
   () =>
     Object.fromEntries([
@@ -38,6 +40,8 @@ vi.mock("web-push", () => ({
 beforeEach(async () => {
   tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "push-web-test-"));
   vi.stubEnv("OPENCLAW_STATE_DIR", tmpDir);
+  signingEnv = captureEnv(["OPENCLAW_PUSH_SIGNING_KEY_FILE"]);
+  deleteTestEnvValue("OPENCLAW_PUSH_SIGNING_KEY_FILE");
   vi.clearAllMocks();
   vi.mocked(webPush.sendNotification).mockResolvedValue({ statusCode: 201 } as never);
 });
@@ -45,6 +49,7 @@ beforeEach(async () => {
 afterEach(async () => {
   closeOpenClawStateDatabase();
   vi.unstubAllEnvs();
+  signingEnv.restore();
   await fs.rm(tmpDir, { recursive: true, force: true });
 });
 
@@ -288,6 +293,11 @@ describe("subscription CRUD", () => {
 
 describe("sending", () => {
   const keys = { p256dh: "p256dh-key", auth: "auth-key" };
+
+  beforeEach(() => {
+    const nowMs = Date.now();
+    initializePushKeySetup({ validFromMs: nowMs - 1000, validUntilMs: nowMs + 600000 });
+  });
 
   it("keeps notification content off the transport and redeems it only for its owner", async () => {
     await registerWebPushSubscription({

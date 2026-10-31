@@ -186,6 +186,40 @@ describe("generate-npm-package-lock", () => {
     });
   });
 
+  it("preserves peer-decorated snapshot dependency pins for different parent versions", () => {
+    const plan = resolvePnpmLockOverridePlan({
+      packages: {
+        "@agentclientprotocol/sdk@1.2.1": {},
+        "@agentclientprotocol/sdk@1.3.0": {},
+      },
+      snapshots: {
+        "@agentclientprotocol/claude-agent-acp@0.59.0(zod@4.6.6)": {
+          dependencies: { "@agentclientprotocol/sdk": "1.2.1(zod@4.6.6)" },
+        },
+        "@agentclientprotocol/codex-acp@1.1.7": {
+          dependencies: { "@agentclientprotocol/sdk": "1.3.0(zod@4.6.6)(other@1.0.0(zod@4.6.6))" },
+        },
+      },
+    });
+    expect(plan.scopedVersionOverrides).toMatchObject({
+      "@agentclientprotocol/claude-agent-acp@0.59.0": { "@agentclientprotocol/sdk": "1.2.1" },
+      "@agentclientprotocol/codex-acp@1.1.7": { "@agentclientprotocol/sdk": "1.3.0" },
+    });
+    expect(plan.versionOverrides).not.toHaveProperty("@agentclientprotocol/sdk");
+  });
+
+  it("does not turn non-exact decorated snapshot references into exact overrides", () => {
+    const plan = resolvePnpmLockOverridePlan({
+      packages: { "sdk@1.2.1": {}, "sdk@1.3.0": {} },
+      snapshots: {
+        "parent@1.0.0": { dependencies: { sdk: "^1.3.0(peer@1.0.0)" } },
+        "other@1.0.0": { dependencies: { sdk: "link:../sdk(peer@1.0.0)" } },
+      },
+    });
+    expect(plan.scopedVersionOverrides).toEqual({});
+    expect(plan.versionOverrides).not.toHaveProperty("sdk");
+  });
+
   it("parses nested scoped package paths", () => {
     expect(
       parseLockPackagePath("node_modules/@openclaw/codex/node_modules/@anthropic-ai/sdk"),

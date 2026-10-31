@@ -90,6 +90,33 @@ async function messages(count: number) {
     ed25519PublicKeyBase64Url: b64(await getPublicKeyAsync(ed)),
     mldsa65PublicKeyBase64Url: b64(ml.publicKey),
   };
+  const nowMs = Date.now();
+  const trustedKeys = {
+    ...keys,
+    keyPolicyVersion: 1 as const,
+    keyPolicy: {
+      ed25519: {
+        algorithm: "ed25519" as const,
+        keyId: keys.keyIdEd25519,
+        senderId: keys.senderId,
+        publicKeyBase64Url: keys.ed25519PublicKeyBase64Url,
+        status: "active" as const,
+        validFromMs: nowMs - 1000,
+        validUntilMs: nowMs + 600000,
+        revision: 1,
+      },
+      mldsa65: {
+        algorithm: "ml-dsa-65" as const,
+        keyId: keys.keyIdMldsa65,
+        senderId: keys.senderId,
+        publicKeyBase64Url: keys.mldsa65PublicKeyBase64Url,
+        status: "active" as const,
+        validFromMs: nowMs - 1000,
+        validUntilMs: nowMs + 600000,
+        revision: 1,
+      },
+    },
+  };
   const values = new Map<string, { payload: string; envelope: PushV2Envelope }>();
   const rows = [];
   for (let sequence = 1; sequence <= count; sequence++) {
@@ -127,9 +154,193 @@ async function messages(count: number) {
     values.set(object_id, { payload, envelope });
   }
   await queued(rows);
-  return { keys, values, rows };
+  return { keys: trustedKeys, values, rows };
 }
 describe("real browser durable wake retries", () => {
+  it.each(["ed25519", "mldsa65"] as const)(
+    "refreshes %s policy before display and keeps the inbox on revocation",
+    async (algorithm) => {
+      const m = await messages(1);
+      let keyReads = 0;
+      let revoked = true;
+      const request = vi.fn(async (method: string, p: Record<string, unknown>) => {
+        if (method === "push.pqc.keys") {
+          keyReads++;
+          // First pass and durable acceptance see an active key; the final display check must refresh.
+          if (revoked && keyReads >= 3) {
+            return {
+              ...m.keys,
+              keyPolicy: {
+                ...m.keys.keyPolicy,
+                [algorithm]: { ...m.keys.keyPolicy[algorithm], status: "revoked", revision: 2 },
+              },
+            };
+          }
+          return m.keys;
+        }
+        if (p.acknowledge) {
+          return { acknowledged: true };
+        }
+        return m.values.get(p.object_id as string);
+      });
+      const client = { request } as unknown as GatewayBrowserClient;
+      await expect(receivePendingPqcPushes(client)).rejects.toThrow();
+      expect(showNotification).not.toHaveBeenCalled();
+      expect(await queued()).toBe(1);
+      expect(request.mock.calls.filter(([, p]) => p.acknowledge)).toHaveLength(0);
+      // A second drain must also revalidate a previously verified, persisted inbox.
+      await expect(receivePendingPqcPushes(client)).rejects.toThrow();
+      expect(showNotification).not.toHaveBeenCalled();
+      expect(await queued()).toBe(1);
+      // Test-only policy restoration models a transient provisioning fault, not an admin un-revoke API.
+      revoked = false;
+      await receivePendingPqcPushes(client);
+      expect(showNotification).toHaveBeenCalledTimes(1);
+      expect(await queued()).toBe(0);
+      expect(
+        request.mock.calls.filter(([method, p]) => method === "push.pqc.redeem" && !p.acknowledge),
+      ).toHaveLength(1);
+    },
+  );
+
+  it.each([1, 2, 3, 4, 5, 6])(
+    "halts the drain on policy refresh failure %s and recovers both ordered messages",
+    async (failAt) => {
+      const m = await messages(2);
+      let reads = 0;
+      let fail = true;
+      const request = vi.fn(async (method: string, p: Record<string, unknown>) => {
+        if (method === "push.pqc.keys") {
+          if (++reads === failAt && fail) {
+            throw new Error("transient key policy RPC failure");
+          }
+          return m.keys;
+        }
+        if (p.acknowledge) {
+          return { acknowledged: true };
+        }
+        return m.values.get(p.object_id as string);
+      });
+      const client = { request } as unknown as GatewayBrowserClient;
+      await expect(receivePendingPqcPushes(client)).rejects.toThrow();
+      const completedBeforeFailure = failAt >= 5 ? 1 : 0;
+      expect(showNotification).toHaveBeenCalledTimes(completedBeforeFailure);
+      expect(await queued()).toBe(2 - completedBeforeFailure);
+      expect(request.mock.calls.filter(([, p]) => p.acknowledge)).toHaveLength(
+        completedBeforeFailure,
+      );
+      fail = false;
+      await receivePendingPqcPushes(client);
+      expect(showNotification.mock.calls.map(([title]) => title)).toEqual([
+        "Verified 1",
+        "Verified 2",
+      ]);
+      expect(await queued()).toBe(0);
+      expect(request.mock.calls.filter(([, p]) => p.acknowledge)).toHaveLength(2);
+    },
+  );
+
+  describe.each([1, 3])("unusable policy response at refresh %s", (failAt) => {
+    it.each([
+      "missing-policy",
+      "missing-ed-policy",
+      "missing-ml-policy",
+      "invalid-validity",
+      "missing-ed-key",
+      "short-ed-key",
+      "missing-sender",
+      "missing-ml-key-id",
+      "invalid-revision",
+    ])("halts on %s and later recovers both messages", async (kind) => {
+      const m = await messages(2);
+      const malformed = structuredClone(m.keys) as unknown as Record<string, unknown>;
+      const policies = malformed.keyPolicy as Record<string, Record<string, unknown>>;
+      switch (kind) {
+        case "missing-policy":
+          delete malformed.keyPolicy;
+          break;
+        case "missing-ed-policy":
+          delete policies.ed25519;
+          break;
+        case "missing-ml-policy":
+          delete policies.mldsa65;
+          break;
+        case "invalid-validity":
+          policies.ed25519!.validUntilMs = "tomorrow";
+          break;
+        case "missing-ed-key":
+          delete malformed.ed25519PublicKeyBase64Url;
+          break;
+        case "short-ed-key":
+          malformed.ed25519PublicKeyBase64Url = "AA";
+          policies.ed25519!.publicKeyBase64Url = "AA";
+          break;
+        case "missing-sender":
+          delete malformed.senderId;
+          delete policies.ed25519!.senderId;
+          delete policies.mldsa65!.senderId;
+          break;
+        case "missing-ml-key-id":
+          delete malformed.keyIdMldsa65;
+          delete policies.mldsa65!.keyId;
+          break;
+        case "invalid-revision":
+          policies.mldsa65!.revision = "1";
+          break;
+      }
+      let reads = 0;
+      let fail = true;
+      const request = vi.fn(async (method: string, p: Record<string, unknown>) => {
+        if (method === "push.pqc.keys") {
+          return ++reads === failAt && fail ? malformed : m.keys;
+        }
+        if (p.acknowledge) {
+          return { acknowledged: true };
+        }
+        return m.values.get(p.object_id as string);
+      });
+      const client = { request } as unknown as GatewayBrowserClient;
+      await expect(receivePendingPqcPushes(client)).rejects.toThrow();
+      expect(showNotification).not.toHaveBeenCalled();
+      expect(await queued()).toBe(2);
+      expect(request.mock.calls.filter(([, p]) => p.acknowledge)).toHaveLength(0);
+      fail = false;
+      await receivePendingPqcPushes(client);
+      expect(showNotification.mock.calls.map(([title]) => title)).toEqual([
+        "Verified 1",
+        "Verified 2",
+      ]);
+      expect(await queued()).toBe(0);
+    });
+  });
+
+  it("does not display or acknowledge when the final policy refresh disconnects", async () => {
+    const m = await messages(1);
+    let reads = 0;
+    let fail = true;
+    const request = vi.fn(async (method: string, p: Record<string, unknown>) => {
+      if (method === "push.pqc.keys") {
+        if (++reads >= 3 && fail) {
+          throw new Error("connection lost during policy refresh");
+        }
+        return m.keys;
+      }
+      if (p.acknowledge) {
+        return { acknowledged: true };
+      }
+      return m.values.get(p.object_id as string);
+    });
+    const client = { request } as unknown as GatewayBrowserClient;
+    await expect(receivePendingPqcPushes(client)).rejects.toThrow();
+    expect(showNotification).not.toHaveBeenCalled();
+    expect(await queued()).toBe(1);
+    expect(request.mock.calls.filter(([, p]) => p.acknowledge)).toHaveLength(0);
+    fail = false;
+    await receivePendingPqcPushes(client);
+    expect(showNotification).toHaveBeenCalledTimes(1);
+    expect(await queued()).toBe(0);
+  });
+
   it("keeps four quota failures after 60 successful redemptions and displays them after retry", async () => {
     const m = await messages(64);
     let attempts = 0;
@@ -185,7 +396,7 @@ describe("real browser durable wake retries", () => {
     await queued([{ ...m.rows[0], expires_at_ms: Date.now() - 1 }]);
     const request = vi.fn(async () => m.keys);
     await receivePendingPqcPushes({ request } as unknown as GatewayBrowserClient);
-    expect(request).toHaveBeenCalledTimes(1);
+    expect(request).not.toHaveBeenCalled();
     expect(await queued()).toBe(0);
     expect(showNotification).not.toHaveBeenCalled();
   });

@@ -23,8 +23,11 @@ describe("zod default locale", () => {
     try {
       // Simulate a built dist: zod@4 is sideEffects:false, so its implicit
       // locale registration can be dropped by bundling.
+      // Zod 4.6 also installs its locale during schema construction. Clear it
+      // after building the probe so this still exercises the missing-locale state.
+      const probe = z.object({ expected: z.string() }).strict();
       z.config({ localeError: undefined });
-      const degraded = z.object({ expected: z.string() }).strict().safeParse({ unexpected: true });
+      const degraded = probe.safeParse({ unexpected: true });
       expect(firstIssueMessage(degraded)).toBe("Invalid input");
 
       const { OpenClawSchema } = await import("./zod-schema.js");

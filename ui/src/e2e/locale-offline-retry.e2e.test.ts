@@ -70,17 +70,27 @@ describeControlUiE2e("Control UI offline locale retry", () => {
     await server?.close();
   });
 
-  it("applies a locale whose first chunk request failed after the Gateway reconnects", async () => {
+  it.each([
+    { name: "transient locale request failure", requiresReload: false },
+    { name: "locale import unavailable until document reload", requiresReload: true },
+  ])("recovers $name after the Gateway reconnects", async ({ requiresReload }) => {
     const context = await createContext();
     const page = await context.newPage();
     const gateway = await installMockGateway(page);
     let abortedLocaleRequests = 0;
+    let navigationCount = 0;
     const abortFrenchLocale = async (route: Route) => {
-      abortedLocaleRequests += 1;
-      await route.abort("internetdisconnected");
+      // Browsers may retry a failed dynamic import without a new document.
+      // Keep the stale-import scenario unavailable for the original document
+      // so it exercises guarded reload recovery rather than transient retry.
+      if (abortedLocaleRequests === 0 || (requiresReload && navigationCount === 0)) {
+        abortedLocaleRequests += 1;
+        await route.abort("internetdisconnected");
+        return;
+      }
+      await route.continue();
     };
     await page.route(frenchLocaleModule, abortFrenchLocale);
-    let navigationCount = 0;
 
     try {
       const response = await page.goto(`${server.baseUrl}settings/general`);
@@ -110,21 +120,26 @@ describeControlUiE2e("Control UI offline locale retry", () => {
       expect(await documentMarker(page)).toBe("same-document");
       expect(navigationCount).toBe(0);
 
-      await page.unroute(frenchLocaleModule, abortFrenchLocale);
       await reconnect(page, gateway);
 
       await page
         .locator(".settings-row__title", { hasText: "Langue" })
         .waitFor({ timeout: 10_000 });
-      expect(await documentMarker(page)).toBeUndefined();
-      expect(navigationCount).toBe(1);
+      const marker = await documentMarker(page);
+      const reloaded = marker === undefined;
+      expect(marker).toBe(reloaded ? undefined : "same-document");
+      if (requiresReload) {
+        expect(reloaded).toBe(true);
+      }
+      const expectedNavigations = reloaded ? 1 : 0;
+      expect(navigationCount).toBe(expectedNavigations);
       expect(
         await page.evaluate(() =>
           sessionStorage.getItem("openclaw.controlUi.staleChunkReloadBuildId"),
         ),
-      ).toBe("e2e");
+      ).toBe(reloaded ? "e2e" : null);
       await page.waitForTimeout(500);
-      expect(navigationCount).toBe(1);
+      expect(navigationCount).toBe(expectedNavigations);
       expect(new URL(page.url()).pathname).toBe("/settings/general");
     } finally {
       await page.unroute(frenchLocaleModule, abortFrenchLocale);

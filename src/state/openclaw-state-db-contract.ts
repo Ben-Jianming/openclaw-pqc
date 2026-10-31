@@ -10,6 +10,7 @@ export const OPENCLAW_STATE_STRICT_SCHEMA_VERSION = 3;
 export const LAZY_ADDITIVE_STATE_TABLES = [
   "model_catalog_remote",
   "sidebar_sections",
+  "pqc_push_key_policies",
   "pqc_push_sequences",
   "pqc_push_replay",
   "pqc_push_nonces",

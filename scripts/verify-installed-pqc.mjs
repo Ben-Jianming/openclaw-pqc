@@ -272,6 +272,7 @@ if (process.argv[2] === "--probe") {
       mode: "cli",
       role: "operator",
       scopes: ["operator.read"],
+      caps: ["push-key-policy-v1"],
       requestTimeoutMs: 10000,
       onHelloOk: acceptHello,
       onConnectError: rejectHello,
@@ -461,6 +462,26 @@ if (process.argv[2] === "--probe") {
   delete env.NODE_OPTIONS;
   delete env.NODE_COMPILE_CACHE;
   try {
+    // Initialization is an explicit operator action, never a read-side effect.
+    // Exercise that public CLI only inside this verifier's throwaway profile.
+    const uninitialized = child([cliPath, "security", "push-key", "status", "--json"], env, false);
+    assert.equal(JSON.parse(uninitialized.stdout).ready, false);
+    const now = Date.now();
+    const initialized = child(
+      [
+        cliPath,
+        "security",
+        "push-key",
+        "init",
+        "--valid-from-ms",
+        String(now - 1000),
+        "--valid-until-ms",
+        String(now + 60 * 60_000),
+        "--json",
+      ],
+      env,
+    );
+    assert.equal(JSON.parse(initialized.stdout).ready, true);
     child([scriptPath, "--probe", "first"], env);
     child([scriptPath, "--probe", "restart"], env);
     const initial = JSON.parse(readFileSync(proofPath(directory), "utf8"));

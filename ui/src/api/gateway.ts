@@ -31,6 +31,7 @@ import {
   PROTOCOL_VERSION,
 } from "@openclaw/gateway-client/browser";
 import type { ControlUiSessionPullRequests } from "../../../src/gateway/control-ui-contract.js";
+import { PUSH_KEY_POLICY_CAPABILITY } from "../../../src/shared/push-key-policy.ts";
 import {
   clearDeviceAuthToken,
   loadDeviceAuthToken,
@@ -490,6 +491,7 @@ export class GatewayBrowserClient {
         scopes,
         device,
         caps: [
+          PUSH_KEY_POLICY_CAPABILITY,
           GATEWAY_CLIENT_CAPS.AGENT_KIND,
           GATEWAY_CLIENT_CAPS.APPROVALS,
           GATEWAY_CLIENT_CAPS.TASK_SUGGESTIONS,
