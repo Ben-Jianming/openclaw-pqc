@@ -12,6 +12,12 @@ import {
   finalizeNodePairingCleanupClaim,
   recordPairedNodeConnection,
 } from "../../../infra/node-pairing.js";
+import { roleScopesAllow } from "../../../shared/operator-scope-compat.js";
+import {
+  hasPushRecoveryCapabilities,
+  PUSH_RECOVERY_CAPABILITY,
+  PUSH_RECOVERY_ACTIVE_CAPABILITY,
+} from "../../../shared/push-recovery.js";
 import { listProfiles } from "../../../state/user-profiles.js";
 import { resolveRuntimeServiceVersion } from "../../../version.js";
 import {
@@ -98,6 +104,18 @@ export async function sendGatewayHello(
         GATEWAY_SERVER_CAPS.BOARD_WIDGET_PUT_CANVAS_DOC,
         GATEWAY_SERVER_CAPS.CHAT_SEND_ROUTING_CONTRACT,
         GATEWAY_SERVER_CAPS.SYSTEM_AGENT_SETUP_MODEL_REF,
+        ...(connectParams.caps?.includes(PUSH_RECOVERY_CAPABILITY)
+          ? [PUSH_RECOVERY_CAPABILITY]
+          : []),
+        ...(authMethod === "device-token" &&
+        device &&
+        state.deviceAuthPayloadVersion &&
+        !controlUiDeviceAuthMigrationPending &&
+        role === "operator" &&
+        hasPushRecoveryCapabilities(connectParams.caps) &&
+        roleScopesAllow({ role, requestedScopes: ["operator.read"], allowedScopes: scopes })
+          ? [PUSH_RECOVERY_ACTIVE_CAPABILITY]
+          : []),
       ],
     },
     snapshot,

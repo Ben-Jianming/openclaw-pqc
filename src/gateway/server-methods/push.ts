@@ -6,6 +6,8 @@ import {
   errorShape,
   validatePushTestParams,
   validatePushPqcKeysParams,
+  validatePushPqcPendingParams,
+  validatePushPqcPendingAckParams,
   validatePushPqcRedeemParams,
   validateWebPushSubscribeParams,
   validateWebPushTestParams,
@@ -32,6 +34,10 @@ import {
 import { PUSH_KEY_POLICY_CAPABILITY } from "../../shared/push-key-policy.js";
 import { respondInvalidParams, respondUnavailableOnThrow } from "./nodes.helpers.js";
 import { resolveDispatchableNodeSession } from "./nodes.shared.js";
+import {
+  requirePushRecoveryAuthorization,
+  requirePushRecoveryRecipient,
+} from "./push-recovery-auth.js";
 import { normalizeTrimmedString } from "./record-shared.js";
 import type { GatewayRequestHandlers, GatewayRequestHandlerOptions } from "./types.js";
 
@@ -58,6 +64,41 @@ function requirePushKeyPolicyClient({
 }
 
 export const pushHandlers: GatewayRequestHandlers = {
+  "push.pqc.pending": async ({ params, client, respond }) => {
+    try {
+      const { recipientId, tokenSha256 } = await requirePushRecoveryAuthorization(client);
+      if (!validatePushPqcPendingParams(params) || !allowPushRedemption(recipientId)) {
+        throw new Error("push recovery unavailable");
+      }
+      respond(
+        true,
+        new SqlitePushReferenceStore().listSnapshotForAuthenticatedRecipient(
+          recipientId,
+          tokenSha256,
+          params,
+        ),
+        undefined,
+      );
+    } catch {
+      respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, "push recovery unavailable"));
+    }
+  },
+  "push.pqc.pending.ack": async ({ params, client, respond }) => {
+    try {
+      const recipientId = await requirePushRecoveryRecipient(client);
+      if (
+        !validatePushPqcPendingAckParams(params) ||
+        !allowPushRedemption(recipientId, {}, Date.now(), "acknowledge")
+      ) {
+        throw new Error("push recovery unavailable");
+      }
+      new SqlitePushReferenceStore().acknowledgeForAuthenticatedRecipient(params, recipientId);
+      respond(true, { acknowledged: true }, undefined);
+    } catch {
+      respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, "push recovery unavailable"));
+    }
+  },
+
   "push.pqc.keys": ({ params, client, respond }) => {
     const recipientId = client?.connect.device?.id;
     if (!recipientId || !validatePushPqcKeysParams(params)) {

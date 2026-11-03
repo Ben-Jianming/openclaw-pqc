@@ -107,14 +107,19 @@ export function createWebPushCapability(gateway: ApplicationGateway): WebPushCap
   const receiveSecurePushes = (client: GatewayBrowserClient) => {
     clearTimeout(securePushRetry);
     securePushRetry = undefined;
+    if (client.pushRecoveryRequired && !client.pushRecoveryReady && client.preparePushRecovery()) {
+      return;
+    }
     void import("./pqc-push.ts")
       .then((m) => m.receivePendingPqcPushes(client))
       .catch((error: unknown) => {
         publish({ error: webPushError(error) });
-        if (disposed || securePushRetry !== undefined) {
+      })
+      .finally(() => {
+        if (disposed || gateway.snapshot.client !== client || securePushRetry !== undefined) {
           return;
         }
-        // The server permits 60 attempts per minute; retry retained references after that window.
+        // Discover work even if the push provider never delivered a wake. Finite server TTL still applies.
         securePushRetry = setTimeout(() => {
           securePushRetry = undefined;
           const current = gateway.snapshot.client;

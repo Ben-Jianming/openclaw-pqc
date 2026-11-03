@@ -26,6 +26,7 @@ CREATE TABLE IF NOT EXISTS pqc_push_key_policies (
 
 CREATE TABLE IF NOT EXISTS pqc_push_sequences (
   sender_id TEXT NOT NULL, recipient_id TEXT NOT NULL, sequence INTEGER NOT NULL,
+  published_sequence INTEGER NOT NULL DEFAULT 0,
   PRIMARY KEY (sender_id, recipient_id)
 ) STRICT;
 CREATE TABLE IF NOT EXISTS pqc_push_replay (
@@ -38,8 +39,15 @@ CREATE TABLE IF NOT EXISTS pqc_push_nonces (
 ) STRICT;
 CREATE TABLE IF NOT EXISTS pqc_push_objects (
   object_id TEXT PRIMARY KEY, token_hash TEXT NOT NULL, recipient_id TEXT NOT NULL,
-  payload TEXT NOT NULL, envelope_json TEXT NOT NULL, expires_at_ms INTEGER NOT NULL
+  payload TEXT NOT NULL, envelope_json TEXT NOT NULL, expires_at_ms INTEGER NOT NULL,
+  publication_version INTEGER NOT NULL DEFAULT 0
 ) STRICT;
+CREATE TABLE IF NOT EXISTS pqc_push_recovery_snapshots (
+  snapshot_id TEXT PRIMARY KEY, recipient_id TEXT NOT NULL, token_sha256 TEXT NOT NULL,
+  expires_at_ms INTEGER NOT NULL, objects_json TEXT NOT NULL CHECK (length(objects_json) <= 32768)
+) STRICT;
+CREATE INDEX IF NOT EXISTS idx_pqc_push_snapshot_recipient ON pqc_push_recovery_snapshots(recipient_id, expires_at_ms);
+
 CREATE TABLE IF NOT EXISTS pqc_push_bindings (
   subscription_id TEXT PRIMARY KEY, device_id TEXT NOT NULL
 ) STRICT;
@@ -64,6 +72,8 @@ const ensuredPqcPushSchemas = new WeakSet<object>();
 export function ensurePqcPushStateSchema(database: DatabaseSync): void {
   if (!ensuredPqcPushSchemas.has(database)) {
     database.exec(PQC_PUSH_SCHEMA_SQL);
+    ensureColumn(database, "pqc_push_objects", "publication_version INTEGER NOT NULL DEFAULT 0");
+    ensureColumn(database, "pqc_push_sequences", "published_sequence INTEGER NOT NULL DEFAULT 0");
     // DDL inside a caller's transaction may still roll back. Cache only a
     // committed ensure; older runtimes without transaction introspection do not cache.
     if ("isTransaction" in database && !database.isTransaction) {

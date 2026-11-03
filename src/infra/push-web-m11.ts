@@ -15,17 +15,17 @@ export function buildWebPushPayloadWithEnvelope(
   if (!recipientId) {
     throw new Error("authenticated push recipient required");
   }
-  const signed = signPushEnvelope({
-    payload: JSON.stringify(payload),
-    recipientId,
-    env: options.env,
-  });
   const store = options.store ?? new SqlitePushReferenceStore({ env: options.env });
-  const reference = store.create({
-    payload: signed.payload,
-    envelope: signed.envelope,
-    recipientId,
-  });
+  const buildValue = (env: NodeJS.ProcessEnv = options.env ?? process.env) => {
+    const signed = signPushEnvelope({ payload: JSON.stringify(payload), recipientId, env });
+    return { payload: signed.payload, envelope: signed.envelope, recipientId };
+  };
+  // Production Web Push and APNs use the shared SQLite store. Custom stores do
+  // not participate in the SQLite recovery RPC or its publication guarantees.
+  const reference =
+    store instanceof SqlitePushReferenceStore
+      ? store.createWithSignature(buildValue)
+      : store.create(buildValue());
   const wake = { kind: "openclaw.pqc.wake.v2" as const, pqc_ref: reference };
   if (Buffer.byteLength(JSON.stringify(wake), "utf8") > WEB_PUSH_PLAINTEXT_LIMIT) {
     store.discard(reference);

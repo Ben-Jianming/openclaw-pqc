@@ -5,6 +5,8 @@ import * as uiCommand from "./ui-command.js";
 export const IntegrationProtocolSchemas = {
   PushTestParams: push.PushTestParamsSchema,
   PushTestResult: push.PushTestResultSchema,
+  PushPqcPendingParams: push.PushPqcPendingParamsSchema,
+  PushPqcPendingAckParams: push.PushPqcPendingAckParamsSchema,
   UiSplitCommand: uiCommand.UiSplitCommandSchema,
   UiClosePaneCommand: uiCommand.UiClosePaneCommandSchema,
   UiFocusCommand: uiCommand.UiFocusCommandSchema,

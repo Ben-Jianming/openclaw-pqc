@@ -33,6 +33,10 @@ import {
 import type { ControlUiSessionPullRequests } from "../../../src/gateway/control-ui-contract.js";
 import { PUSH_KEY_POLICY_CAPABILITY } from "../../../src/shared/push-key-policy.ts";
 import {
+  PUSH_RECOVERY_CAPABILITY,
+  PUSH_RECOVERY_ACTIVE_CAPABILITY,
+} from "../../../src/shared/push-recovery.ts";
+import {
   clearDeviceAuthToken,
   loadDeviceAuthToken,
   storeDeviceAuthToken,
@@ -41,6 +45,7 @@ import {
 } from "../lib/nodes/index.ts";
 import { generateUUID } from "../lib/uuid.ts";
 import {
+  canUpgradePushRecoveryToDeviceAuth,
   gatewayRecoveryScopeMaterial,
   GatewayRecoveryScopeTracker,
   storedDeviceTokenScopesAllowRead,
@@ -314,6 +319,33 @@ async function buildGatewayConnectDevice(params: {
 export class GatewayBrowserClient {
   private readonly client: GatewayProtocolClient<ConnectPlan>;
   inboundActivitySeq = 0;
+  private pushRecoveryNegotiated = false;
+  private pushRecoverySupported = false;
+  private preferDeviceTokenForRecovery = false;
+  private connectedDeviceId: string | undefined;
+  get pushRecoveryRequired(): boolean {
+    return this.client.connected && this.pushRecoverySupported;
+  }
+  get pushRecoveryReady(): boolean {
+    return this.client.connected && this.pushRecoveryNegotiated;
+  }
+  /** Explicit push-only upgrade; keep ordinary UI authentication selection unchanged. */
+  preparePushRecovery(): boolean {
+    if (
+      !canUpgradePushRecoveryToDeviceAuth({
+        required: this.pushRecoveryRequired,
+        ready: this.pushRecoveryReady,
+        requested: this.preferDeviceTokenForRecovery,
+        deviceId: this.connectedDeviceId,
+        gatewayUrl: this.opts.url,
+      })
+    ) {
+      return false;
+    }
+    this.preferDeviceTokenForRecovery = true;
+    this.forceReconnect("secure push device authentication");
+    return true;
+  }
   private pendingDeviceTokenRetry = false;
   private deviceTokenRetryBudgetUsed = false;
   // This optional surface can be advertised before its runtime dependency is usable.
@@ -349,6 +381,8 @@ export class GatewayBrowserClient {
       },
       resolveClose: (context) => this.resolveClose(context),
       onClose: (context, decision) => {
+        this.pushRecoveryNegotiated = false;
+        this.pushRecoverySupported = false;
         const error = context.connectFailure?.error;
         this.client.recordTiming("failed", context.generation, undefined, {
           errorCode: error instanceof GatewayRequestError ? error.code : "SOCKET_CLOSED",
@@ -492,6 +526,7 @@ export class GatewayBrowserClient {
         device,
         caps: [
           PUSH_KEY_POLICY_CAPABILITY,
+          PUSH_RECOVERY_CAPABILITY,
           GATEWAY_CLIENT_CAPS.AGENT_KIND,
           GATEWAY_CLIENT_CAPS.APPROVALS,
           GATEWAY_CLIENT_CAPS.TASK_SUGGESTIONS,
@@ -516,6 +551,11 @@ export class GatewayBrowserClient {
   }
 
   private handleConnectHello(hello: GatewayHelloOk, plan: ConnectPlan) {
+    this.pushRecoverySupported =
+      hello.features?.capabilities?.includes(PUSH_RECOVERY_CAPABILITY) === true;
+    this.pushRecoveryNegotiated =
+      hello.features?.capabilities?.includes(PUSH_RECOVERY_ACTIVE_CAPABILITY) === true;
+    this.connectedDeviceId = plan.deviceIdentity?.deviceId;
     this.pendingDeviceTokenRetry = false;
     this.deviceTokenRetryBudgetUsed = false;
     this.resetSessionPullRequestsAvailability();
@@ -599,10 +639,17 @@ export class GatewayBrowserClient {
       params.role,
       storedEntry?.scopes ?? [],
     );
+    // Recovery cannot silently use shared gateway credentials in place of the
+    // approved device token. Preserve its stored scopes and fail closed if revoked.
+    const preferDeviceToken =
+      this.preferDeviceTokenForRecovery &&
+      storedTokenCanRead &&
+      Boolean(storedEntry?.token) &&
+      !this.opts.bootstrapToken;
     return selectGatewayConnectAuth({
-      token: this.opts.token,
+      token: preferDeviceToken ? undefined : this.opts.token,
       bootstrapToken: this.opts.bootstrapToken,
-      password: this.opts.password,
+      password: preferDeviceToken ? undefined : this.opts.password,
       storedToken: storedTokenCanRead ? storedEntry?.token : undefined,
       storedScopes: storedEntry?.scopes,
       pendingDeviceTokenRetry: this.pendingDeviceTokenRetry,

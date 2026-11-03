@@ -60,6 +60,26 @@ export const WebPushTestParamsSchema = closedObject({
 });
 
 export const PushPqcKeysParamsSchema = closedObject({});
+/** A bounded page scoped exclusively by the server-retained authenticated device. */
+export const PushPqcPendingParamsSchema = closedObject({
+  after: Type.Optional(
+    closedObject({
+      snapshotId: Type.String({
+        minLength: 36,
+        maxLength: 36,
+        pattern: "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+      }),
+      offset: Type.Integer({ minimum: 0, maximum: 100 }),
+    }),
+  ),
+});
+/** No capability token or caller-supplied recipient is accepted on the recovery surface. */
+export const PushPqcPendingAckParamsSchema = closedObject({
+  version: Type.Literal(1),
+  object_id: Type.String({ minLength: 1, maxLength: 64 }),
+  expires_at_ms: Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }),
+});
+
 export const PushPqcRedeemParamsSchema = closedObject({
   version: Type.Literal(1),
   object_id: Type.String({ minLength: 1, maxLength: 64 }),

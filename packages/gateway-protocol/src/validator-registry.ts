@@ -98,6 +98,8 @@ import {
   type WebPushTestParams,
   WebPushTestParamsSchema,
   PushPqcKeysParamsSchema,
+  PushPqcPendingParamsSchema,
+  PushPqcPendingAckParamsSchema,
   PushPqcRedeemParamsSchema,
   SecretsResolveParamsSchema,
   SecretsResolveResultSchema,
@@ -688,3 +690,6 @@ export const validateUpdateRunParams = lazyCompile(UpdateRunParamsSchema);
 export const validateUiCommandParams = lazyCompile(UiCommandParamsSchema);
 export const validateWebLoginStartParams = lazyCompile(WebLoginStartParamsSchema);
 export const validateWebLoginWaitParams = lazyCompile(WebLoginWaitParamsSchema);
+
+export const validatePushPqcPendingParams = lazyCompile(PushPqcPendingParamsSchema);
+export const validatePushPqcPendingAckParams = lazyCompile(PushPqcPendingAckParamsSchema);

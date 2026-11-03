@@ -2135,6 +2135,7 @@ CREATE TABLE IF NOT EXISTS model_catalog_remote (
 
 CREATE TABLE IF NOT EXISTS pqc_push_sequences (
   sender_id TEXT NOT NULL, recipient_id TEXT NOT NULL, sequence INTEGER NOT NULL,
+  published_sequence INTEGER NOT NULL DEFAULT 0,
   PRIMARY KEY (sender_id, recipient_id)
 ) STRICT;
 CREATE TABLE IF NOT EXISTS pqc_push_replay (
@@ -2147,8 +2148,15 @@ CREATE TABLE IF NOT EXISTS pqc_push_nonces (
 ) STRICT;
 CREATE TABLE IF NOT EXISTS pqc_push_objects (
   object_id TEXT PRIMARY KEY, token_hash TEXT NOT NULL, recipient_id TEXT NOT NULL,
-  payload TEXT NOT NULL, envelope_json TEXT NOT NULL, expires_at_ms INTEGER NOT NULL
+  payload TEXT NOT NULL, envelope_json TEXT NOT NULL, expires_at_ms INTEGER NOT NULL,
+  publication_version INTEGER NOT NULL DEFAULT 0
 ) STRICT;
+CREATE TABLE IF NOT EXISTS pqc_push_recovery_snapshots (
+  snapshot_id TEXT PRIMARY KEY, recipient_id TEXT NOT NULL, token_sha256 TEXT NOT NULL,
+  expires_at_ms INTEGER NOT NULL, objects_json TEXT NOT NULL CHECK (length(objects_json) <= 32768)
+) STRICT;
+CREATE INDEX IF NOT EXISTS idx_pqc_push_snapshot_recipient ON pqc_push_recovery_snapshots(recipient_id, expires_at_ms);
+
 CREATE TABLE IF NOT EXISTS pqc_push_bindings (
   subscription_id TEXT PRIMARY KEY, device_id TEXT NOT NULL
 ) STRICT;

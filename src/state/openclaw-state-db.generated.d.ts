@@ -1058,8 +1058,17 @@ export interface PqcPushObjects {
   expires_at_ms: number;
   object_id: string;
   payload: string;
+  publication_version: Generated<number>;
   recipient_id: string;
   token_hash: string;
+}
+
+export interface PqcPushRecoverySnapshots {
+  expires_at_ms: number;
+  objects_json: string;
+  recipient_id: string;
+  snapshot_id: string;
+  token_sha256: string;
 }
 
 export interface PqcPushReplay {
@@ -1069,6 +1078,7 @@ export interface PqcPushReplay {
 }
 
 export interface PqcPushSequences {
+  published_sequence: Generated<number>;
   recipient_id: string;
   sender_id: string;
   sequence: number;
@@ -1649,6 +1659,7 @@ export interface DB {
   pqc_push_key_policies: PqcPushKeyPolicies;
   pqc_push_nonces: PqcPushNonces;
   pqc_push_objects: PqcPushObjects;
+  pqc_push_recovery_snapshots: PqcPushRecoverySnapshots;
   pqc_push_replay: PqcPushReplay;
   pqc_push_sequences: PqcPushSequences;
   pqc_push_wakes: PqcPushWakes;

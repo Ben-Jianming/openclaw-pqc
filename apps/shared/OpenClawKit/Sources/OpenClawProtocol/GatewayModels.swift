@@ -3762,6 +3762,42 @@ public struct PushTestResult: Codable, Sendable {
     }
 }
 
+public struct PushPqcPendingParams: Codable, Sendable {
+    public let after: [String: AnyCodable]?
+
+    public init(
+        after: [String: AnyCodable]? = nil)
+    {
+        self.after = after
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case after
+    }
+}
+
+public struct PushPqcPendingAckParams: Codable, Sendable {
+    public let version: Double
+    public let objectId: String
+    public let expiresAtMs: Int
+
+    public init(
+        version: Double,
+        objectId: String,
+        expiresAtMs: Int)
+    {
+        self.version = version
+        self.objectId = objectId
+        self.expiresAtMs = expiresAtMs
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case version
+        case objectId = "object_id"
+        case expiresAtMs = "expires_at_ms"
+    }
+}
+
 public struct UiSplitCommand: Codable, Sendable {
     public let kind: String
     public let direction: AnyCodable

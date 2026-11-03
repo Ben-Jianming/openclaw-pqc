@@ -1,6 +1,11 @@
 import { verifyAsync } from "@noble/ed25519";
 import { ml_dsa65 } from "@noble/post-quantum/ml-dsa.js";
 import { assertPushKeyPolicy, type PushKeyPolicy } from "../../../src/shared/push-key-policy.ts";
+import {
+  MAX_PUSH_RECOVERY_PAGE_BYTES,
+  MAX_PUSH_RECOVERY_PAGE_ITEMS,
+  MAX_PUSH_RECOVERY_PAGES,
+} from "../../../src/shared/push-recovery.ts";
 import type { GatewayBrowserClient } from "../api/gateway.ts";
 import { loadOrCreateDeviceIdentity } from "../lib/nodes/index.ts";
 
@@ -205,7 +210,8 @@ function openPushDatabase(): Promise<IDBDatabase> {
 type PendingPush = {
   version: 1;
   object_id: string;
-  token: string;
+  token?: string;
+  recovery?: true;
   expires_at_ms: number;
   inbox?: {
     payload: string;
@@ -250,8 +256,35 @@ async function acceptDurably(
           tx.objectStore("wakes").put({ ...reference, inbox: { payload, envelope: e } });
           accepted = true;
         };
+        const commitBounded = () => {
+          const wakes = tx.objectStore("wakes");
+          const all = wakes.getAll();
+          all.addEventListener(
+            "success",
+            () => {
+              const live = (all.result as PendingPush[]).filter(
+                (row) => row.expires_at_ms > Date.now(),
+              );
+              for (const row of all.result as PendingPush[]) {
+                if (row.expires_at_ms <= Date.now()) {
+                  wakes.delete(row.object_id);
+                }
+              }
+              if (!live.some((row) => row.object_id === reference.object_id) && live.length >= 64) {
+                // Verified work may replace an unverified relay wake, never another committed inbox.
+                const disposable = live.find((row) => !row.inbox);
+                if (!disposable) {
+                  return;
+                }
+                wakes.delete(disposable.object_id);
+              }
+              commit();
+            },
+            { once: true },
+          );
+        };
         if (prior) {
-          commit();
+          commitBounded();
         } else {
           // Never evict a peer high-water mark: that would permit old replay.
           const count = store.count();
@@ -259,7 +292,7 @@ async function acceptDurably(
             "success",
             () => {
               if (count.result < 10000) {
-                commit();
+                commitBounded();
               }
             },
             { once: true },
@@ -345,6 +378,92 @@ export function receivePendingPqcPushes(client: GatewayBrowserClient): Promise<v
 
 class PushPolicyRefreshError extends Error {}
 
+async function discoverPendingPushes(
+  client: GatewayBrowserClient,
+  recipientId: string,
+  known: PendingPush[],
+): Promise<{
+  references: PendingPush[];
+  recovered: Map<string, { payload: string; envelope: PushV2Envelope }>;
+}> {
+  // Publish no partial discovery state: later-page failures must not advance replay or upgrade a legacy wake.
+  const references = [...known];
+  const recovered = new Map<string, { payload: string; envelope: PushV2Envelope }>();
+  const seen = new Set<string>();
+  let snapshotId: string | undefined;
+  let after: { snapshotId: string; offset: number } | undefined;
+  for (let pageIndex = 0; pageIndex < MAX_PUSH_RECOVERY_PAGES; pageIndex++) {
+    const page = (await client.request("push.pqc.pending", after ? { after } : {})) as {
+      snapshotId: string;
+      items: Array<{
+        object_id: string;
+        expires_at_ms: number;
+        value: { payload: string; envelope: PushV2Envelope; recipientId: string };
+      }>;
+      next?: { snapshotId: string; offset: number };
+    };
+    if (
+      !page ||
+      typeof page.snapshotId !== "string" ||
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(page.snapshotId) ||
+      (snapshotId !== undefined && snapshotId !== page.snapshotId) ||
+      !Array.isArray(page.items) ||
+      page.items.length > MAX_PUSH_RECOVERY_PAGE_ITEMS ||
+      utf8.encode(JSON.stringify(page)).length > MAX_PUSH_RECOVERY_PAGE_BYTES
+    ) {
+      throw new Error("Invalid secure push recovery response.");
+    }
+    snapshotId = page.snapshotId;
+    for (const item of page.items) {
+      if (
+        !item ||
+        typeof item.object_id !== "string" ||
+        !/^[0-9a-f-]{36}$/.test(item.object_id) ||
+        seen.has(item.object_id) ||
+        !Number.isSafeInteger(item.expires_at_ms) ||
+        item.expires_at_ms <= Date.now() ||
+        item.value?.recipientId !== recipientId
+      ) {
+        throw new Error("Invalid secure push recovery binding.");
+      }
+      seen.add(item.object_id);
+      const existing = references.find((row) => row.object_id === item.object_id);
+      if (existing && existing.expires_at_ms !== item.expires_at_ms) {
+        throw new Error("Conflicting secure push recovery reference.");
+      }
+      if (existing) {
+        // Snapshot membership selects request-time authorization for both read
+        // and ACK, even when an earlier relay wake has a valid bearer token.
+        // Replace this local record; a later-page failure publishes no upgrade.
+        references[references.indexOf(existing)] = { ...existing, recovery: true };
+      } else {
+        references.push({
+          version: 1,
+          object_id: item.object_id,
+          expires_at_ms: item.expires_at_ms,
+          recovery: true,
+        });
+      }
+      recovered.set(item.object_id, item.value);
+    }
+    if (!page.next) {
+      break;
+    }
+    if (
+      page.items.length === 0 ||
+      page.next.snapshotId !== snapshotId ||
+      !Number.isSafeInteger(page.next.offset) ||
+      page.next.offset <= (after?.offset ?? 0) ||
+      page.next.offset > 100 ||
+      pageIndex === MAX_PUSH_RECOVERY_PAGES - 1
+    ) {
+      throw new Error("Invalid secure push recovery cursor.");
+    }
+    after = page.next;
+  }
+  return { references, recovered };
+}
+
 async function receivePending(client: GatewayBrowserClient): Promise<void> {
   const db = await openPushDatabase();
   let references: PendingPush[];
@@ -360,10 +479,30 @@ async function receivePending(client: GatewayBrowserClient): Promise<void> {
   } finally {
     db.close();
   }
+  const identity = await loadOrCreateDeviceIdentity();
+  if (client.pushRecoveryRequired && !client.pushRecoveryReady) {
+    throw new Error("Secure push recovery requires an approved device-authenticated reconnect.");
+  }
+  let recovered = new Map<string, { payload: string; envelope: PushV2Envelope }>();
+  if (client.pushRecoveryReady) {
+    // In negotiated strict mode the complete snapshot is required before any
+    // legacy capability can advance replay state past an unseen older object.
+    const discovered = await discoverPendingPushes(client, identity.deviceId, references);
+    references = discovered.references;
+    recovered = discovered.recovered;
+  } else {
+    // Servers/sessions without negotiated recovery retain their original
+    // per-object path. Tokenless inboxes never degrade into that legacy path.
+    references = references.filter(
+      (reference) =>
+        !reference.recovery &&
+        typeof reference.token === "string" &&
+        /^[A-Za-z0-9_-]{43}$/.test(reference.token),
+    );
+  }
   if (references.length === 0) {
     return;
   }
-  const identity = await loadOrCreateDeviceIdentity();
   const freshKeys = async (): Promise<PushV2Keys> => {
     try {
       const keys = (await client.request("push.pqc.keys", {})) as PushV2Keys & {
@@ -396,12 +535,35 @@ async function receivePending(client: GatewayBrowserClient): Promise<void> {
         token: reference.token,
         expires_at_ms: reference.expires_at_ms,
       };
-      const value =
-        reference.inbox ??
-        ((await client.request("push.pqc.redeem", descriptor)) as {
-          payload: string;
-          envelope: PushV2Envelope;
-        });
+      let selectedReference = reference;
+      let value = reference.inbox;
+      if (!value) {
+        if (reference.recovery) {
+          value = recovered.get(reference.object_id);
+        } else {
+          try {
+            value = (await client.request("push.pqc.redeem", descriptor)) as {
+              payload: string;
+              envelope: PushV2Envelope;
+            };
+          } catch (error) {
+            value = recovered.get(reference.object_id);
+            if (!value) {
+              throw error;
+            }
+            // A bad relay capability cannot hide a separately authorized, signed object.
+            selectedReference = {
+              version: 1,
+              object_id: reference.object_id,
+              expires_at_ms: reference.expires_at_ms,
+              recovery: true,
+            };
+          }
+        }
+      }
+      if (!value) {
+        throw new Error("push recovery object unavailable");
+      }
       // Refresh per object, including inbox recovery; a batch snapshot can outlive revocation.
       const keys = await freshKeys();
       // Verify before ordering; a forged sequence must not control the drain.
@@ -412,7 +574,11 @@ async function receivePending(client: GatewayBrowserClient): Promise<void> {
         identity.deviceId,
         async () => true,
       );
-      values.push({ reference, payload: value.payload, envelope: value.envelope });
+      values.push({
+        reference: selectedReference,
+        payload: value.payload,
+        envelope: value.envelope,
+      });
     } catch (error) {
       // A policy outage is shared state, not an invalid individual wake. Do not
       // advance replay watermarks beyond work whose policy could not be refreshed.
@@ -507,12 +673,11 @@ async function receivePending(client: GatewayBrowserClient): Promise<void> {
           throw error;
         }
       }
-      await client.request("push.pqc.redeem", {
+      await client.request(value.reference.recovery ? "push.pqc.pending.ack" : "push.pqc.redeem", {
         version: value.reference.version,
         object_id: value.reference.object_id,
-        token: value.reference.token,
         expires_at_ms: value.reference.expires_at_ms,
-        acknowledge: true,
+        ...(value.reference.recovery ? {} : { token: value.reference.token, acknowledge: true }),
       });
       await updatePendingPush(value.reference, () => undefined);
     } catch (error) {
