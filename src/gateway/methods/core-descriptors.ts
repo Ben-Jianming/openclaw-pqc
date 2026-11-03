@@ -342,6 +342,8 @@ const CORE_GATEWAY_METHOD_SPECS: readonly CoreGatewayMethodSpec[] = [
   { name: "push.web.unsubscribe", scope: "operator.write", since: "<=2026.7", advertise: false },
   { name: "push.web.test", scope: "operator.write", since: "<=2026.7", advertise: false },
   { name: "push.pqc.keys", scope: "operator.read", since: "2026.7", advertise: false },
+  { name: "push.pqc.pending", scope: "operator.read", since: "2026.7", advertise: false },
+  { name: "push.pqc.pending.ack", scope: "operator.read", since: "2026.7", advertise: false },
   { name: "push.pqc.redeem", scope: "operator.read", since: "2026.7", advertise: false },
   { name: "node.push.pqc.keys", scope: "node", since: "2026.7", advertise: false },
   { name: "node.push.pqc.redeem", scope: "node", since: "2026.7", advertise: false },

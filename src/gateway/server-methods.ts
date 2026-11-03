@@ -818,6 +818,8 @@ export const coreGatewayHandlers: GatewayRequestHandlers = {
     methods: [
       "push.test",
       "push.pqc.keys",
+      "push.pqc.pending",
+      "push.pqc.pending.ack",
       "push.pqc.redeem",
       "node.push.pqc.keys",
       "node.push.pqc.redeem",

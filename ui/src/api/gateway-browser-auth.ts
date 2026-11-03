@@ -3,6 +3,27 @@ import { loadDeviceAuthToken, peekStoredDeviceIdentityId } from "../lib/nodes/in
 
 const CONTROL_UI_OPERATOR_ROLE = "operator";
 
+/** Only an explicitly negotiated push upgrade may replace shared auth with a scoped device token. */
+export function canUpgradePushRecoveryToDeviceAuth(params: {
+  required: boolean;
+  ready: boolean;
+  requested: boolean;
+  deviceId?: string;
+  gatewayUrl: string;
+}): boolean {
+  if (!params.required || params.ready || params.requested || !params.deviceId) {
+    return false;
+  }
+  const stored = loadDeviceAuthToken({
+    deviceId: params.deviceId,
+    gatewayUrl: params.gatewayUrl,
+    role: CONTROL_UI_OPERATOR_ROLE,
+  });
+  return Boolean(
+    stored?.token && storedDeviceTokenScopesAllowRead(CONTROL_UI_OPERATOR_ROLE, stored.scopes),
+  );
+}
+
 export function storedDeviceTokenScopesAllowRead(role: string, scopes: readonly string[]): boolean {
   return (
     role !== CONTROL_UI_OPERATOR_ROLE ||

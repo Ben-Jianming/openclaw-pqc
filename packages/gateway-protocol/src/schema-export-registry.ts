@@ -108,6 +108,8 @@ export {
   WebPushUnsubscribeParamsSchema,
   WebPushTestParamsSchema,
   PushPqcKeysParamsSchema,
+  PushPqcPendingParamsSchema,
+  PushPqcPendingAckParamsSchema,
   PushPqcRedeemParamsSchema,
   NodePairListParamsSchema,
   NodePairApproveParamsSchema,

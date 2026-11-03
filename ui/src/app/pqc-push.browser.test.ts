@@ -9,6 +9,7 @@ import {
   type PushV2Envelope,
 } from "./pqc-push.ts";
 
+const snapshotId = "00000000-0000-4000-8000-000000000099";
 const databaseName = "openclaw-pqc-push-v2";
 const originalWorker = Object.getOwnPropertyDescriptor(navigator, "serviceWorker");
 const showNotification = vi.fn().mockResolvedValue(undefined);
@@ -164,6 +165,9 @@ describe("real browser durable wake retries", () => {
       let keyReads = 0;
       let revoked = true;
       const request = vi.fn(async (method: string, p: Record<string, unknown>) => {
+        if (method === "push.pqc.pending") {
+          return { snapshotId, items: [] };
+        }
         if (method === "push.pqc.keys") {
           keyReads++;
           // First pass and durable acceptance see an active key; the final display check must refresh.
@@ -183,7 +187,7 @@ describe("real browser durable wake retries", () => {
         }
         return m.values.get(p.object_id as string);
       });
-      const client = { request } as unknown as GatewayBrowserClient;
+      const client = { request, pushRecoveryReady: true } as unknown as GatewayBrowserClient;
       await expect(receivePendingPqcPushes(client)).rejects.toThrow();
       expect(showNotification).not.toHaveBeenCalled();
       expect(await queued()).toBe(1);
@@ -210,6 +214,9 @@ describe("real browser durable wake retries", () => {
       let reads = 0;
       let fail = true;
       const request = vi.fn(async (method: string, p: Record<string, unknown>) => {
+        if (method === "push.pqc.pending") {
+          return { snapshotId, items: [] };
+        }
         if (method === "push.pqc.keys") {
           if (++reads === failAt && fail) {
             throw new Error("transient key policy RPC failure");
@@ -221,7 +228,7 @@ describe("real browser durable wake retries", () => {
         }
         return m.values.get(p.object_id as string);
       });
-      const client = { request } as unknown as GatewayBrowserClient;
+      const client = { request, pushRecoveryReady: true } as unknown as GatewayBrowserClient;
       await expect(receivePendingPqcPushes(client)).rejects.toThrow();
       const completedBeforeFailure = failAt >= 5 ? 1 : 0;
       expect(showNotification).toHaveBeenCalledTimes(completedBeforeFailure);
@@ -291,6 +298,9 @@ describe("real browser durable wake retries", () => {
       let reads = 0;
       let fail = true;
       const request = vi.fn(async (method: string, p: Record<string, unknown>) => {
+        if (method === "push.pqc.pending") {
+          return { snapshotId, items: [] };
+        }
         if (method === "push.pqc.keys") {
           return ++reads === failAt && fail ? malformed : m.keys;
         }
@@ -299,7 +309,7 @@ describe("real browser durable wake retries", () => {
         }
         return m.values.get(p.object_id as string);
       });
-      const client = { request } as unknown as GatewayBrowserClient;
+      const client = { request, pushRecoveryReady: true } as unknown as GatewayBrowserClient;
       await expect(receivePendingPqcPushes(client)).rejects.toThrow();
       expect(showNotification).not.toHaveBeenCalled();
       expect(await queued()).toBe(2);
@@ -319,6 +329,9 @@ describe("real browser durable wake retries", () => {
     let reads = 0;
     let fail = true;
     const request = vi.fn(async (method: string, p: Record<string, unknown>) => {
+      if (method === "push.pqc.pending") {
+        return { snapshotId, items: [] };
+      }
       if (method === "push.pqc.keys") {
         if (++reads >= 3 && fail) {
           throw new Error("connection lost during policy refresh");
@@ -330,7 +343,7 @@ describe("real browser durable wake retries", () => {
       }
       return m.values.get(p.object_id as string);
     });
-    const client = { request } as unknown as GatewayBrowserClient;
+    const client = { request, pushRecoveryReady: true } as unknown as GatewayBrowserClient;
     await expect(receivePendingPqcPushes(client)).rejects.toThrow();
     expect(showNotification).not.toHaveBeenCalled();
     expect(await queued()).toBe(1);
@@ -345,7 +358,11 @@ describe("real browser durable wake retries", () => {
     const m = await messages(64);
     let attempts = 0;
     const client = {
+      pushRecoveryReady: true,
       request: vi.fn(async (method: string, p: Record<string, unknown>) => {
+        if (method === "push.pqc.pending") {
+          return { snapshotId, items: [] };
+        }
         if (method === "push.pqc.keys") {
           return m.keys;
         }
@@ -372,7 +389,11 @@ describe("real browser durable wake retries", () => {
     const m = await messages(1);
     let disconnected = true;
     const client = {
+      pushRecoveryReady: true,
       request: vi.fn(async (method: string, p: Record<string, unknown>) => {
+        if (method === "push.pqc.pending") {
+          return { snapshotId, items: [] };
+        }
         if (method === "push.pqc.keys") {
           return m.keys;
         }
@@ -394,15 +415,23 @@ describe("real browser durable wake retries", () => {
   it("removes expired references without trying to redeem or display them", async () => {
     const m = await messages(1);
     await queued([{ ...m.rows[0], expires_at_ms: Date.now() - 1 }]);
-    const request = vi.fn(async () => m.keys);
-    await receivePendingPqcPushes({ request } as unknown as GatewayBrowserClient);
-    expect(request).not.toHaveBeenCalled();
+    const request = vi.fn(async (method: string) =>
+      method === "push.pqc.pending" ? { snapshotId, items: [] } : m.keys,
+    );
+    await receivePendingPqcPushes({
+      request,
+      pushRecoveryReady: true,
+    } as unknown as GatewayBrowserClient);
+    expect(request.mock.calls.map(([method]) => method)).toEqual(["push.pqc.pending"]);
     expect(await queued()).toBe(0);
     expect(showNotification).not.toHaveBeenCalled();
   });
   it("retries a failed display from the durable verified inbox without another redemption", async () => {
     const m = await messages(1);
     const request = vi.fn(async (method: string, p: Record<string, unknown>) => {
+      if (method === "push.pqc.pending") {
+        return { snapshotId, items: [] };
+      }
       if (method === "push.pqc.keys") {
         return m.keys;
       }
@@ -411,7 +440,7 @@ describe("real browser durable wake retries", () => {
       }
       return m.values.get(p.object_id as string);
     });
-    const client = { request } as unknown as GatewayBrowserClient;
+    const client = { request, pushRecoveryReady: true } as unknown as GatewayBrowserClient;
     showNotification.mockRejectedValueOnce(new Error("presentation unavailable"));
     await expect(receivePendingPqcPushes(client)).rejects.toThrow();
     expect(await queued()).toBe(1);
@@ -429,6 +458,9 @@ describe("real browser durable wake retries", () => {
     const m = await messages(1);
     let lost = true;
     const request = vi.fn(async (method: string, p: Record<string, unknown>) => {
+      if (method === "push.pqc.pending") {
+        return { snapshotId, items: [] };
+      }
       if (method === "push.pqc.keys") {
         return m.keys;
       }
@@ -441,12 +473,477 @@ describe("real browser durable wake retries", () => {
       }
       return m.values.get(p.object_id as string);
     });
-    const client = { request } as unknown as GatewayBrowserClient;
+    const client = { request, pushRecoveryReady: true } as unknown as GatewayBrowserClient;
     await expect(receivePendingPqcPushes(client)).rejects.toThrow();
     expect(showNotification).toHaveBeenCalledTimes(1);
     expect(await queued()).toBe(1);
     await receivePendingPqcPushes(client);
     expect(showNotification).toHaveBeenCalledTimes(1);
+    expect(await queued()).toBe(0);
+  });
+  it("recovers a signed object with no provider wake, keeps a verified inbox across lost ACK, and does not redisplay", async () => {
+    const m = await messages(1);
+    await resetDatabase();
+    let failAck = true;
+    let acknowledged = false;
+    const request = vi.fn(async (method: string) => {
+      if (method === "push.pqc.pending") {
+        return {
+          snapshotId,
+          items: acknowledged
+            ? []
+            : m.rows.map((row) => ({
+                object_id: row.object_id,
+                expires_at_ms: row.expires_at_ms,
+                value: { ...m.values.get(row.object_id), recipientId: m.keys.recipientId },
+              })),
+        };
+      }
+      if (method === "push.pqc.keys") {
+        return m.keys;
+      }
+      if (method === "push.pqc.pending.ack") {
+        if (failAck) {
+          throw new Error("test lost ACK response");
+        }
+        acknowledged = true;
+        return { acknowledged: true };
+      }
+      throw new Error("unexpected capability redemption on recovered object");
+    });
+    const client = { request, pushRecoveryReady: true } as unknown as GatewayBrowserClient;
+    await expect(receivePendingPqcPushes(client)).rejects.toThrow();
+    expect(showNotification).toHaveBeenCalledTimes(1);
+    expect(await queued()).toBe(1);
+    failAck = false;
+    await receivePendingPqcPushes(client);
+    expect(showNotification).toHaveBeenCalledTimes(1);
+    expect(await queued()).toBe(0);
+    expect(request.mock.calls.some(([method]) => method === "push.pqc.redeem")).toBe(false);
+    expect(acknowledged).toBe(true);
+  });
+  it("verifies and orders recovered work before advancing replay, alongside an existing wake", async () => {
+    const m = await messages(2);
+    await resetDatabase();
+    await queued([m.rows[0]!]);
+    const request = vi.fn(async (method: string) => {
+      if (method === "push.pqc.pending") {
+        return {
+          snapshotId,
+          items: [...m.rows].toReversed().map((row) => ({
+            object_id: row.object_id,
+            expires_at_ms: row.expires_at_ms,
+            value: { ...m.values.get(row.object_id), recipientId: m.keys.recipientId },
+          })),
+        };
+      }
+      if (method === "push.pqc.keys") {
+        return m.keys;
+      }
+      if (method === "push.pqc.pending.ack") {
+        return { acknowledged: true };
+      }
+      throw new Error("unexpected legacy redemption");
+    });
+    await receivePendingPqcPushes({
+      request,
+      pushRecoveryReady: true,
+    } as unknown as GatewayBrowserClient);
+    expect(showNotification.mock.calls.map(([title]) => title)).toEqual([
+      "Verified 1",
+      "Verified 2",
+    ]);
+    expect(await queued()).toBe(0);
+  });
+  it("rejects recovered content for another recipient without display, ACK or replay advancement", async () => {
+    const m = await messages(1);
+    await resetDatabase();
+    const request = vi.fn(async () => ({
+      snapshotId,
+      items: [
+        {
+          object_id: m.rows[0]!.object_id,
+          expires_at_ms: m.rows[0]!.expires_at_ms,
+          value: { ...m.values.get(m.rows[0]!.object_id), recipientId: "other" },
+        },
+      ],
+    }));
+    await expect(
+      receivePendingPqcPushes({
+        request,
+        pushRecoveryReady: true,
+      } as unknown as GatewayBrowserClient),
+    ).rejects.toThrow("binding");
+    expect(showNotification).not.toHaveBeenCalled();
+    expect(await queued()).toBe(0);
+    expect(request).toHaveBeenCalledTimes(1);
+  });
+  it.each(["payload", "ed25519_sig", "mldsa65_sig"] as const)(
+    "rejects corrupt recovered %s without burning replay state",
+    async (field) => {
+      const m = await messages(1);
+      await resetDatabase();
+      const row = m.rows[0]!;
+      const original = m.values.get(row.object_id)!;
+      let corrupt = true;
+      const request = vi.fn(async (method: string) => {
+        if (method === "push.pqc.keys") {
+          return m.keys;
+        }
+        if (method === "push.pqc.pending.ack") {
+          return { acknowledged: true };
+        }
+        if (method === "push.pqc.pending") {
+          const value = {
+            payload: original.payload,
+            envelope: { ...original.envelope },
+            recipientId: m.keys.recipientId,
+          };
+          if (corrupt) {
+            if (field === "payload") {
+              value.payload += " ";
+            } else {
+              const bytes = Uint8Array.from(
+                atob(value.envelope[field].replaceAll("-", "+").replaceAll("_", "/")),
+                (c) => c.charCodeAt(0),
+              );
+              bytes[0] = bytes[0]! ^ 1;
+              value.envelope[field] = b64(bytes);
+            }
+          }
+          return {
+            snapshotId,
+            items: [{ object_id: row.object_id, expires_at_ms: row.expires_at_ms, value }],
+          };
+        }
+        throw new Error("unexpected method");
+      });
+      const client = { request, pushRecoveryReady: true } as unknown as GatewayBrowserClient;
+      await expect(receivePendingPqcPushes(client)).rejects.toThrow("could not be verified");
+      expect(showNotification).not.toHaveBeenCalled();
+      expect(await queued()).toBe(0);
+      expect(request.mock.calls.some(([method]) => method === "push.pqc.pending.ack")).toBe(false);
+      corrupt = false;
+      await receivePendingPqcPushes(client);
+      expect(showNotification).toHaveBeenCalledTimes(1);
+      expect(await queued()).toBe(0);
+    },
+  );
+  it("lets verified recovery replace an unverified wake when the local wake budget is full", async () => {
+    const m = await messages(1);
+    await resetDatabase();
+    const row = m.rows[0]!;
+    await queued(
+      Array.from({ length: 64 }, (_, i) => ({
+        version: 1,
+        object_id: "ffffffff-ffff-4fff-8fff-" + String(i).padStart(12, "0"),
+        token: "A".repeat(43),
+        expires_at_ms: Date.now() + 300000,
+      })),
+    );
+    const request = vi.fn(async (method: string) => {
+      if (method === "push.pqc.pending") {
+        return {
+          snapshotId,
+          items: [
+            {
+              object_id: row.object_id,
+              expires_at_ms: row.expires_at_ms,
+              value: { ...m.values.get(row.object_id), recipientId: m.keys.recipientId },
+            },
+          ],
+        };
+      }
+      if (method === "push.pqc.keys") {
+        return m.keys;
+      }
+      if (method === "push.pqc.pending.ack") {
+        return { acknowledged: true };
+      }
+      throw new Error("test invalid relay wake");
+    });
+    await expect(
+      receivePendingPqcPushes({
+        request,
+        pushRecoveryReady: true,
+      } as unknown as GatewayBrowserClient),
+    ).rejects.toThrow("could not be verified");
+    expect(showNotification).toHaveBeenCalledTimes(1);
+    expect(await queued()).toBe(63);
+  });
+  it("does not infer the server clock from reference expiry, while retaining signed lifetime checks", async () => {
+    const m = await messages(1);
+    await resetDatabase();
+    const row = m.rows[0]!;
+    const request = vi.fn(async (method: string) => {
+      if (method === "push.pqc.pending") {
+        return {
+          snapshotId,
+          items: [
+            {
+              object_id: row.object_id,
+              expires_at_ms: row.expires_at_ms + 90000,
+              value: { ...m.values.get(row.object_id), recipientId: m.keys.recipientId },
+            },
+          ],
+        };
+      }
+      if (method === "push.pqc.keys") {
+        return m.keys;
+      }
+      if (method === "push.pqc.pending.ack") {
+        return { acknowledged: true };
+      }
+      throw new Error("unexpected capability path");
+    });
+    await receivePendingPqcPushes({
+      request,
+      pushRecoveryReady: true,
+    } as unknown as GatewayBrowserClient);
+    expect(showNotification).toHaveBeenCalledTimes(1);
+    expect(await queued()).toBe(0);
+  });
+  it("holds a higher capability sequence during a negotiated snapshot outage and later displays the full ordered batch", async () => {
+    const m = await messages(2);
+    await resetDatabase();
+    await queued([m.rows[1]!]);
+    let unavailable = true;
+    const request = vi.fn(async (method: string, params: Record<string, unknown>) => {
+      if (method === "push.pqc.pending") {
+        if (unavailable) {
+          throw new Error("test snapshot unavailable");
+        }
+        return {
+          snapshotId,
+          items: m.rows.map((row) => ({
+            object_id: row.object_id,
+            expires_at_ms: row.expires_at_ms,
+            value: { ...m.values.get(row.object_id), recipientId: m.keys.recipientId },
+          })),
+        };
+      }
+      if (method === "push.pqc.keys") {
+        return m.keys;
+      }
+      if (method === "push.pqc.pending.ack") {
+        return { acknowledged: true };
+      }
+      if (method === "push.pqc.redeem") {
+        return params.acknowledge
+          ? { acknowledged: true }
+          : m.values.get(params.object_id as string);
+      }
+      throw new Error("unexpected method");
+    });
+    const client = { request, pushRecoveryReady: true } as unknown as GatewayBrowserClient;
+    await expect(receivePendingPqcPushes(client)).rejects.toThrow("snapshot unavailable");
+    expect(showNotification).not.toHaveBeenCalled();
+    expect(await queued()).toBe(1);
+    unavailable = false;
+    await receivePendingPqcPushes(client);
+    expect(showNotification.mock.calls.map(([title]) => title)).toEqual([
+      "Verified 1",
+      "Verified 2",
+    ]);
+    expect(await queued()).toBe(0);
+  });
+  it.each(["unavailable", "forbidden", "rate limit"])(
+    "keeps a valid capability wake usable when discovery is %s",
+    async (reason) => {
+      const m = await messages(1);
+      const request = vi.fn(async (method: string, params: Record<string, unknown>) => {
+        if (method === "push.pqc.pending") {
+          throw new Error("test discovery " + reason);
+        }
+        if (method === "push.pqc.keys") {
+          return m.keys;
+        }
+        if (method === "push.pqc.redeem") {
+          return params.acknowledge
+            ? { acknowledged: true }
+            : m.values.get(params.object_id as string);
+        }
+        throw new Error("unexpected recovery ACK");
+      });
+      await receivePendingPqcPushes({
+        request,
+        pushRecoveryReady: false,
+      } as unknown as GatewayBrowserClient);
+      expect(showNotification).toHaveBeenCalledTimes(1);
+      expect(await queued()).toBe(0);
+      expect(request.mock.calls.some(([method]) => method === "push.pqc.pending.ack")).toBe(false);
+    },
+  );
+  it("retries an existing capability inbox when the new discovery service fails", async () => {
+    const m = await messages(1);
+    let discoveryFails = false;
+    const request = vi.fn(async (method: string, params: Record<string, unknown>) => {
+      if (method === "push.pqc.pending") {
+        if (discoveryFails) {
+          throw new Error("test discovery outage");
+        }
+        return { snapshotId, items: [] };
+      }
+      if (method === "push.pqc.keys") {
+        return m.keys;
+      }
+      if (method === "push.pqc.redeem") {
+        return params.acknowledge
+          ? { acknowledged: true }
+          : m.values.get(params.object_id as string);
+      }
+      throw new Error("unexpected method");
+    });
+    const client = { request, pushRecoveryReady: false } as unknown as GatewayBrowserClient;
+    showNotification.mockRejectedValueOnce(new Error("test OS presentation failure"));
+    await expect(receivePendingPqcPushes(client)).rejects.toThrow();
+    expect(await queued()).toBe(1);
+    discoveryFails = true;
+    await receivePendingPqcPushes(client);
+    expect(await queued()).toBe(0);
+    expect(showNotification).toHaveBeenCalledTimes(2);
+    expect(
+      request.mock.calls.filter(
+        ([method, params]) => method === "push.pqc.redeem" && !params.acknowledge,
+      ),
+    ).toHaveLength(1);
+  });
+  it("uses recovery authorization for a snapshot member even when its legacy capability is valid", async () => {
+    const m = await messages(1);
+    const row = m.rows[0]!;
+    await queued([row]);
+    let failAck = true;
+    const request = vi.fn(async (method: string) => {
+      if (method === "push.pqc.pending") {
+        return {
+          snapshotId,
+          items: [
+            {
+              object_id: row.object_id,
+              expires_at_ms: row.expires_at_ms,
+              value: { ...m.values.get(row.object_id), recipientId: m.keys.recipientId },
+            },
+          ],
+        };
+      }
+      if (method === "push.pqc.keys") {
+        return m.keys;
+      }
+      if (method === "push.pqc.redeem") {
+        return m.values.get(row.object_id);
+      }
+      if (method === "push.pqc.pending.ack") {
+        if (failAck) {
+          throw new Error("test current recovery authorization rejected");
+        }
+        return { acknowledged: true };
+      }
+      throw new Error("unexpected push RPC");
+    });
+    const client = { request, pushRecoveryReady: true } as unknown as GatewayBrowserClient;
+    await expect(receivePendingPqcPushes(client)).rejects.toThrow();
+    expect(await queued()).toBe(1);
+    expect(request.mock.calls.some(([method]) => method === "push.pqc.redeem")).toBe(false);
+    failAck = false;
+    await receivePendingPqcPushes(client);
+    expect(await queued()).toBe(0);
+    expect(showNotification).toHaveBeenCalledTimes(1);
+    expect(request.mock.calls.some(([method]) => method === "push.pqc.redeem")).toBe(false);
+  });
+  it("does not degrade a tokenless recovered inbox when current recovery authorization fails", async () => {
+    const m = await messages(1);
+    await resetDatabase();
+    let denyDiscovery = false;
+    let failAck = true;
+    const request = vi.fn(async (method: string) => {
+      if (method === "push.pqc.pending") {
+        if (denyDiscovery) {
+          throw new Error("test recovery proof denied");
+        }
+        return {
+          snapshotId,
+          items: m.rows.map((row) => ({
+            object_id: row.object_id,
+            expires_at_ms: row.expires_at_ms,
+            value: { ...m.values.get(row.object_id), recipientId: m.keys.recipientId },
+          })),
+        };
+      }
+      if (method === "push.pqc.keys") {
+        return m.keys;
+      }
+      if (method === "push.pqc.pending.ack") {
+        if (failAck) {
+          throw new Error("test lost ACK");
+        }
+        return { acknowledged: true };
+      }
+      throw new Error("tokenless recovery cannot use capability RPC");
+    });
+    const client = { request, pushRecoveryReady: true } as unknown as GatewayBrowserClient;
+    await expect(receivePendingPqcPushes(client)).rejects.toThrow();
+    expect(await queued()).toBe(1);
+    const priorAckCalls = request.mock.calls.filter(
+      ([method]) => method === "push.pqc.pending.ack",
+    ).length;
+    denyDiscovery = true;
+    await expect(receivePendingPqcPushes(client)).rejects.toThrow("proof denied");
+    expect(showNotification).toHaveBeenCalledTimes(1);
+    expect(await queued()).toBe(1);
+    expect(request.mock.calls.filter(([method]) => method === "push.pqc.pending.ack")).toHaveLength(
+      priorAckCalls,
+    );
+    denyDiscovery = false;
+    failAck = false;
+    await receivePendingPqcPushes(client);
+    expect(await queued()).toBe(0);
+    expect(showNotification).toHaveBeenCalledTimes(1);
+  });
+  it("discards a partial discovery batch when a later page fails and preserves legacy ordering", async () => {
+    const m = await messages(2);
+    await resetDatabase();
+    await queued([m.rows[0]!]);
+    let failSecondPage = true;
+    const row = m.rows[1]!;
+    const request = vi.fn(async (method: string, params: Record<string, unknown>) => {
+      if (method === "push.pqc.pending") {
+        if (failSecondPage && params.after) {
+          throw new Error("test later-page loss");
+        }
+        return {
+          snapshotId,
+          items: [
+            {
+              object_id: row.object_id,
+              expires_at_ms: row.expires_at_ms,
+              value: { ...m.values.get(row.object_id), recipientId: m.keys.recipientId },
+            },
+          ],
+          ...(failSecondPage ? { next: { snapshotId, offset: 1 } } : {}),
+        };
+      }
+      if (method === "push.pqc.keys") {
+        return m.keys;
+      }
+      if (method === "push.pqc.redeem") {
+        return params.acknowledge
+          ? { acknowledged: true }
+          : m.values.get(params.object_id as string);
+      }
+      if (method === "push.pqc.pending.ack") {
+        return { acknowledged: true };
+      }
+      throw new Error("unexpected method");
+    });
+    const client = { request, pushRecoveryReady: true } as unknown as GatewayBrowserClient;
+    await expect(receivePendingPqcPushes(client)).rejects.toThrow("later-page loss");
+    expect(showNotification).not.toHaveBeenCalled();
+    failSecondPage = false;
+    await receivePendingPqcPushes(client);
+    expect(showNotification.mock.calls.map(([title]) => title)).toEqual([
+      "Verified 1",
+      "Verified 2",
+    ]);
     expect(await queued()).toBe(0);
   });
 });

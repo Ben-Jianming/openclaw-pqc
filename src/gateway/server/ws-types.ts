@@ -27,6 +27,10 @@ export type GatewayWsClient = PluginNodeCapabilityClient & {
   connectionKind?: GatewayWsConnectionKind;
   worker?: WorkerConnectionIdentity;
   isDeviceTokenAuth?: boolean;
+  /** SHA-256 of the credential actually authenticated at connect; never wire input. */
+  authenticatedDeviceTokenSha256?: string;
+  /** Server-retained proof set only after connect nonce/signature verification. Never wire input. */
+  verifiedDeviceProof?: { id: string; publicKey: string };
   /** Temporary legacy migration session closed when normal enforcement resumes. */
   isControlUiDeviceAuthMigrationSession?: boolean;
   /** Signed shared-auth session admitted only to approve its own upgrade pairing. */

@@ -437,6 +437,8 @@ enum class GatewayMethod(
   PushWebUnsubscribe("push.web.unsubscribe"),
   PushWebTest("push.web.test"),
   PushPqcKeys("push.pqc.keys"),
+  PushPqcPending("push.pqc.pending"),
+  PushPqcPendingAck("push.pqc.pending.ack"),
   PushPqcRedeem("push.pqc.redeem"),
   NodePushPqcKeys("node.push.pqc.keys"),
   NodePushPqcRedeem("node.push.pqc.redeem"),

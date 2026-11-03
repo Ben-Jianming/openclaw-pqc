@@ -433,6 +433,7 @@ describe("GatewayBrowserClient", () => {
     expect(connectFrame.params?.maxProtocol).toBe(PROTOCOL_VERSION);
     expect(connectFrame.params?.caps).toEqual([
       "push-key-policy-v1",
+      "push-recovery-snapshot-v1",
       GATEWAY_CLIENT_CAPS.AGENT_KIND,
       GATEWAY_CLIENT_CAPS.APPROVALS,
       GATEWAY_CLIENT_CAPS.TASK_SUGGESTIONS,
@@ -442,6 +443,71 @@ describe("GatewayBrowserClient", () => {
       GATEWAY_CLIENT_CAPS.UI_COMMANDS,
     ]);
     expect(connectFrame.params?.scopes).toEqual([...CONTROL_UI_OPERATOR_SCOPES]);
+  });
+  it("upgrades to scoped device authentication only after explicitly preparing negotiated push recovery", async () => {
+    useNodeFakeTimers();
+    const client = new GatewayBrowserClient({
+      url: DEFAULT_GATEWAY_URL,
+      token: "shared-auth-token",
+    });
+    const { ws, connectFrame } = await startConnect(client);
+    expect(connectFrame.params?.auth?.token).toBe("shared-auth-token");
+    ws.emitMessage({
+      type: "res",
+      id: connectFrame.id,
+      ok: true,
+      payload: {
+        type: "hello-ok",
+        protocol: PROTOCOL_VERSION,
+        features: { capabilities: ["push-recovery-snapshot-v1"] },
+        auth: {
+          role: "operator",
+          scopes: [...CONTROL_UI_OPERATOR_SCOPES],
+          deviceToken: STORED_CRED,
+        },
+      },
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(client.pushRecoveryRequired).toBe(true);
+    expect(client.pushRecoveryReady).toBe(false);
+    expect(client.preparePushRecovery()).toBe(true);
+    await expectSocketClosed(ws);
+    ws.emitClose(4000, "secure push device authentication");
+    await vi.advanceTimersByTimeAsync(800);
+    const replacement = getLatestWebSocket();
+    const next = await continueConnect(replacement, "device-auth-nonce");
+    expect(next.connectFrame.params?.auth?.token).toBe(STORED_CRED);
+    expect(next.connectFrame.params?.auth?.deviceToken).toBe(STORED_CRED);
+    replacement.emitMessage({
+      type: "res",
+      id: next.connectFrame.id,
+      ok: true,
+      payload: {
+        type: "hello-ok",
+        protocol: PROTOCOL_VERSION,
+        features: {
+          capabilities: ["push-recovery-snapshot-v1", "push-recovery-snapshot-active-v1"],
+        },
+        auth: { role: "operator", scopes: [...CONTROL_UI_OPERATOR_SCOPES] },
+      },
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(client.pushRecoveryReady).toBe(true);
+    expect(client.preparePushRecovery()).toBe(false);
+    storeDeviceAuthToken({
+      deviceId: "device-1",
+      role: "operator",
+      token: "rotated-device-token",
+      scopes: [...CONTROL_UI_OPERATOR_SCOPES],
+    });
+    replacement.emitClose(4000, "secure push reauthentication required");
+    await vi.advanceTimersByTimeAsync(800);
+    expect(client.pushRecoveryReady).toBe(false);
+    const rotatedSocket = getLatestWebSocket();
+    const rotated = await continueConnect(rotatedSocket, "rotated-device-nonce");
+    expect(rotated.connectFrame.params?.auth?.token).toBe("rotated-device-token");
+    expect(rotated.connectFrame.params?.auth?.deviceToken).toBe("rotated-device-token");
+    client.stop();
   });
 
   it("requests handoff scopes with bootstrap token auth", async () => {

@@ -10,6 +10,10 @@ import {
   type PushReferenceStore,
   type StoredSignedPush,
 } from "../security/push-reference.js";
+import {
+  MAX_PUSH_RECOVERY_PAGE_BYTES,
+  MAX_PUSH_RECOVERY_PAGE_ITEMS,
+} from "../shared/push-recovery.js";
 import type { OpenClawStateDatabaseOptions } from "../state/openclaw-state-db-contract.js";
 import { ensurePqcPushStateSchema } from "../state/openclaw-state-db-schema-additive.js";
 import type { DB as OpenClawStateDb } from "../state/openclaw-state-db.generated.js";
@@ -22,6 +26,10 @@ import {
   executeSqliteQueryTakeFirstSync,
   getNodeSqliteKysely,
 } from "./kysely-sync.js";
+import {
+  readPushRecoverySnapshotPage,
+  type PushRecoverySnapshotCursor,
+} from "./pqc-push-recovery-snapshot.js";
 
 const MAX_PEERS = 10_000;
 const MAX_OBJECTS = 2_000;
@@ -171,6 +179,59 @@ export class SqlitePushReplayGuard implements PushReplayGuard {
 
 export class SqlitePushReferenceStore implements PushReferenceStore {
   constructor(private readonly options: OpenClawStateDatabaseOptions = {}) {}
+  /** The signer must use this state environment: sequence and object publish in one commit. */
+  createWithSignature(
+    buildValue: (env: NodeJS.ProcessEnv) => StoredSignedPush,
+    options: { nowMs?: number; ttlMs?: number } = {},
+  ): PushReferenceDescriptor {
+    // Signing is synchronous. The existing transaction helper rejects Promise results
+    // and uses savepoints for the sequence/create calls on this same connection.
+    return transaction(this.options, (db, sql) => {
+      const value = buildValue(this.options.env ?? process.env);
+      const current = executeSqliteQueryTakeFirstSync(
+        db,
+        sql
+          .selectFrom("pqc_push_sequences")
+          .select(["sequence", "published_sequence"])
+          .where("sender_id", "=", value.envelope.sender_id)
+          .where("recipient_id", "=", value.recipientId),
+      );
+      if (
+        !current ||
+        value.envelope.sequence !== current.sequence ||
+        value.envelope.sequence <= current.published_sequence
+      ) {
+        throw new Error("push publication sequence unavailable");
+      }
+      const descriptor = this.create(value, options);
+      executeSqliteQuerySync(
+        db,
+        sql
+          .updateTable("pqc_push_sequences")
+          .set({ published_sequence: value.envelope.sequence })
+          .where("sender_id", "=", value.envelope.sender_id)
+          .where("recipient_id", "=", value.recipientId),
+      );
+      executeSqliteQuerySync(
+        db,
+        sql
+          .updateTable("pqc_push_objects")
+          .set({ publication_version: 1 })
+          .where("object_id", "=", descriptor.object_id),
+      );
+      return descriptor;
+    });
+  }
+  /** New recovery protocol; immutable membership bound to the authenticated token. */
+  listSnapshotForAuthenticatedRecipient(
+    recipientId: string,
+    tokenSha256: string,
+    options: { nowMs?: number; after?: PushRecoverySnapshotCursor } = {},
+  ) {
+    return transaction(this.options, (db, sql) =>
+      readPushRecoverySnapshotPage(db, sql, recipientId, tokenSha256, options),
+    );
+  }
   create(
     value: StoredSignedPush,
     options: { nowMs?: number; ttlMs?: number } = {},
@@ -243,11 +304,100 @@ export class SqlitePushReferenceStore implements PushReferenceStore {
   acknowledge(descriptor: PushReferenceDescriptor, recipientId: string, nowMs = Date.now()): void {
     this.access(descriptor, recipientId, nowMs, "acknowledge");
   }
+  /** Only call after server-side proof and current pairing authorization. Never accepts a request recipient. */
+  listForAuthenticatedRecipient(
+    recipientId: string,
+    options: { nowMs?: number; after?: { objectId: string; expiresAtMs: number } } = {},
+  ): {
+    items: Array<{ object_id: string; expires_at_ms: number; value: StoredSignedPush }>;
+    next?: { objectId: string; expiresAtMs: number };
+  } {
+    const nowMs = options.nowMs ?? Date.now();
+    const after = options.after;
+    if (
+      !recipientId ||
+      Buffer.byteLength(recipientId, "utf8") > 256 ||
+      !Number.isSafeInteger(nowMs) ||
+      nowMs < 0 ||
+      (after &&
+        (!Number.isSafeInteger(after.expiresAtMs) ||
+          after.expiresAtMs < 0 ||
+          !/^[0-9a-f-]{36}$/.test(after.objectId)))
+    ) {
+      throw new Error("invalid push recovery request");
+    }
+    return transaction(this.options, (db, sql) => {
+      let query = sql
+        .selectFrom("pqc_push_objects")
+        .selectAll()
+        .where("recipient_id", "=", recipientId)
+        .where("expires_at_ms", ">", nowMs);
+      if (after) {
+        query = query.where((eb) =>
+          eb.or([
+            eb("expires_at_ms", ">", after.expiresAtMs),
+            eb.and([
+              eb("expires_at_ms", "=", after.expiresAtMs),
+              eb("object_id", ">", after.objectId),
+            ]),
+          ]),
+        );
+      }
+      const rows = executeSqliteQuerySync(
+        db,
+        query
+          .orderBy("expires_at_ms")
+          .orderBy("object_id")
+          .limit(MAX_PUSH_RECOVERY_PAGE_ITEMS + 1),
+      ).rows;
+      const items: Array<{ object_id: string; expires_at_ms: number; value: StoredSignedPush }> =
+        [];
+      // Reserve wrapper/cursor overhead; JSON escaping counts toward the wire budget.
+      let remaining = MAX_PUSH_RECOVERY_PAGE_BYTES - 1024;
+      for (const row of rows.slice(0, MAX_PUSH_RECOVERY_PAGE_ITEMS)) {
+        const item = {
+          object_id: row.object_id,
+          expires_at_ms: row.expires_at_ms,
+          value: {
+            payload: row.payload,
+            envelope: JSON.parse(row.envelope_json),
+            recipientId: row.recipient_id,
+          },
+        };
+        const bytes = Buffer.byteLength(JSON.stringify(item), "utf8") + 1;
+        if (bytes > remaining) {
+          if (items.length === 0) {
+            throw new Error("push recovery object exceeds response budget");
+          }
+          break;
+        }
+        remaining -= bytes;
+        items.push(item);
+      }
+      const last = items.at(-1);
+      return {
+        items,
+        ...(last && items.length < rows.length
+          ? {
+              next: { objectId: last.object_id, expiresAtMs: last.expires_at_ms },
+            }
+          : {}),
+      };
+    });
+  }
+  /** Caller must reauthorize current paired proof before each ACK, including retries. */
+  acknowledgeForAuthenticatedRecipient(
+    reference: Omit<PushReferenceDescriptor, "token">,
+    recipientId: string,
+    nowMs = Date.now(),
+  ): void {
+    this.access(reference, recipientId, nowMs, "recovery-acknowledge");
+  }
   private access(
-    descriptor: PushReferenceDescriptor,
+    descriptor: PushReferenceDescriptor | Omit<PushReferenceDescriptor, "token">,
     recipientId: string,
     nowMs: number,
-    mode: "read" | "acknowledge",
+    mode: "read" | "acknowledge" | "recovery-acknowledge",
   ): StoredSignedPush | undefined {
     if (
       descriptor.version !== 1 ||
@@ -269,7 +419,7 @@ export class SqlitePushReferenceStore implements PushReferenceStore {
           .where("object_id", "=", descriptor.object_id),
       );
       const receipt =
-        mode === "acknowledge" && !row
+        mode !== "read" && !row
           ? executeSqliteQueryTakeFirstSync(
               db,
               sql
@@ -281,10 +431,10 @@ export class SqlitePushReferenceStore implements PushReferenceStore {
       const binding = row ?? receipt;
       // Hash every well-formed token even for a missing id. Never reveal which
       // binding failed, and never consume another device's object on failure.
-      const tokenMatches = matchesPushReferenceToken(
-        binding?.token_hash ?? "0".repeat(64),
-        descriptor.token,
-      );
+      const tokenMatches =
+        mode === "recovery-acknowledge" ||
+        ("token" in descriptor &&
+          matchesPushReferenceToken(binding?.token_hash ?? "0".repeat(64), descriptor.token));
       if (
         !binding ||
         !tokenMatches ||
@@ -296,7 +446,7 @@ export class SqlitePushReferenceStore implements PushReferenceStore {
       }
       // A read response can be lost before the receiver commits its inbox.
       // Keep the capability retryable until authenticated acknowledgement or expiry.
-      if (mode === "acknowledge") {
+      if (mode !== "read") {
         if (row) {
           executeSqliteQuerySync(
             db,

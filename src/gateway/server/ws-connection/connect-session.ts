@@ -1,4 +1,5 @@
 // Gateway WebSocket connect finalization attaches node/session state and sends hello-ok.
+import { createHash } from "node:crypto";
 import os from "node:os";
 import { normalizeOptionalString } from "@openclaw/normalization-core/string-coerce";
 import type { WebSocket } from "ws";
@@ -293,6 +294,10 @@ export async function attachAuthenticatedGatewayConnect(
     );
   }
   clearHandshakeTimer();
+  const authenticatedDeviceToken =
+    authMethod === "device-token"
+      ? normalizeOptionalString(connectParams.auth?.deviceToken ?? connectParams.auth?.token)
+      : undefined;
   const nextClient: GatewayWsClient = {
     socket,
     connect: state.controlUiDeviceAuthMigrationPending
@@ -301,6 +306,13 @@ export async function attachAuthenticatedGatewayConnect(
     connId,
     connectionKind: "gateway",
     isDeviceTokenAuth: authMethod === "device-token",
+    authenticatedDeviceTokenSha256: authenticatedDeviceToken
+      ? createHash("sha256").update(authenticatedDeviceToken).digest("hex")
+      : undefined,
+    verifiedDeviceProof:
+      device && devicePublicKey && state.deviceAuthPayloadVersion
+        ? { id: device.id, publicKey: devicePublicKey }
+        : undefined,
     isControlUiDeviceAuthMigrationSession: state.controlUiDeviceAuthMigrationPending,
     // Only identity-bearing migration sessions may use bounded self-pairing.
     // Device-less sessions remain pairing-scoped until reopened securely.
